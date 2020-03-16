@@ -651,10 +651,18 @@ def get_this_host():
     f.close()
     return uuid
 
-def is_master(session):
+
+def get_master_ref(session):
     pools = session.xenapi.pool.get_all()
-    master = session.xenapi.pool.get_master(pools[0])
-    return get_this_host_ref(session) == master
+    return session.xenapi.pool.get_master(pools[0])
+
+
+def get_master_rec(session):
+    return session.xenapi.host.get_record(get_master_ref(session))
+
+
+def is_master(session):
+    return get_this_host_ref(session) == get_master_ref(session)
 
 # XXX: this function doesn't do what it claims to do
 def get_localhost_uuid(session):
