@@ -8,6 +8,7 @@ SM_DRIVERS += udev
 SM_DRIVERS += ISO
 SM_DRIVERS += HBA
 SM_DRIVERS += RawHBA
+SM_DRIVERS += Linstor
 SM_DRIVERS += LVHD
 SM_DRIVERS += LVHDoISCSI
 SM_DRIVERS += LVHDoHBA
@@ -30,6 +31,9 @@ SM_LIBS += verifyVHDsOnSR
 SM_LIBS += scsiutil
 SM_LIBS += scsi_host_rescan
 SM_LIBS += vhdutil
+SM_LIBS += linstorjournaler
+SM_LIBS += linstorvhdutil
+SM_LIBS += linstorvolumemanager
 SM_LIBS += lvhdutil
 SM_LIBS += cifutils
 SM_LIBS += xs_errors
@@ -187,6 +191,7 @@ install: precheck
 	cd $(SM_STAGING)$(SM_DEST) && rm -f OCFSoHBASR
 	ln -sf $(SM_DEST)mpathutil.py $(SM_STAGING)/sbin/mpathutil
 	install -m 755 drivers/02-vhdcleanup $(SM_STAGING)$(MASTER_SCRIPT_DEST)
+	install -m 755 drivers/linstor-manager $(SM_STAGING)$(PLUGIN_SCRIPT_DEST)
 	install -m 755 drivers/lvhd-thin $(SM_STAGING)$(PLUGIN_SCRIPT_DEST)
 	install -m 755 drivers/on_slave.py $(SM_STAGING)$(PLUGIN_SCRIPT_DEST)/on-slave
 	install -m 755 drivers/testing-hooks $(SM_STAGING)$(PLUGIN_SCRIPT_DEST)
