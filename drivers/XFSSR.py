@@ -58,6 +58,12 @@ class XFSSR(FileSR.FileSR):
     handles = staticmethod(handles)
 
     def load(self, sr_uuid):
+        if not self._is_xfs_available():
+            raise xs_errors.XenError(
+                'SRUnavailable',
+                opterr='xfsprogs is not installed'
+            )
+
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
@@ -217,6 +223,11 @@ class XFSSR(FileSR.FileSR):
 
     def vdi(self, uuid, loadLocked=False):
         return XFSFileVDI(self, uuid)
+
+    @staticmethod
+    def _is_xfs_available():
+        import distutils.spawn
+        return distutils.spawn.find_executable('mkfs.xfs')
 
 
 class XFSFileVDI(FileSR.FileVDI):
