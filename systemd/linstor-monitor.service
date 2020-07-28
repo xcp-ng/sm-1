@@ -1,0 +1,9 @@
+[Unit]
+Description=LINSTOR Monitor
+Before=xapi-init-complete.target
+
+[Service]
+StandardOutput=null
+StandardError=journal
+ExecStart=/opt/xensource/libexec/linstor-monitord
+Restart=always

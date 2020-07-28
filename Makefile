@@ -103,6 +103,7 @@ SM_PY_FILES = $(foreach LIB, $(SM_LIBS), drivers/$(LIB).py) $(foreach DRIVER, $(
 .PHONY: build
 build:
 	make -C dcopy 
+	make -C linstor
 
 .PHONY: precommit
 precommit: build
@@ -178,6 +179,8 @@ install: precheck
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	install -m 644 systemd/storage-init.service \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
+	install -m 644 systemd/linstor-monitor.service \
+	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	for i in $(UDEV_RULES); do \
 	  install -m 644 udev/$$i.rules \
 	    $(SM_STAGING)$(UDEV_RULES_DIR); done
@@ -217,6 +220,7 @@ install: precheck
 	install -m 755 scripts/kickpipe $(SM_STAGING)$(LIBEXEC)
 	install -m 755 scripts/set-iscsi-initiator $(SM_STAGING)$(LIBEXEC)
 	$(MAKE) -C dcopy install DESTDIR=$(SM_STAGING)
+	$(MAKE) -C linstor install DESTDIR=$(SM_STAGING)
 	ln -sf $(SM_DEST)blktap2.py $(SM_STAGING)$(BIN_DEST)/blktap2
 	ln -sf $(SM_DEST)lcache.py $(SM_STAGING)$(BIN_DEST)tapdisk-cache-stats
 	ln -sf /dev/null $(SM_STAGING)$(UDEV_RULES_DIR)/69-dm-lvm-metad.rules
