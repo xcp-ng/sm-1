@@ -29,7 +29,11 @@ import lvhdutil
 import vhdutil
 import lvmcache
 
-from linstorvolumemanager import LinstorVolumeManager
+try:
+    from linstorvolumemanager import LinstorVolumeManager
+    LINSTOR_AVAILABLE = True
+except ImportError:
+    LINSTOR_AVAILABLE = False
 
 TAPDEV_BACKPATH_PFX = "/dev/sm/backend"
 TAPDEV_PHYPATH_PFX = "/dev/sm/phy"
@@ -133,6 +137,11 @@ class Tapdisk:
                     if ty == "LV": self.vdi_type = "aio"
                     else: self.vdi_type = "vhd"
         elif realpath.startswith('/dev/drbd/by-res/xcp-volume-'):
+            if not LINSTOR_AVAILABLE:
+                raise util.SMException(
+                    'Can\'t refresh tapdisk: LINSTOR libraries are missing'
+                )
+
             # We must always recreate the symlink to ensure we have
             # the right info. Why? Because if the volume UUID is changed in
             # LINSTOR the symlink is not directly updated. When live leaf

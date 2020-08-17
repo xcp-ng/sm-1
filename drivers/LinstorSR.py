@@ -15,10 +15,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from constants import CBTLOG_TAG
-from linstorjournaler import LinstorJournaler
-from linstorvhdutil import LinstorVhdUtil
-from linstorvolumemanager \
-    import LinstorVolumeManager, LinstorVolumeManagerError
+
+try:
+    from linstorjournaler import LinstorJournaler
+    from linstorvhdutil import LinstorVhdUtil
+    from linstorvolumemanager \
+        import LinstorVolumeManager, LinstorVolumeManagerError
+    LINSTOR_AVAILABLE = True
+except ImportError:
+    LINSTOR_AVAILABLE = False
+
 from lock import Lock
 import blktap2
 import cleanup
@@ -252,6 +258,11 @@ class LinstorSR(SR.SR):
         return type == LinstorSR.DRIVER_TYPE
 
     def load(self, sr_uuid):
+        if not LINSTOR_AVAILABLE:
+            raise util.SMException(
+                'Can\'t load LinstorSR: LINSTOR libraries are missing'
+            )
+
         # Check parameters.
         if 'hosts' not in self.dconf or not self.dconf['hosts']:
             raise xs_errors.XenError('LinstorConfigHostsMissing')

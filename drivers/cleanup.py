@@ -49,10 +49,15 @@ from ipc import IPCFlag
 from lvmanager import LVActivator
 from srmetadata import LVMMetadataHandler, VDI_TYPE_TAG
 
-from linstorjournaler import LinstorJournaler
-from linstorvhdutil import LinstorVhdUtil
-from linstorvolumemanager \
-    import LinstorVolumeManager, LinstorVolumeManagerError
+try:
+    from linstorjournaler import LinstorJournaler
+    from linstorvhdutil import LinstorVhdUtil
+    from linstorvolumemanager \
+        import LinstorVolumeManager, LinstorVolumeManagerError
+    LINSTOR_AVAILABLE = True
+except ImportError:
+    LINSTOR_AVAILABLE = False
+
 
 # Disable automatic leaf-coalescing. Online leaf-coalesce is currently not 
 # possible due to lvhd_stop_using_() not working correctly. However, we leave 
@@ -2814,6 +2819,11 @@ class LinstorSR(SR):
     TYPE = SR.TYPE_LINSTOR
 
     def __init__(self, uuid, xapi, createLock, force):
+        if not LINSTOR_AVAILABLE:
+            raise util.SMException(
+                'Can\'t load cleanup LinstorSR: LINSTOR libraries are missing'
+            )
+
         SR.__init__(self, uuid, xapi, createLock, force)
         self._master_uri = 'linstor://localhost'
         self.path = LinstorVolumeManager.DEV_ROOT_PATH
