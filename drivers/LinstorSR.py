@@ -1428,11 +1428,21 @@ class LinstorVDI(VDI.VDI):
         parent_uuid = vdi1
         parent_path = self._linstor.get_device_path(parent_uuid)
 
-        vhdutil.setParent(self.path, parent_path, False)
-        vhdutil.setHidden(parent_path)
-        self.sr.session.xenapi.VDI.set_managed(
-            self.sr.srcmd.params['args'][0], False
-        )
+        # We must pause tapdisk to correctly change the parent. Otherwise we
+        # have a readonly error.
+        # See: https://github.com/xapi-project/xen-api/blob/b3169a16d36dae0654881b336801910811a399d9/ocaml/xapi/storage_migrate.ml#L928-L929
+        # and: https://github.com/xapi-project/xen-api/blob/b3169a16d36dae0654881b336801910811a399d9/ocaml/xapi/storage_migrate.ml#L775
+
+        if not blktap2.VDI.tap_pause(self.session, self.sr.uuid, self.uuid):
+            raise util.SMException('Failed to pause VDI {}'.format(self.uuid))
+        try:
+            vhdutil.setParent(self.path, parent_path, False)
+            vhdutil.setHidden(parent_path)
+            self.sr.session.xenapi.VDI.set_managed(
+                self.sr.srcmd.params['args'][0], False
+            )
+        finally:
+            blktap2.VDI.tap_unpause(self.session, self.sr.uuid, self.uuid)
 
         if not blktap2.VDI.tap_refresh(self.session, self.sr.uuid, self.uuid):
             raise util.SMException(
