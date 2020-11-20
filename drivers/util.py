@@ -699,30 +699,8 @@ def get_master_ref(session):
     return session.xenapi.pool.get_master(pools[0])
 
 
-def get_master_rec(session):
-    return session.xenapi.host.get_record(get_master_ref(session))
-
-
 def is_master(session):
     return get_this_host_ref(session) == get_master_ref(session)
-
-
-def get_master_address():
-    address = None
-    try:
-        fd = open('/etc/xensource/pool.conf', 'r')
-        try:
-            items = fd.readline().split(':')
-            if items[0].strip() == 'master':
-                address = 'localhost'
-            else:
-                address = items[1].strip()
-        finally:
-            fd.close()
-    except Exception:
-        pass
-    return address
-
 
 
 def get_localhost_ref(session):
@@ -765,6 +743,17 @@ def get_hosts_attached_on(session, vdi_uuids):
             host_refs[key[len('host_'):]] = True
     return host_refs.keys()
 
+def get_this_host_address(session):
+    host_uuid = get_this_host()
+    host_ref = session.xenapi.host.get_by_uuid(host_uuid)
+    return session.xenapi.host.get_record(host_ref)['address']
+
+def get_host_addresses(session):
+    addresses = []
+    hosts = session.xenapi.host.get_all_records()
+    for record in hosts.itervalues():
+        addresses.append(record['address'])
+    return addresses
 
 def get_this_host_ref(session):
     host_uuid = get_this_host()
@@ -1955,3 +1944,95 @@ def sessions_less_than_targets(other_config, device_config):
         return (sessions < targets)
     else:
         return False
+
+
+def enable_and_start_service(name, start):
+    attempt = 0
+    while True:
+        attempt += 1
+        fn = 'enable' if start else 'disable'
+        args = ('systemctl', fn, '--now', name)
+        (ret, out, err) = doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            raise Exception(
+                'Failed to {} {}: {} {}'.format(fn, name, out, err)
+            )
+        time.sleep(1)
+
+
+def stop_service(name):
+    args = ('systemctl', 'stop', name)
+    (ret, out, err) = doexec(args)
+    if ret == 0:
+        return
+    raise Exception('Failed to stop {}: {} {}'.format(name, out, err))
+
+
+def restart_service(name):
+    attempt = 0
+    while True:
+        attempt += 1
+        SMlog('Restarting service {} {}...'.format(name, attempt))
+        args = ('systemctl', 'restart', name)
+        (ret, out, err) = doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            SMlog('Restart service FAILED {} {}'.format(name, attempt))
+            raise Exception(
+                'Failed to restart {}: {} {}'.format(name, out, err)
+            )
+        time.sleep(1)
+
+
+def check_pid_exists(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    else:
+        return True
+
+
+def make_profile(name, function):
+    """
+    Helper to execute cProfile using unique log file.
+    """
+
+    import cProfile
+    import itertools
+    import os.path
+    import time
+
+    assert name
+    assert function
+
+    FOLDER = '/tmp/sm-perfs/'
+    makedirs(FOLDER)
+
+    filename = time.strftime('{}_%Y%m%d_%H%M%S.prof'.format(name))
+
+    def gen_path(path):
+        yield path
+        root, ext = os.path.splitext(path)
+        for i in itertools.count(start=1, step=1):
+            yield root + '.{}.'.format(i) + ext
+
+    for profile_path in gen_path(FOLDER + filename):
+        try:
+            file = open_atomic(profile_path, 'w')
+            file.close()
+            break
+        except OSError as e:
+            if e.errno == errno.EEXIST:
+                pass
+            else:
+                raise
+
+    try:
+        SMlog('* Start profiling of {} ({}) *'.format(name, filename))
+        cProfile.runctx('function()', None, locals(), profile_path)
+    finally:
+        SMlog('* End profiling of {} ({}) *'.format(name, filename))
