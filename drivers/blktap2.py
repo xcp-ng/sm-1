@@ -50,6 +50,12 @@ import VDI as sm
 from xmlrpc.client import ServerProxy, Transport
 from socket import socket, AF_UNIX, SOCK_STREAM
 
+try:
+    from linstorvolumemanager import log_drbd_openers
+    LINSTOR_AVAILABLE = True
+except ImportError:
+    LINSTOR_AVAILABLE = False
+
 PLUGIN_TAP_PAUSE = "tapdisk-pause"
 
 SOCKPATH = "/var/xapi/xcp-rrdd"
@@ -811,7 +817,23 @@ class Tapdisk(object):
                 TapCtl.attach(pid, minor)
 
                 try:
-                    TapCtl.open(pid, minor, _type, path, options)
+                    retry_open = 0
+                    while True:
+                        try:
+                            TapCtl.open(pid, minor, _type, path, options)
+                            break
+                        except TapCtl.CommandFailure as e:
+                            err = (
+                                'status' in e.info and e.info['status']
+                            ) or None
+                            if err in (errno.EIO, errno.EROFS, errno.EAGAIN):
+                                if retry_open < 5:
+                                    retry_open += 1
+                                    time.sleep(1)
+                                    continue
+                                if LINSTOR_AVAILABLE and err == errno.EROFS:
+                                    log_drbd_openers(path)
+                            raise
                     try:
                         tapdisk = cls.__from_blktap(blktap)
                         node = '/sys/dev/block/%d:%d' % (tapdisk.major(), tapdisk.minor)

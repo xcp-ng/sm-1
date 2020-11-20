@@ -79,6 +79,7 @@ def _is_open(session, args):
     import CephFSSR
     import EXTSR
     import GlusterFSSR
+    import LinstorSR
     import LVHDSR
     import MooseFSSR
     import NFSSR
@@ -109,8 +110,28 @@ def _is_open(session, args):
     }
     cmd.params = {"command": None}
 
+    sr_uuid = srRec["uuid"]
+
+    # Another ugly piece of code to load a real Linstor SR, otherwise
+    # we can't fetch the VDI path.
+    if srType == 'linstor':
+        host_ref = util.get_this_host_ref(session)
+        sr_ref = session.xenapi.SR.get_by_uuid(sr_uuid)
+
+        pbd = util.find_my_pbd(session, host_ref, sr_ref)
+        if pbd is None:
+            raise util.SMException('Failed to find Linstor PBD')
+
+        cmd.dconf = session.xenapi.PBD.get_device_config(pbd)
+
     driver = SR.driver(srType)
-    sr = driver(cmd, srRec["uuid"])
+    sr = driver(cmd, sr_uuid)
+
+    # session_ref param is required to have a valid session when SR object is created.
+    # It's not the case here, so attach the current session object to make LinstorSR happy.
+    if srType == 'linstor':
+        sr.session = session
+
     vdi = sr.vdi(vdiUuid)
     tapdisk = blktap2.Tapdisk.find_by_path(vdi.path)
     util.SMlog("Tapdisk for %s: %s" % (vdi.path, tapdisk))
