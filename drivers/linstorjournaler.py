@@ -16,7 +16,8 @@
 #
 
 
-from linstorvolumemanager import LinstorVolumeManager
+from linstorvolumemanager import \
+  get_controller_uri, LinstorVolumeManager, LinstorVolumeManagerError
 import linstor
 import re
 import util
@@ -52,20 +53,10 @@ class LinstorJournaler:
         self._namespace = '{}journal/'.format(
             LinstorVolumeManager._build_sr_namespace()
         )
-
-        def connect():
-            self._journal = linstor.KV(
-                LinstorVolumeManager._build_group_name(group_name),
-                uri=uri,
-                namespace=self._namespace
-            )
-
-        util.retry(
-            connect,
-            maxretry=60,
-            exceptions=[linstor.errors.LinstorNetworkError]
-        )
         self._logger = logger
+        self._journal = self._create_journal_instance(
+            uri, group_name, self._namespace
+        )
 
     def create(self, type, identifier, value):
         # TODO: Maybe rename to 'add' in the future (in Citrix code too).
@@ -116,6 +107,7 @@ class LinstorJournaler:
             )
 
     def get(self, type, identifier):
+        self._reset_namespace()
         return self._journal.get(self._get_key(type, identifier))
 
     def get_all(self, type):
@@ -149,6 +141,34 @@ class LinstorJournaler:
 
     def _reset_namespace(self):
         self._journal.namespace = self._namespace
+
+    @classmethod
+    def _create_journal_instance(cls, uri, group_name, namespace):
+        def connect(uri):
+            if not uri:
+                uri = get_controller_uri()
+                if not uri:
+                    raise LinstorVolumeManagerError(
+                        'Unable to find controller uri...'
+                    )
+            return linstor.KV(
+                LinstorVolumeManager._build_group_name(group_name),
+                uri=uri,
+                namespace=namespace
+            )
+
+        try:
+            return connect(uri)
+        except (linstor.errors.LinstorNetworkError, LinstorVolumeManagerError):
+            pass
+
+        return util.retry(
+            lambda: connect(None),
+            maxretry=10,
+            exceptions=[
+                linstor.errors.LinstorNetworkError, LinstorVolumeManagerError
+            ]
+        )
 
     @staticmethod
     def _get_key(type, identifier):
