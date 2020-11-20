@@ -30,7 +30,7 @@ import vhdutil
 import lvmcache
 
 try:
-    from linstorvolumemanager import LinstorVolumeManager
+    from linstorvolumemanager import get_controller_uri, LinstorVolumeManager
     LINSTOR_AVAILABLE = True
 except ImportError:
     LINSTOR_AVAILABLE = False
@@ -152,10 +152,6 @@ class Tapdisk:
             # "B" path. Note: "A", "B" and "OLD_A" are UUIDs.
             session = self.session
 
-            linstor_uri = 'linstor://{}'.format(
-                util.get_master_rec(session)['address']
-            )
-
             host_ref = util.get_this_host_ref(session)
             sr_ref = session.xenapi.SR.get_by_uuid(self.sr_uuid)
 
@@ -167,7 +163,7 @@ class Tapdisk:
             group_name = dconf['group-name']
 
             device_path = LinstorVolumeManager(
-                linstor_uri,
+                get_controller_uri(),
                 group_name,
                 logger=util.SMlog
             ).get_device_path(self.vdi_uuid)
