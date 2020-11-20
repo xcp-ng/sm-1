@@ -86,6 +86,7 @@ PLUGIN_SCRIPT_DEST := /etc/xapi.d/plugins/
 LIBEXEC := /opt/xensource/libexec/
 UDEV_RULES_DIR := /etc/udev/rules.d/
 UDEV_SCRIPTS_DIR := /etc/udev/scripts/
+SYSTEMD_CONF_DIR := /etc/systemd/system/
 SYSTEMD_SERVICE_DIR := /usr/lib/systemd/system/
 INIT_DIR := /etc/rc.d/init.d/
 MPATH_CONF_DIR := /etc/multipath.xenserver/
@@ -133,6 +134,9 @@ install: precheck
 	mkdir -p $(SM_STAGING)$(UDEV_RULES_DIR)
 	mkdir -p $(SM_STAGING)$(UDEV_SCRIPTS_DIR)
 	mkdir -p $(SM_STAGING)$(INIT_DIR)
+	mkdir -p $(SM_STAGING)$(SYSTEMD_CONF_DIR)
+	mkdir -p $(SM_STAGING)$(SYSTEMD_CONF_DIR)/drbd-reactor.service.d
+	mkdir -p $(SM_STAGING)$(SYSTEMD_CONF_DIR)/linstor-satellite.service.d
 	mkdir -p $(SM_STAGING)$(SYSTEMD_SERVICE_DIR)
 	mkdir -p $(SM_STAGING)$(MPATH_CONF_DIR)
 	mkdir -p $(SM_STAGING)$(MPATH_CUSTOM_CONF_DIR)
@@ -161,6 +165,12 @@ install: precheck
 	  $(SM_STAGING)/$(SM_DEST)
 	install -m 644 etc/logrotate.d/$(SMLOG_CONF) \
 	  $(SM_STAGING)/$(LOGROTATE_DIR)
+	install -m 644 etc/systemd/system/drbd-reactor.service.d/override.conf \
+	  $(SM_STAGING)/$(SYSTEMD_CONF_DIR)/drbd-reactor.service.d/
+	install -m 644 etc/systemd/system/linstor-satellite.service.d/override.conf \
+	  $(SM_STAGING)/$(SYSTEMD_CONF_DIR)/linstor-satellite.service.d/
+	install -m 644 etc/systemd/system/var-lib-linstor.service \
+	  $(SM_STAGING)/$(SYSTEMD_CONF_DIR)
 	install -m 644 etc/make-dummy-sr.service \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	install -m 644 systemd/xs-sm.service \
@@ -210,6 +220,9 @@ install: precheck
 	install -m 755 drivers/iscsilib.py $(SM_STAGING)$(SM_DEST)
 	install -m 755 drivers/fcoelib.py $(SM_STAGING)$(SM_DEST)
 	mkdir -p $(SM_STAGING)$(LIBEXEC)
+	install -m 755 scripts/fork-log-daemon $(SM_STAGING)$(LIBEXEC)
+	install -m 755 scripts/linstor-kv-tool $(SM_STAGING)$(BIN_DEST)
+	install -m 755 scripts/safe-umount $(SM_STAGING)$(LIBEXEC)
 	install -m 755 scripts/local-device-change $(SM_STAGING)$(LIBEXEC)
 	install -m 755 scripts/check-device-sharing $(SM_STAGING)$(LIBEXEC)
 	install -m 755 scripts/usb_change $(SM_STAGING)$(LIBEXEC)

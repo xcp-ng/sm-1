@@ -19,25 +19,39 @@ from constants import CBTLOG_TAG
 try:
     from linstorjournaler import LinstorJournaler
     from linstorvhdutil import LinstorVhdUtil
-    from linstorvolumemanager \
-        import LinstorVolumeManager, LinstorVolumeManagerError
+    from linstorvolumemanager import get_controller_uri
+    from linstorvolumemanager import get_controller_node_name
+    from linstorvolumemanager import LinstorVolumeManager
+    from linstorvolumemanager import LinstorVolumeManagerError
+    from linstorvolumemanager import PERSISTENT_PREFIX
+
     LINSTOR_AVAILABLE = True
 except ImportError:
+    PERSISTENT_PREFIX = 'unknown'
+
     LINSTOR_AVAILABLE = False
 
 from lock import Lock, LOCK_TYPE_GC_RUNNING
 import blktap2
 import cleanup
+import distutils
 import errno
 import functools
+import lvutil
+import os
+import re
 import scsiutil
+import signal
+import socket
 import SR
 import SRCommand
+import subprocess
 import time
 import traceback
 import util
 import VDI
 import vhdutil
+import xml.etree.ElementTree as xml_parser
 import xmlrpc.client
 import xs_errors
 
@@ -47,6 +61,27 @@ from srmetadata import \
     METADATA_OF_POOL_TAG
 
 HIDDEN_TAG = 'hidden'
+
+XHA_CONFIG_PATH = '/etc/xensource/xhad.conf'
+
+FORK_LOG_DAEMON = '/opt/xensource/libexec/fork-log-daemon'
+
+# This flag can be disabled to debug the DRBD layer.
+# When this config var is False, the HA can only be used under
+# specific conditions:
+# - Only one heartbeat diskless VDI is present in the pool.
+# - The other hearbeat volumes must be diskful and limited to a maximum of 3.
+USE_HTTP_NBD_SERVERS = True
+
+# Useful flag to trace calls using cProfile.
+TRACE_PERFS = False
+
+# Enable/Disable VHD key hash support.
+USE_KEY_HASH = False
+
+# Special volumes.
+HA_VOLUME_NAME = PERSISTENT_PREFIX + 'ha-statefile'
+REDO_LOG_VOLUME_NAME = PERSISTENT_PREFIX + 'redo-log'
 
 # ==============================================================================
 
@@ -72,9 +107,9 @@ CAPABILITIES = [
 
 CONFIGURATION = [
     ['group-name', 'LVM group name'],
-    ['hosts', 'host names to use'],
     ['redundancy', 'replication count'],
-    ['provisioning', '"thin" or "thick" are accepted']
+    ['provisioning', '"thin" or "thick" are accepted (optional, defaults to thin)'],
+    ['monitor-db-quorum', 'disable controller when only one host is online (optional, defaults to true)']
 ]
 
 DRIVER_INFO = {
@@ -92,33 +127,13 @@ DRIVER_CONFIG = {'ATTACH_FROM_CONFIG_WITH_TAPDISK': False}
 
 OPS_EXCLUSIVE = [
     'sr_create', 'sr_delete', 'sr_attach', 'sr_detach', 'sr_scan',
-    'sr_update', 'vdi_create', 'vdi_delete', 'vdi_clone', 'vdi_snapshot'
+    'sr_update', 'sr_probe', 'vdi_init', 'vdi_create', 'vdi_delete',
+    'vdi_attach', 'vdi_detach', 'vdi_clone', 'vdi_snapshot',
 ]
 
 # ==============================================================================
 # Misc helpers used by LinstorSR and linstor-thin plugin.
 # ==============================================================================
-
-
-def compute_volume_size(virtual_size, image_type):
-    if image_type == vhdutil.VDI_TYPE_VHD:
-        # All LINSTOR VDIs have the metadata area preallocated for
-        # the maximum possible virtual size (for fast online VDI.resize).
-        meta_overhead = vhdutil.calcOverheadEmpty(LinstorVDI.MAX_SIZE)
-        bitmap_overhead = vhdutil.calcOverheadBitmap(virtual_size)
-        virtual_size += meta_overhead + bitmap_overhead
-    elif image_type != vhdutil.VDI_TYPE_RAW:
-        raise Exception('Invalid image type: {}'.format(image_type))
-
-    return LinstorVolumeManager.round_up_volume_size(virtual_size)
-
-
-def try_lock(lock):
-    for i in range(20):
-        if lock.acquireNoblock():
-            return
-        time.sleep(1)
-    raise util.SRBusyException()
 
 
 def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
@@ -127,41 +142,33 @@ def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
     if image_type == vhdutil.VDI_TYPE_RAW:
         return
 
-    lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
-    try:
-        try_lock(lock)
+    device_path = linstor.get_device_path(vdi_uuid)
 
-        device_path = linstor.get_device_path(vdi_uuid)
+    # If the virtual VHD size is lower than the LINSTOR volume size,
+    # there is nothing to do.
+    vhd_size = LinstorVhdUtil.compute_volume_size(
+        # TODO: Replace pylint comment with this feature when possible:
+        # https://github.com/PyCQA/pylint/pull/2926
+        LinstorVhdUtil(session, linstor).get_size_virt(vdi_uuid),  # pylint: disable = E1120
+        image_type
+    )
 
-        # If the virtual VHD size is lower than the LINSTOR volume size,
-        # there is nothing to do.
-        vhd_size = compute_volume_size(
-            LinstorVhdUtil(session, linstor).get_size_virt(vdi_uuid),
-            image_type
+    volume_info = linstor.get_volume_info(vdi_uuid)
+    volume_size = volume_info.virtual_size
+
+    if vhd_size > volume_size:
+        LinstorVhdUtil(session, linstor).inflate(
+            journaler, vdi_uuid, device_path, vhd_size, volume_size
         )
 
-        volume_info = linstor.get_volume_info(vdi_uuid)
-        volume_size = volume_info.virtual_size
 
-        if vhd_size > volume_size:
-            inflate(
-                journaler, linstor, vdi_uuid, device_path,
-                vhd_size, volume_size
-            )
-    finally:
-        lock.release()
-
-
-def detach_thin(session, linstor, sr_uuid, vdi_uuid):
+def detach_thin_impl(session, linstor, sr_uuid, vdi_uuid):
     volume_metadata = linstor.get_volume_metadata(vdi_uuid)
     image_type = volume_metadata.get(VDI_TYPE_TAG)
     if image_type == vhdutil.VDI_TYPE_RAW:
         return
 
-    lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
-    try:
-        try_lock(lock)
-
+    def check_vbd_count():
         vdi_ref = session.xenapi.VDI.get_by_uuid(vdi_uuid)
         vbds = session.xenapi.VBD.get_all_records_where(
             'field "VDI" = "{}"'.format(vdi_ref)
@@ -178,67 +185,103 @@ def detach_thin(session, linstor, sr_uuid, vdi_uuid):
                         'at least 2 VBDs'.format(vdi_uuid)
                     )
 
-        device_path = linstor.get_device_path(vdi_uuid)
-        new_volume_size = LinstorVolumeManager.round_up_volume_size(
-            LinstorVhdUtil(session, linstor).get_size_phys(device_path)
+    # We can have multiple VBDs attached to a VDI during a VM-template clone.
+    # So we use a timeout to ensure that we can detach the volume properly.
+    util.retry(check_vbd_count, maxretry=10, period=1)
+
+    device_path = linstor.get_device_path(vdi_uuid)
+    vhdutil_inst = LinstorVhdUtil(session, linstor)
+    new_volume_size = LinstorVolumeManager.round_up_volume_size(
+        # TODO: Replace pylint comment with this feature when possible:
+        # https://github.com/PyCQA/pylint/pull/2926
+        vhdutil_inst.get_size_phys(vdi_uuid)  # pylint: disable = E1120
+    )
+
+    volume_info = linstor.get_volume_info(vdi_uuid)
+    old_volume_size = volume_info.virtual_size
+    vhdutil_inst.deflate(device_path, new_volume_size, old_volume_size)
+
+
+def detach_thin(session, linstor, sr_uuid, vdi_uuid):
+    # This function must always return without errors.
+    # Otherwise it could cause errors in the XAPI regarding the state of the VDI.
+    # It's why we use this `try` block.
+    try:
+        detach_thin_impl(session, linstor, sr_uuid, vdi_uuid)
+    except Exception as e:
+        util.SMlog('Failed to detach properly VDI {}: {}'.format(vdi_uuid, e))
+
+
+def get_ips_from_xha_config_file():
+    ips = dict()
+    host_id = None
+    try:
+        # Ensure there is no dirty read problem.
+        # For example if the HA is reloaded.
+        tree = util.retry(
+            lambda: xml_parser.parse(XHA_CONFIG_PATH),
+            maxretry=10,
+            period=1
         )
+    except:
+        return (None, ips)
 
-        volume_info = linstor.get_volume_info(vdi_uuid)
-        old_volume_size = volume_info.virtual_size
-        deflate(vdi_uuid, device_path, new_volume_size, old_volume_size)
-    finally:
-        lock.release()
+    def parse_host_nodes(ips, node):
+        current_id = None
+        current_ip = None
+
+        for sub_node in node:
+            if sub_node.tag == 'IPaddress':
+                current_ip = sub_node.text
+            elif sub_node.tag == 'HostID':
+                current_id = sub_node.text
+            else:
+                continue
+
+            if current_id and current_ip:
+                ips[current_id] = current_ip
+                return
+        util.SMlog('Ill-formed XHA file, missing IPaddress or/and HostID')
+
+    def parse_common_config(ips, node):
+        for sub_node in node:
+            if sub_node.tag == 'host':
+                parse_host_nodes(ips, sub_node)
+
+    def parse_local_config(ips, node):
+        for sub_node in node:
+            if sub_node.tag == 'localhost':
+                for host_node in sub_node:
+                    if host_node.tag == 'HostID':
+                        return host_node.text
+
+    for node in tree.getroot():
+        if node.tag == 'common-config':
+            parse_common_config(ips, node)
+        elif node.tag == 'local-config':
+            host_id = parse_local_config(ips, node)
+        else:
+            continue
+
+        if ips and host_id:
+            break
+
+    return (host_id and ips.get(host_id), ips)
 
 
-def inflate(journaler, linstor, vdi_uuid, vdi_path, new_size, old_size):
-    # Only inflate if the LINSTOR volume capacity is not enough.
-    new_size = LinstorVolumeManager.round_up_volume_size(new_size)
-    if new_size <= old_size:
-        return
-
-    util.SMlog(
-        'Inflate {} (new VHD size={}, previous={})'
-        .format(vdi_uuid, new_size, old_size)
-    )
-
-    journaler.create(
-        LinstorJournaler.INFLATE, vdi_uuid, old_size
-    )
-    linstor.resize_volume(vdi_uuid, new_size)
-
-    if not util.zeroOut(
-        vdi_path, new_size - vhdutil.VHD_FOOTER_SIZE,
-        vhdutil.VHD_FOOTER_SIZE
-    ):
-        raise xs_errors.XenError(
-            'EIO',
-            opterr='Failed to zero out VHD footer {}'.format(vdi_path)
-        )
-
-    vhdutil.setSizePhys(vdi_path, new_size, False)
-    journaler.remove(LinstorJournaler.INFLATE, vdi_uuid)
-
-
-def deflate(vdi_uuid, vdi_path, new_size, old_size):
-    new_size = LinstorVolumeManager.round_up_volume_size(new_size)
-    if new_size >= old_size:
-        return
-
-    util.SMlog(
-        'Deflate {} (new size={}, previous={})'
-        .format(vdi_uuid, new_size, old_size)
-    )
-
-    vhdutil.setSizePhys(vdi_path, new_size)
-    # TODO: Change the LINSTOR volume size using linstor.resize_volume.
-
+def activate_lvm_group(group_name):
+    path = group_name.split('/')
+    assert path and len(path) <= 2
+    try:
+        lvutil.setActiveVG(path[0], True)
+    except Exception as e:
+        util.SMlog('Cannot active VG `{}`: {}'.format(path[0], e))
 
 # ==============================================================================
 
 # Usage example:
 # xe sr-create type=linstor name-label=linstor-sr
 # host-uuid=d2deba7a-c5ad-4de1-9a20-5c8df3343e93
-# device-config:hosts=node-linstor1,node-linstor2,node-linstor3
 # device-config:group-name=vg_loop device-config:redundancy=2
 
 
@@ -249,6 +292,11 @@ class LinstorSR(SR.SR):
     PROVISIONING_DEFAULT = 'thin'
 
     MANAGER_PLUGIN = 'linstor-manager'
+
+    INIT_STATUS_NOT_SET = 0
+    INIT_STATUS_IN_PROGRESS = 1
+    INIT_STATUS_OK = 2
+    INIT_STATUS_FAIL = 3
 
     # --------------------------------------------------------------------------
     # SR methods.
@@ -265,8 +313,6 @@ class LinstorSR(SR.SR):
             )
 
         # Check parameters.
-        if 'hosts' not in self.dconf or not self.dconf['hosts']:
-            raise xs_errors.XenError('LinstorConfigHostsMissing')
         if 'group-name' not in self.dconf or not self.dconf['group-name']:
             raise xs_errors.XenError('LinstorConfigGroupNameMissing')
         if 'redundancy' not in self.dconf or not self.dconf['redundancy']:
@@ -289,6 +335,10 @@ class LinstorSR(SR.SR):
         else:
             self._provisioning = self.PROVISIONING_DEFAULT
 
+        monitor_db_quorum = self.dconf.get('monitor-db-quorum')
+        self._monitor_db_quorum = (monitor_db_quorum is None) or \
+            distutils.util.strtobool(monitor_db_quorum)
+
         # Note: We don't have access to the session field if the
         # 'vdi_attach_from_config' command is executed.
         self._has_session = self.sr_ref and self.session is not None
@@ -307,8 +357,8 @@ class LinstorSR(SR.SR):
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
 
-        self._hosts = self.dconf['hosts'].split(',')
-        self._redundancy = int(self.dconf['redundancy'] or 1)
+        if self.cmd == 'sr_create':
+            self._redundancy = int(self.dconf['redundancy']) or 1
         self._linstor = None  # Ensure that LINSTOR attribute exists.
         self._journaler = None
 
@@ -317,46 +367,75 @@ class LinstorSR(SR.SR):
             self._is_master = True
         self._group_name = self.dconf['group-name']
 
-        self._master_uri = None
-        self._vdi_shared_locked = False
+        self._vdi_shared_time = 0
 
-        self._initialized = False
+        self._init_status = self.INIT_STATUS_NOT_SET
+
+        self._vdis_loaded = False
+        self._all_volume_info_cache = None
+        self._all_volume_metadata_cache = None
 
     def _locked_load(method):
-        @functools.wraps(method)
-        def wrap(self, *args, **kwargs):
-            if self._initialized:
-                return method(self, *args, **kwargs)
-            self._initialized = True
+        def wrapped_method(self, *args, **kwargs):
+            self._init_status = self.INIT_STATUS_OK
+            return method(self, *args, **kwargs)
+
+        def load(self, *args, **kwargs):
+            # Activate all LVMs to make drbd-reactor happy.
+            if self.srcmd.cmd in ('sr_attach', 'vdi_attach_from_config'):
+                activate_lvm_group(self._group_name)
 
             if not self._has_session:
-                if self.srcmd.cmd == 'vdi_attach_from_config':
-                    # We must have a valid LINSTOR instance here without using
-                    # the XAPI.
-                    self._master_uri = 'linstor://{}'.format(
-                        util.get_master_address()
-                    )
-                    self._journaler = LinstorJournaler(
-                        self._master_uri, self._group_name, logger=util.SMlog
-                    )
-
-                    try:
+                if self.srcmd.cmd in (
+                    'vdi_attach_from_config',
+                    'vdi_detach_from_config',
+                    # When on-slave (is_open) is executed we have an
+                    # empty command.
+                    None
+                ):
+                    def create_linstor(uri, attempt_count=30):
                         self._linstor = LinstorVolumeManager(
-                            self._master_uri,
+                            uri,
                             self._group_name,
-                            logger=util.SMlog
+                            logger=util.SMlog,
+                            attempt_count=attempt_count
                         )
-                        return
-                    except Exception as e:
-                        util.SMlog(
-                            'Ignore exception. Failed to build LINSTOR '
-                            'instance without session: {}'.format(e)
-                        )
-                return
+                        # Only required if we are attaching from config using a non-special VDI.
+                        # I.e. not an HA volume.
+                        self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
 
-            self._master_uri = 'linstor://{}'.format(
-                util.get_master_rec(self.session)['address']
-            )
+                    controller_uri = get_controller_uri()
+                    if controller_uri:
+                        create_linstor(controller_uri)
+                    else:
+                        def connect():
+                            # We must have a valid LINSTOR instance here without using
+                            # the XAPI. Fallback with the HA config file.
+                            for ip in get_ips_from_xha_config_file()[1].values():
+                                controller_uri = 'linstor://' + ip
+                                try:
+                                    util.SMlog('Connecting from config to LINSTOR controller using: {}'.format(ip))
+                                    create_linstor(controller_uri, attempt_count=0)
+                                    return controller_uri
+                                except:
+                                    pass
+
+                        controller_uri = util.retry(connect, maxretry=30, period=1)
+                        if not controller_uri:
+                            raise xs_errors.XenError(
+                                'SRUnavailable',
+                                opterr='No valid controller URI to attach/detach from config'
+                            )
+
+                    self._journaler = LinstorJournaler(
+                        controller_uri, self._group_name, logger=util.SMlog
+                    )
+
+                if self.srcmd.cmd is None:
+                    # Only useful on on-slave plugin (is_open).
+                    self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
+
+                return wrapped_method(self, *args, **kwargs)
 
             if not self._is_master:
                 if self.cmd in [
@@ -374,37 +453,12 @@ class LinstorSR(SR.SR):
                 # behaviors if the GC is executed during an action on a slave.
                 if self.cmd.startswith('vdi_'):
                     self._shared_lock_vdi(self.srcmd.params['vdi_uuid'])
-                    self._vdi_shared_locked = True
+                    self._vdi_shared_time = time.time()
 
-            self._journaler = LinstorJournaler(
-                self._master_uri, self._group_name, logger=util.SMlog
-            )
-
-            # Ensure ports are opened and LINSTOR controller/satellite
-            # are activated.
-            if self.srcmd.cmd == 'sr_create':
-                # TODO: Disable if necessary
-                self._enable_linstor_on_all_hosts(status=True)
-
-            try:
-                # Try to open SR if exists.
-                self._linstor = LinstorVolumeManager(
-                    self._master_uri,
-                    self._group_name,
-                    repair=self._is_master,
-                    logger=util.SMlog
-                )
-                self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
-            except Exception as e:
-                if self.srcmd.cmd == 'sr_create' or \
-                        self.srcmd.cmd == 'sr_detach':
-                    # Ignore exception in this specific case: sr_create.
-                    # At this moment the LinstorVolumeManager cannot be
-                    # instantiated. Concerning the sr_detach command, we must
-                    # ignore LINSTOR exceptions (if the volume group doesn't
-                    # exist for example after a bad user action).
-                    pass
-                else:
+            if self.srcmd.cmd != 'sr_create' and self.srcmd.cmd != 'sr_detach':
+                try:
+                    self._reconnect()
+                except Exception as e:
                     raise xs_errors.XenError('SRUnavailable', opterr=str(e))
 
             if self._linstor:
@@ -416,41 +470,87 @@ class LinstorSR(SR.SR):
                 if hosts:
                     util.SMlog('Failed to join node(s): {}'.format(hosts))
 
+                # Ensure we use a non-locked volume when vhdutil is called.
+                if (
+                    self._is_master and self.cmd.startswith('vdi_') and
+                    self.cmd != 'vdi_create'
+                ):
+                    self._linstor.ensure_volume_is_not_locked(
+                        self.srcmd.params['vdi_uuid']
+                    )
+
                 try:
-                    # If the command is a SR command on the master, we must
-                    # load all VDIs and clean journal transactions.
-                    # We must load the VDIs in the snapshot case too.
+                    # If the command is a SR scan command on the master,
+                    # we must load all VDIs and clean journal transactions.
+                    # We must load the VDIs in the snapshot case too only if
+                    # there is at least one entry in the journal.
+                    #
+                    # If the command is a SR command we want at least to remove
+                    # resourceless volumes.
                     if self._is_master and self.cmd not in [
                         'vdi_attach', 'vdi_detach',
                         'vdi_activate', 'vdi_deactivate',
                         'vdi_epoch_begin', 'vdi_epoch_end',
                         'vdi_update', 'vdi_destroy'
                     ]:
-                        self._load_vdis()
-                        self._undo_all_journal_transactions()
+                        load_vdis = (
+                            self.cmd == 'sr_scan' or
+                            self.cmd == 'sr_attach'
+                        ) or len(
+                            self._journaler.get_all(LinstorJournaler.INFLATE)
+                        ) or len(
+                            self._journaler.get_all(LinstorJournaler.CLONE)
+                        )
+
+                        if load_vdis:
+                            self._load_vdis()
+
                         self._linstor.remove_resourceless_volumes()
 
                     self._synchronize_metadata()
                 except Exception as e:
+                    if self.cmd == 'sr_scan' or self.cmd == 'sr_attach':
+                        # Always raise, we don't want to remove VDIs
+                        # from the XAPI database otherwise.
+                        raise e
                     util.SMlog(
                         'Ignoring exception in LinstorSR.load: {}'.format(e)
                     )
                     util.SMlog(traceback.format_exc())
 
-            return method(self, *args, **kwargs)
+            return wrapped_method(self, *args, **kwargs)
+
+        @functools.wraps(wrapped_method)
+        def wrap(self, *args, **kwargs):
+            if self._init_status in \
+                    (self.INIT_STATUS_OK, self.INIT_STATUS_IN_PROGRESS):
+                return wrapped_method(self, *args, **kwargs)
+            if self._init_status == self.INIT_STATUS_FAIL:
+                util.SMlog(
+                    'Can\'t call method {} because initialization failed'
+                    .format(method)
+                )
+            else:
+                try:
+                    self._init_status = self.INIT_STATUS_IN_PROGRESS
+                    return load(self, *args, **kwargs)
+                except Exception:
+                    if self._init_status != self.INIT_STATUS_OK:
+                        self._init_status = self.INIT_STATUS_FAIL
+                    raise
 
         return wrap
 
-    @_locked_load
     def cleanup(self):
-        if self._vdi_shared_locked:
+        if self._vdi_shared_time:
             self._shared_lock_vdi(self.srcmd.params['vdi_uuid'], locked=False)
 
     @_locked_load
     def create(self, uuid, size):
         util.SMlog('LinstorSR.create for {}'.format(self.uuid))
 
-        if self._redundancy > len(self._hosts):
+        host_adresses = util.get_host_addresses(self.session)
+        if self._redundancy > len(host_adresses):
             raise xs_errors.XenError(
                 'LinstorSRCreate',
                 opterr='Redundancy greater than host count'
@@ -469,18 +569,50 @@ class LinstorSR(SR.SR):
                 if group_name and group_name == self._group_name:
                     raise xs_errors.XenError(
                         'LinstorSRCreate',
-                        opterr='group name must be unique'
+                        opterr='group name must be unique, already used by PBD {}'.format(
+                            xenapi.PBD.get_uuid(pbd)
+                        )
                     )
+
+        if srs:
+            raise xs_errors.XenError(
+                'LinstorSRCreate',
+                opterr='LINSTOR SR must be unique in a pool'
+            )
+
+        online_hosts = util.get_online_hosts(self.session)
+        if len(online_hosts) < len(host_adresses):
+            raise xs_errors.XenError(
+                'LinstorSRCreate',
+                opterr='Not enough online hosts'
+            )
+
+        ips = {}
+        for host_ref in online_hosts:
+            record = self.session.xenapi.host.get_record(host_ref)
+            hostname = record['hostname']
+            ips[hostname] = record['address']
+
+        if len(ips) != len(online_hosts):
+            raise xs_errors.XenError(
+                'LinstorSRCreate',
+                opterr='Multiple hosts with same hostname'
+            )
+
+        # Ensure ports are opened and LINSTOR satellites
+        # are activated. In the same time the drbd-reactor instances
+        # must be stopped.
+        self._prepare_sr_on_all_hosts(self._group_name, enabled=True)
 
         # Create SR.
         # Throw if the SR already exists.
         try:
             self._linstor = LinstorVolumeManager.create_sr(
-                self._master_uri,
                 self._group_name,
-                self._hosts,
+                ips,
                 self._redundancy,
                 thin_provisioning=self._provisioning == 'thin',
+                auto_quorum=self._monitor_db_quorum,
                 logger=util.SMlog
             )
             self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
@@ -488,29 +620,82 @@ class LinstorSR(SR.SR):
             util.SMlog('Failed to create LINSTOR SR: {}'.format(e))
             raise xs_errors.XenError('LinstorSRCreate', opterr=str(e))
 
+        try:
+            util.SMlog(
+                "Finishing SR creation, enable drbd-reactor on all hosts..."
+            )
+            self._update_drbd_reactor_on_all_hosts(enabled=True)
+        except Exception as e:
+            try:
+                self._linstor.destroy()
+            except Exception as e2:
+                util.SMlog(
+                    'Failed to destroy LINSTOR SR after creation fail: {}'
+                    .format(e2)
+                )
+            raise e
+
     @_locked_load
     def delete(self, uuid):
         util.SMlog('LinstorSR.delete for {}'.format(self.uuid))
         cleanup.gc_force(self.session, self.uuid)
 
-        if self.vdis:
+        if self.vdis or self._linstor._volumes:
             raise xs_errors.XenError('SRNotEmpty')
 
+        node_name = get_controller_node_name()
+        if not node_name:
+            raise xs_errors.XenError(
+                'LinstorSRDelete',
+                opterr='Cannot get controller node name'
+            )
+
+        host = None
+        if node_name == 'localhost':
+            host = util.get_this_host_ref(self.session)
+        else:
+            for slave in util.get_all_slaves(self.session):
+                r_name = self.session.xenapi.host.get_record(slave)['hostname']
+                if r_name == node_name:
+                    host = slave
+                    break
+
+        if not host:
+            raise xs_errors.XenError(
+                'LinstorSRDelete',
+                opterr='Failed to find host with hostname: {}'.format(
+                    node_name
+                )
+            )
+
         try:
-            # TODO: Use specific exceptions. If the LINSTOR group doesn't
-            # exist, we can remove it without problem.
+            self._update_drbd_reactor_on_all_hosts(
+                controller_node_name=node_name, enabled=False
+            )
 
-            # TODO: Maybe remove all volumes unused by the SMAPI.
-            # We must ensure it's a safe idea...
-
-            self._linstor.destroy()
-            Lock.cleanupAll(self.uuid)
+            args = {
+                'groupName': self._group_name,
+            }
+            self._exec_manager_command(
+                host, 'destroy', args, 'LinstorSRDelete'
+            )
         except Exception as e:
+            try:
+                self._update_drbd_reactor_on_all_hosts(
+                    controller_node_name=node_name, enabled=True
+                )
+            except Exception as e2:
+                util.SMlog(
+                    'Failed to restart drbd-reactor after destroy fail: {}'
+                    .format(e2)
+                )
             util.SMlog('Failed to delete LINSTOR SR: {}'.format(e))
             raise xs_errors.XenError(
                 'LinstorSRDelete',
                 opterr=str(e)
             )
+
+        Lock.cleanupAll(self.uuid)
 
     @_locked_load
     def update(self, uuid):
@@ -558,6 +743,9 @@ class LinstorSR(SR.SR):
 
     @_locked_load
     def scan(self, uuid):
+        if self._init_status == self.INIT_STATUS_FAIL:
+            return
+
         util.SMlog('LinstorSR.scan for {}'.format(self.uuid))
         if not self._linstor:
             raise xs_errors.XenError(
@@ -565,11 +753,29 @@ class LinstorSR(SR.SR):
                 opterr='no such volume group: {}'.format(self._group_name)
             )
 
+        # Note: `scan` can be called outside this module, so ensure the VDIs
+        # are loaded.
+        self._load_vdis()
         self._update_physical_size()
 
         for vdi_uuid in self.vdis.keys():
             if self.vdis[vdi_uuid].deleted:
                 del self.vdis[vdi_uuid]
+
+        # Security to prevent VDIs from being forgotten if the controller
+        # is started without a shared and mounted /var/lib/linstor path.
+        try:
+            self._linstor.get_database_path()
+        except Exception:
+            # Failed to get database path, ensure we don't have
+            # VDIs in the XAPI database...
+            if self.session.xenapi.SR.get_VDIs(
+                self.session.xenapi.SR.get_by_uuid(self.uuid)
+            ):
+                raise xs_errors.XenError(
+                    'SRUnavailable',
+                    opterr='Database is not mounted'
+                )
 
         # Update the database before the restart of the GC to avoid
         # bad sync in the process if new VDIs have been introduced.
@@ -588,10 +794,9 @@ class LinstorSR(SR.SR):
     # --------------------------------------------------------------------------
 
     def _shared_lock_vdi(self, vdi_uuid, locked=True):
-        pools = self.session.xenapi.pool.get_all()
-        master = self.session.xenapi.pool.get_master(pools[0])
+        master = util.get_master_ref(self.session)
 
-        method = 'lockVdi'
+        command = 'lockVdi'
         args = {
             'groupName': self._group_name,
             'srUuid': self.uuid,
@@ -599,48 +804,128 @@ class LinstorSR(SR.SR):
             'locked': str(locked)
         }
 
-        ret = self.session.xenapi.host.call_plugin(
-            master, self.MANAGER_PLUGIN, method, args
-        )
-        util.SMlog(
-            'call-plugin ({} with {}) returned: {}'
-            .format(method, args, ret)
-        )
-        if ret == 'False':
-            raise xs_errors.XenError(
-                'VDIUnavailable',
-                opterr='Plugin {} failed'.format(self.MANAGER_PLUGIN)
-            )
+        # Note: We must avoid to unlock the volume if the timeout is reached
+        # because during volume unlock, the SR lock is not used. Otherwise
+        # we could destroy a valid lock acquired from another host...
+        #
+        # This code is not very clean, the ideal solution would be to acquire
+        # the SR lock during volume unlock (like lock) but it's not easy
+        # to implement without impacting performance.
+        if not locked:
+            elapsed_time = time.time() - self._vdi_shared_time
+            timeout = LinstorVolumeManager.LOCKED_EXPIRATION_DELAY * 0.7
+            if elapsed_time >= timeout:
+                util.SMlog(
+                    'Avoid unlock call of {} because timeout has been reached'
+                    .format(vdi_uuid)
+                )
+                return
+
+        self._exec_manager_command(master, command, args, 'VDIUnavailable')
 
     # --------------------------------------------------------------------------
     # Network.
     # --------------------------------------------------------------------------
 
-    def _enable_linstor(self, host, status):
-        method = 'enable'
-        args = {'enabled': str(bool(status))}
+    def _exec_manager_command(self, host_ref, command, args, error):
+        host_rec = self.session.xenapi.host.get_record(host_ref)
+        host_uuid = host_rec['uuid']
 
-        ret = self.session.xenapi.host.call_plugin(
-            host, self.MANAGER_PLUGIN, method, args
-        )
+        try:
+            ret = self.session.xenapi.host.call_plugin(
+                host_ref, self.MANAGER_PLUGIN, command, args
+            )
+        except Exception as e:
+            util.SMlog(
+                'call-plugin on {} ({}:{} with {}) raised'.format(
+                    host_uuid, self.MANAGER_PLUGIN, command, args
+                )
+            )
+            raise e
+
         util.SMlog(
-            'call-plugin ({} with {}) returned: {}'.format(method, args, ret)
+            'call-plugin on {} ({}:{} with {}) returned: {}'.format(
+                host_uuid, self.MANAGER_PLUGIN, command, args, ret
+            )
         )
         if ret == 'False':
             raise xs_errors.XenError(
-                'SRUnavailable',
+                error,
                 opterr='Plugin {} failed'.format(self.MANAGER_PLUGIN)
             )
 
-    def _enable_linstor_on_master(self, status):
-        pools = self.session.xenapi.pool.get_all()
-        master = self.session.xenapi.pool.get_master(pools[0])
-        self._enable_linstor(master, status)
+    def _prepare_sr(self, host, group_name, enabled):
+        self._exec_manager_command(
+            host,
+            'prepareSr' if enabled else 'releaseSr',
+            {'groupName': group_name},
+            'SRUnavailable'
+        )
 
-    def _enable_linstor_on_all_hosts(self, status):
-        self._enable_linstor_on_master(status)
+    def _prepare_sr_on_all_hosts(self, group_name, enabled):
+        master = util.get_master_ref(self.session)
+        self._prepare_sr(master, group_name, enabled)
+
         for slave in util.get_all_slaves(self.session):
-            self._enable_linstor(slave, status)
+            self._prepare_sr(slave, group_name, enabled)
+
+    def _update_drbd_reactor(self, host, enabled):
+        self._exec_manager_command(
+            host,
+            'updateDrbdReactor',
+            {'enabled': str(enabled)},
+            'SRUnavailable'
+        )
+
+    def _update_drbd_reactor_on_all_hosts(
+        self, enabled, controller_node_name=None
+    ):
+        if controller_node_name == 'localhost':
+            controller_node_name = self.session.xenapi.host.get_record(
+                util.get_this_host_ref(self.session)
+            )['hostname']
+            assert controller_node_name
+            assert controller_node_name != 'localhost'
+
+        controller_host = None
+        secondary_hosts = []
+
+        hosts = self.session.xenapi.host.get_all_records()
+        for host_ref, host_rec in hosts.iteritems():
+            hostname = host_rec['hostname']
+            if controller_node_name == hostname:
+                controller_host = host_ref
+            else:
+                secondary_hosts.append((host_ref, hostname))
+
+        action_name = 'Starting' if enabled else 'Stopping'
+        if controller_node_name and not controller_host:
+            util.SMlog('Failed to find controller host: `{}`'.format(
+                controller_node_name
+            ))
+
+        if enabled and controller_host:
+            util.SMlog('{} drbd-reactor on controller host `{}`...'.format(
+                action_name, controller_node_name
+            ))
+            # If enabled is true, we try to start the controller on the desired
+            # node name first.
+            self._update_drbd_reactor(controller_host, enabled)
+
+        for host_ref, hostname in secondary_hosts:
+            util.SMlog('{} drbd-reactor on host {}...'.format(
+                action_name, hostname
+            ))
+            self._update_drbd_reactor(host_ref, enabled)
+
+        if not enabled and controller_host:
+            util.SMlog('{} drbd-reactor on controller host `{}`...'.format(
+                action_name, controller_node_name
+            ))
+            # If enabled is false, we disable the drbd-reactor service of
+            # the controller host last. Why? Otherwise the linstor-controller
+            # of other nodes can be started, and we don't want that.
+            self._update_drbd_reactor(controller_host, enabled)
 
     # --------------------------------------------------------------------------
     # Metadata.
@@ -653,7 +938,7 @@ class LinstorSR(SR.SR):
 
             # Now update the VDI information in the metadata if required.
             xenapi = self.session.xenapi
-            volumes_metadata = self._linstor.volumes_with_metadata
+            volumes_metadata = self._linstor.get_volumes_with_metadata()
             for vdi_uuid, volume_metadata in volumes_metadata.items():
                 try:
                     vdi_ref = xenapi.VDI.get_by_uuid(vdi_uuid)
@@ -708,36 +993,43 @@ class LinstorSR(SR.SR):
         # Update size attributes of the SR parent class.
         self.virtual_allocation = valloc + virt_alloc_delta
 
-        # Physical size contains the total physical size.
-        # i.e. the sum of the sizes of all devices on all hosts, not the AVG.
         self._update_physical_size()
 
         # Notify SR parent class.
         self._db_update()
 
     def _update_physical_size(self):
-        # Physical size contains the total physical size.
-        # i.e. the sum of the sizes of all devices on all hosts, not the AVG.
-        self.physical_size = self._linstor.physical_size
+        # We use the size of the smallest disk, this is an approximation that
+        # ensures the displayed physical size is reachable by the user.
+        (min_physical_size, pool_count) = self._linstor.get_min_physical_size()
+        self.physical_size = min_physical_size * pool_count / \
+            self._linstor.redundancy
 
-        # `self._linstor.physical_free_size` contains the total physical free
-        # memory. If Thin provisioning is used we can't use it, we must use
-        # LINSTOR volume size to gives a good idea of the required
-        # usable memory to the users.
-        self.physical_utilisation = self._linstor.total_allocated_volume_size
-
-        # If Thick provisioning is used, we can use this line instead:
-        # self.physical_utilisation = \
-        #     self.physical_size - self._linstor.physical_free_size
+        self.physical_utilisation = self._linstor.allocated_volume_size
 
     # --------------------------------------------------------------------------
     # VDIs.
     # --------------------------------------------------------------------------
 
     def _load_vdis(self):
-        if self.vdis:
+        if self._vdis_loaded:
             return
 
+        assert self._is_master
+
+        # We use a cache to avoid repeated JSON parsing.
+        # The performance gain is not big but we can still
+        # enjoy it with a few lines.
+        self._create_linstor_cache()
+        self._load_vdis_ex()
+        self._destroy_linstor_cache()
+
+        # We must mark VDIs as loaded only if the load is a success.
+        self._vdis_loaded = True
+
+        self._undo_all_journal_transactions()
+
+    def _load_vdis_ex(self):
         # 1. Get existing VDIs in XAPI.
         xenapi = self.session.xenapi
         xapi_vdi_uuids = set()
@@ -745,8 +1037,8 @@ class LinstorSR(SR.SR):
             xapi_vdi_uuids.add(xenapi.VDI.get_uuid(vdi))
 
         # 2. Get volumes info.
-        all_volume_info = self._linstor.volumes_with_info
-        volumes_metadata = self._linstor.volumes_with_metadata
+        all_volume_info = self._all_volume_info_cache
+        volumes_metadata = self._all_volume_metadata_cache
 
         # 3. Get CBT vdis.
         # See: https://support.citrix.com/article/CTX230619
@@ -758,7 +1050,8 @@ class LinstorSR(SR.SR):
 
         introduce = False
 
-        if self.cmd == 'sr_scan':
+        # Try to introduce VDIs only during scan/attach.
+        if self.cmd == 'sr_scan' or self.cmd == 'sr_attach':
             has_clone_entries = list(self._journaler.get_all(
                 LinstorJournaler.CLONE
             ).items())
@@ -780,6 +1073,9 @@ class LinstorSR(SR.SR):
             # 4.a. Check if the VDI in LINSTOR is in XAPI VDIs.
             if vdi_uuid not in xapi_vdi_uuids:
                 if not introduce:
+                    continue
+
+                if vdi_uuid.startswith('DELETED_'):
                     continue
 
                 volume_metadata = volumes_metadata.get(vdi_uuid)
@@ -836,10 +1132,10 @@ class LinstorSR(SR.SR):
 
                 util.SMlog(
                     'Introducing VDI {} '.format(vdi_uuid) +
-                    ' (name={}, virtual_size={}, physical_size={})'.format(
+                    ' (name={}, virtual_size={}, allocated_size={})'.format(
                         name_label,
                         volume_info.virtual_size,
-                        volume_info.physical_size
+                        volume_info.allocated_size
                     )
                 )
 
@@ -857,7 +1153,7 @@ class LinstorSR(SR.SR):
                     sm_config,
                     managed,
                     str(volume_info.virtual_size),
-                    str(volume_info.physical_size)
+                    str(volume_info.allocated_size)
                 )
 
                 is_a_snapshot = volume_metadata.get(IS_A_SNAPSHOT_TAG)
@@ -881,9 +1177,11 @@ class LinstorSR(SR.SR):
             vdi = self.vdi(vdi_uuid)
             self.vdis[vdi_uuid] = vdi
 
-            if vdi.vdi_type == vhdutil.VDI_TYPE_VHD:
+            if USE_KEY_HASH and vdi.vdi_type == vhdutil.VDI_TYPE_VHD:
+                # TODO: Replace pylint comment with this feature when possible:
+                # https://github.com/PyCQA/pylint/pull/2926
                 vdi.sm_config_override['key_hash'] = \
-                    self._vhdutil.get_key_hash(vdi_uuid)
+                    self._vhdutil.get_key_hash(vdi_uuid)  # pylint: disable = E1120
 
             # 4.c. Update CBT status of disks either just added
             # or already in XAPI.
@@ -940,7 +1238,7 @@ class LinstorSR(SR.SR):
                 else:
                     geneology[vdi.parent] = [vdi_uuid]
             if not vdi.hidden:
-                self.virtual_allocation += vdi.utilisation
+                self.virtual_allocation += vdi.size
 
         # 9. Remove all hidden leaf nodes to avoid introducing records that
         # will be GC'ed.
@@ -1014,13 +1312,12 @@ class LinstorSR(SR.SR):
             util.SMlog('Cannot deflate missing VDI {}'.format(vdi_uuid))
             return
 
-        current_size = self._linstor.get_volume_info(self.uuid).virtual_size
-        util.zeroOut(
-            vdi.path,
-            current_size - vhdutil.VHD_FOOTER_SIZE,
-            vhdutil.VHD_FOOTER_SIZE
-        )
-        deflate(vdi_uuid, vdi.path, old_size, current_size)
+        assert not self._all_volume_info_cache
+        volume_info = self._linstor.get_volume_info(vdi_uuid)
+
+        current_size = volume_info.virtual_size
+        assert current_size > 0
+        self._vhdutil.force_deflate(vdi.path, old_size, current_size, zeroize=True)
 
     def _handle_interrupted_clone(
         self, vdi_uuid, clone_info, force_undo=False
@@ -1033,7 +1330,7 @@ class LinstorSR(SR.SR):
         base_uuid, snap_uuid = clone_info.split('_')
 
         # Use LINSTOR data because new VDIs may not be in the XAPI.
-        volume_names = self._linstor.volumes_with_name
+        volume_names = self._linstor.get_volumes_with_name()
 
         # Check if we don't have a base VDI. (If clone failed at startup.)
         if base_uuid not in volume_names:
@@ -1089,7 +1386,7 @@ class LinstorSR(SR.SR):
         if base_type == vhdutil.VDI_TYPE_VHD:
             vhd_info = self._vhdutil.get_vhd_info(base_uuid, False)
             if vhd_info.hidden:
-                vhdutil.setHidden(base_path, False)
+                self._vhdutil.set_hidden(base_path, False)
         elif base_type == vhdutil.VDI_TYPE_RAW and \
                 base_metadata.get(HIDDEN_TAG):
             self._linstor.update_volume_metadata(
@@ -1099,10 +1396,6 @@ class LinstorSR(SR.SR):
         # Remove the child nodes.
         if snap_uuid and snap_uuid in volume_names:
             util.SMlog('Destroying snap {}...'.format(snap_uuid))
-            snap_metadata = self._linstor.get_volume_metadata(snap_uuid)
-
-            if snap_metadata.get(VDI_TYPE_TAG) != vhdutil.VDI_TYPE_VHD:
-                raise util.SMException('Clone {} not VHD'.format(snap_uuid))
 
             try:
                 self._linstor.destroy_volume(snap_uuid)
@@ -1136,9 +1429,9 @@ class LinstorSR(SR.SR):
         # Inflate to the right size.
         if base_type == vhdutil.VDI_TYPE_VHD:
             vdi = self.vdi(vdi_uuid)
-            volume_size = compute_volume_size(vdi.size, vdi.vdi_type)
-            inflate(
-                self._journaler, self._linstor, vdi_uuid, vdi.path,
+            volume_size = LinstorVhdUtil.compute_volume_size(vdi.size, vdi.vdi_type)
+            self._vhdutil.inflate(
+                self._journaler, vdi_uuid, vdi.path,
                 volume_size, vdi.capacity
             )
             self.vdis[vdi_uuid] = vdi
@@ -1151,8 +1444,62 @@ class LinstorSR(SR.SR):
         util.SMlog('*** INTERRUPTED CLONE OP: rollback success')
 
     # --------------------------------------------------------------------------
+    # Cache.
+    # --------------------------------------------------------------------------
+
+    def _create_linstor_cache(self):
+        # TODO: use a nonlocal with python3.
+        class context:
+            reconnect = False
+
+        def create_cache():
+            try:
+                if context.reconnect:
+                    self._reconnect()
+                return self._linstor.get_volumes_with_info()
+            except Exception as e:
+                context.reconnect = True
+                raise e
+
+        self._all_volume_metadata_cache = \
+            self._linstor.get_volumes_with_metadata()
+        self._all_volume_info_cache = util.retry(
+            create_cache,
+            maxretry=10,
+            period=3
+        )
+
+    def _destroy_linstor_cache(self):
+        self._all_volume_info_cache = None
+        self._all_volume_metadata_cache = None
+
+    # --------------------------------------------------------------------------
     # Misc.
     # --------------------------------------------------------------------------
+
+    def _reconnect(self):
+        controller_uri = get_controller_uri()
+
+        self._journaler = LinstorJournaler(
+            controller_uri, self._group_name, logger=util.SMlog
+        )
+
+        # Try to open SR if exists.
+        # We can repair only if we are on the master AND if
+        # we are trying to execute an exclusive operation.
+        # Otherwise we could try to delete a VDI being created or
+        # during a snapshot. An exclusive op is the guarantee that
+        # the SR is locked.
+        self._linstor = LinstorVolumeManager(
+            controller_uri,
+            self._group_name,
+            repair=(
+                self._is_master and
+                self.srcmd.cmd in self.ops_exclusive
+            ),
+            logger=util.SMlog
+        )
+        self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
 
     def _ensure_space_available(self, amount_needed):
         space_available = self._linstor.max_volume_size_allowed
@@ -1199,8 +1546,6 @@ class LinstorVDI(VDI.VDI):
     TYPE_RAW = 'raw'
     TYPE_VHD = 'vhd'
 
-    MAX_SIZE = 2 * 1024 * 1024 * 1024 * 1024  # Max VHD size.
-
     # Metadata size given to the "S" param of vhd-util create.
     # "-S size (MB) for metadata preallocation".
     # Increase the performance when resize is called.
@@ -1233,7 +1578,7 @@ class LinstorVDI(VDI.VDI):
             if (
                 self.sr.srcmd.cmd == 'vdi_attach_from_config' or
                 self.sr.srcmd.cmd == 'vdi_detach_from_config'
-            ) and self.sr.srcmd.params['vdi_uuid'] == self.uuid:
+            ):
                 self.vdi_type = vhdutil.VDI_TYPE_RAW
                 self.path = self.sr.srcmd.params['vdi_path']
             else:
@@ -1297,11 +1642,11 @@ class LinstorVDI(VDI.VDI):
 
         # 2. Compute size and check space available.
         size = vhdutil.validate_and_round_vhd_size(int(size))
-        util.SMlog('LinstorVDI.create: type={}, size={}'.format(
-            self.vdi_type, size
-        ))
-
-        volume_size = compute_volume_size(size, self.vdi_type)
+        volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
+        util.SMlog(
+            'LinstorVDI.create: type={}, vhd-size={}, volume-size={}'
+            .format(self.vdi_type, size, volume_size)
+        )
         self.sr._ensure_space_available(volume_size)
 
         # 3. Set sm_config attribute of VDI parent class.
@@ -1310,8 +1655,15 @@ class LinstorVDI(VDI.VDI):
         # 4. Create!
         failed = False
         try:
+            volume_name = None
+            if self.ty == 'ha_statefile':
+                volume_name = HA_VOLUME_NAME
+            elif self.ty == 'redo_log':
+                volume_name = REDO_LOG_VOLUME_NAME
+
             self._linstor.create_volume(
-                self.uuid, volume_size, persistent=False
+                self.uuid, volume_size, persistent=False,
+                volume_name=volume_name
             )
             volume_info = self._linstor.get_volume_info(self.uuid)
 
@@ -1320,16 +1672,16 @@ class LinstorVDI(VDI.VDI):
             if self.vdi_type == vhdutil.VDI_TYPE_RAW:
                 self.size = volume_info.virtual_size
             else:
-                vhdutil.create(
+                self.sr._vhdutil.create(
                     self.path, size, False, self.MAX_METADATA_VIRT_SIZE
                 )
                 self.size = self.sr._vhdutil.get_size_virt(self.uuid)
 
             if self._key_hash:
-                vhdutil.setKey(self.path, self._key_hash)
+                self.sr._vhdutil.set_key(self.path, self._key_hash)
 
             # Because vhdutil commands modify the volume data,
-            # we must retrieve a new time the utilisation size.
+            # we must retrieve a new time the utilization size.
             volume_info = self._linstor.get_volume_info(self.uuid)
 
             volume_metadata = {
@@ -1344,6 +1696,13 @@ class LinstorVDI(VDI.VDI):
                 METADATA_OF_POOL_TAG: ''
             }
             self._linstor.set_volume_metadata(self.uuid, volume_metadata)
+
+            # Set the open timeout to 1min to reduce CPU usage
+            # in http-disk-server when a secondary server tries to open
+            # an already opened volume.
+            if self.ty == 'ha_statefile' or self.ty == 'redo_log':
+                self._linstor.set_auto_promote_timeout(self.uuid, 600)
+
             self._linstor.mark_volume_as_persistent(self.uuid)
         except util.CommandException as e:
             failed = True
@@ -1364,11 +1723,11 @@ class LinstorVDI(VDI.VDI):
                         '{}'.format(e)
                     )
 
-        self.utilisation = volume_info.physical_size
+        self.utilisation = volume_info.allocated_size
         self.sm_config['vdi_type'] = self.vdi_type
 
         self.ref = self._db_introduce()
-        self.sr._update_stats(volume_info.virtual_size)
+        self.sr._update_stats(self.size)
 
         return VDI.VDI.get_params(self)
 
@@ -1401,20 +1760,28 @@ class LinstorVDI(VDI.VDI):
                 'Failed to remove the volume (maybe is leaf coalescing) '
                 'for {} err: {}'.format(self.uuid, e)
             )
-            raise xs_errors.XenError('VDIDelete', opterr=str(e))
+
+            try:
+                raise xs_errors.XenError('VDIDelete', opterr=str(e))
+            except LinstorVolumeManagerError as e:
+                if e.code != LinstorVolumeManagerError.ERR_VOLUME_DESTROY:
+                    raise xs_errors.XenError('VDIDelete', opterr=str(e))
+
+            return
 
         if self.uuid in self.sr.vdis:
             del self.sr.vdis[self.uuid]
 
         # TODO: Check size after delete.
-        self.sr._update_stats(-self.capacity)
+        self.sr._update_stats(-self.size)
         self.sr._kick_gc()
         return super(LinstorVDI, self).delete(sr_uuid, vdi_uuid, data_only)
 
     def attach(self, sr_uuid, vdi_uuid):
         util.SMlog('LinstorVDI.attach for {}'.format(self.uuid))
+        attach_from_config = self.sr.srcmd.cmd == 'vdi_attach_from_config'
         if (
-            self.sr.srcmd.cmd != 'vdi_attach_from_config' or
+            not attach_from_config or
             self.sr.srcmd.params['vdi_uuid'] != self.uuid
         ) and self.sr._journaler.has_entries(self.uuid):
             raise xs_errors.XenError(
@@ -1423,56 +1790,62 @@ class LinstorVDI(VDI.VDI):
                 'scan SR first to trigger auto-repair'
             )
 
-        writable = 'args' not in self.sr.srcmd.params or \
-            self.sr.srcmd.params['args'][0] == 'true'
+        if not attach_from_config or self.sr._is_master:
+            writable = 'args' not in self.sr.srcmd.params or \
+                self.sr.srcmd.params['args'][0] == 'true'
 
-        # We need to inflate the volume if we don't have enough place
-        # to mount the VHD image. I.e. the volume capacity must be greater
-        # than the VHD size + bitmap size.
-        need_inflate = True
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW or not writable or \
-                self.capacity >= compute_volume_size(self.size, self.vdi_type):
-            need_inflate = False
+            # We need to inflate the volume if we don't have enough place
+            # to mount the VHD image. I.e. the volume capacity must be greater
+            # than the VHD size + bitmap size.
+            need_inflate = True
+            if (
+                self.vdi_type == vhdutil.VDI_TYPE_RAW or
+                not writable or
+                self.capacity >= LinstorVhdUtil.compute_volume_size(self.size, self.vdi_type)
+            ):
+                need_inflate = False
 
-        if need_inflate:
-            try:
-                self._prepare_thin(True)
-            except Exception as e:
-                raise xs_errors.XenError(
-                    'VDIUnavailable',
-                    opterr='Failed to attach VDI during "prepare thin": {}'
-                    .format(e)
-                )
-
-        if not util.pathexists(self.path):
-            raise xs_errors.XenError(
-                'VDIUnavailable', opterr='Could not find: {}'.format(self.path)
-            )
+            if need_inflate:
+                try:
+                    self._prepare_thin(True)
+                except Exception as e:
+                    raise xs_errors.XenError(
+                        'VDIUnavailable',
+                        opterr='Failed to attach VDI during "prepare thin": {}'
+                        .format(e)
+                    )
 
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
-
-        # TODO: Is it useful?
-        self.xenstore_data.update(scsiutil.update_XS_SCSIdata(
-            self.uuid, scsiutil.gen_synthetic_page_data(self.uuid)
-        ))
-
         self.xenstore_data['storage-type'] = LinstorSR.DRIVER_TYPE
 
-        self.attached = True
+        if (
+            USE_HTTP_NBD_SERVERS and
+            attach_from_config and
+            self.path.startswith('/dev/http-nbd/')
+        ):
+            return self._attach_using_http_nbd()
 
+        # Ensure we have a path...
+        self._create_chain_paths(self.uuid)
+
+        self.attached = True
         return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
 
     def detach(self, sr_uuid, vdi_uuid):
         util.SMlog('LinstorVDI.detach for {}'.format(self.uuid))
+        detach_from_config = self.sr.srcmd.cmd == 'vdi_detach_from_config'
         self.attached = False
+
+        if detach_from_config and self.path.startswith('/dev/http-nbd/'):
+            return self._detach_using_http_nbd()
 
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
             return
 
         # The VDI is already deflated if the VHD image size + metadata is
         # equal to the LINSTOR volume size.
-        volume_size = compute_volume_size(self.size, self.vdi_type)
+        volume_size = LinstorVhdUtil.compute_volume_size(self.size, self.vdi_type)
         already_deflated = self.capacity <= volume_size
 
         if already_deflated:
@@ -1501,10 +1874,44 @@ class LinstorVDI(VDI.VDI):
                     .format(e)
                 )
 
+        # We remove only on slaves because the volume can be used by the GC.
+        if self.sr._is_master:
+            return
+
+        while vdi_uuid:
+            try:
+                path = self._linstor.build_device_path(self._linstor.get_volume_name(vdi_uuid))
+                parent_vdi_uuid = self.sr._vhdutil.get_vhd_info(vdi_uuid).parentUuid
+            except Exception:
+                break
+
+            if util.pathexists(path):
+                try:
+                    self._linstor.remove_volume_if_diskless(vdi_uuid)
+                except Exception as e:
+                    # Ensure we can always detach properly.
+                    # I don't want to corrupt the XAPI info.
+                    util.SMlog('Failed to clean VDI {} during detach: {}'.format(vdi_uuid, e))
+            vdi_uuid = parent_vdi_uuid
+
     def resize(self, sr_uuid, vdi_uuid, size):
         util.SMlog('LinstorVDI.resize for {}'.format(self.uuid))
+        if not self.sr._is_master:
+            raise xs_errors.XenError(
+                'VDISize',
+                opterr='resize on slave not allowed'
+            )
+
         if self.hidden:
             raise xs_errors.XenError('VDIUnavailable', opterr='hidden VDI')
+
+        # Compute the virtual VHD and DRBD volume size.
+        size = vhdutil.validate_and_round_vhd_size(int(size))
+        volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
+        util.SMlog(
+            'LinstorVDI.resize: type={}, vhd-size={}, volume-size={}'
+            .format(self.vdi_type, size, volume_size)
+        )
 
         if size < self.size:
             util.SMlog(
@@ -1513,36 +1920,34 @@ class LinstorVDI(VDI.VDI):
             )
             raise xs_errors.XenError('VDISize', opterr='shrinking not allowed')
 
-        # Compute the virtual VHD size.
-        size = vhdutil.validate_and_round_vhd_size(int(size))
-
         if size == self.size:
             return VDI.VDI.get_params(self)
 
-        # Compute the LINSTOR volume size.
-        new_volume_size = compute_volume_size(size, self.vdi_type)
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
             old_volume_size = self.size
+            new_volume_size = LinstorVolumeManager.round_up_volume_size(size)
         else:
-            old_volume_size = self.capacity
+            old_volume_size = self.utilisation
             if self.sr._provisioning == 'thin':
                 # VDI is currently deflated, so keep it deflated.
                 new_volume_size = old_volume_size
+            else:
+                new_volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
         assert new_volume_size >= old_volume_size
 
         space_needed = new_volume_size - old_volume_size
         self.sr._ensure_space_available(space_needed)
 
-        old_capacity = self.capacity
+        old_size = self.size
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
             self._linstor.resize(self.uuid, new_volume_size)
         else:
             if new_volume_size != old_volume_size:
-                inflate(
-                    self.sr._journaler, self._linstor, self.uuid, self.path,
+                self.sr._vhdutil.inflate(
+                    self.sr._journaler, self.uuid, self.path,
                     new_volume_size, old_volume_size
                 )
-            vhdutil.setSizeVirtFast(self.path, size)
+            self.sr._vhdutil.set_size_virt_fast(self.path, size)
 
         # Reload size attributes.
         self._load_this()
@@ -1552,7 +1957,7 @@ class LinstorVDI(VDI.VDI):
         self.session.xenapi.VDI.set_physical_utilisation(
             vdi_ref, str(self.utilisation)
         )
-        self.sr._update_stats(self.capacity - old_capacity)
+        self.sr._update_stats(self.size - old_size)
         return VDI.VDI.get_params(self)
 
     def clone(self, sr_uuid, vdi_uuid):
@@ -1574,8 +1979,8 @@ class LinstorVDI(VDI.VDI):
         if not blktap2.VDI.tap_pause(self.session, self.sr.uuid, self.uuid):
             raise util.SMException('Failed to pause VDI {}'.format(self.uuid))
         try:
-            vhdutil.setParent(self.path, parent_path, False)
-            vhdutil.setHidden(parent_path)
+            self.sr._vhdutil.set_parent(self.path, parent_path, False)
+            self.sr._vhdutil.set_hidden(parent_path)
             self.sr.session.xenapi.VDI.set_managed(
                 self.sr.srcmd.params['args'][0], False
             )
@@ -1598,24 +2003,39 @@ class LinstorVDI(VDI.VDI):
 
         util.SMlog('LinstorVDI.generate_config for {}'.format(self.uuid))
 
-        if not self.path or not util.pathexists(self.path):
-            available = False
-            # Try to refresh symlink path...
-            try:
-                self.path = self._linstor.get_device_path(vdi_uuid)
-                available = util.pathexists(self.path)
-            except Exception:
-                pass
-            if not available:
-                raise xs_errors.XenError('VDIUnavailable')
-
         resp = {}
         resp['device_config'] = self.sr.dconf
         resp['sr_uuid'] = sr_uuid
         resp['vdi_uuid'] = self.uuid
         resp['sr_sm_config'] = self.sr.sm_config
-        resp['vdi_path'] = self.path
         resp['command'] = 'vdi_attach_from_config'
+
+        # By default, we generate a normal config.
+        # But if the disk is persistent, we must use a HTTP/NBD
+        # server to ensure we can always write or read data.
+        # Why? DRBD is unsafe when used with more than 4 hosts:
+        # We are limited to use 1 diskless and 3 full.
+        # We can't increase this limitation, so we use a NBD/HTTP device
+        # instead.
+        volume_name = self._linstor.get_volume_name(self.uuid)
+        if not USE_HTTP_NBD_SERVERS or volume_name not in [
+            HA_VOLUME_NAME, REDO_LOG_VOLUME_NAME
+        ]:
+            if not self.path or not util.pathexists(self.path):
+                available = False
+                # Try to refresh symlink path...
+                try:
+                    self.path = self._linstor.get_device_path(vdi_uuid)
+                    available = util.pathexists(self.path)
+                except Exception:
+                    pass
+                if not available:
+                    raise xs_errors.XenError('VDIUnavailable')
+
+            resp['vdi_path'] = self.path
+        else:
+            # Axiom: DRBD device is present on at least one host.
+            resp['vdi_path'] = '/dev/http-nbd/' + volume_name
 
         config = xmlrpc.client.dumps(tuple([resp]), 'vdi_attach_from_config')
         return xmlrpc.client.dumps((config,), "", True)
@@ -1652,19 +2072,28 @@ class LinstorVDI(VDI.VDI):
                 .format(self.uuid)
             )
 
-        vhdutil.killData(self.path)
+        self.sr._vhdutil.kill_data(self.path)
 
     def _load_this(self):
-        volume_metadata = self._linstor.get_volume_metadata(self.uuid)
-        volume_info = self._linstor.get_volume_info(self.uuid)
+        volume_metadata = None
+        if self.sr._all_volume_metadata_cache:
+            volume_metadata = self.sr._all_volume_metadata_cache.get(self.uuid)
+        if volume_metadata is None:
+            volume_metadata = self._linstor.get_volume_metadata(self.uuid)
 
-        # Contains the physical size used on all disks.
+        volume_info = None
+        if self.sr._all_volume_info_cache:
+            volume_info = self.sr._all_volume_info_cache.get(self.uuid)
+        if volume_info is None:
+            volume_info = self._linstor.get_volume_info(self.uuid)
+
+        # Contains the max physical size used on a disk.
         # When LINSTOR LVM driver is used, the size should be similar to
         # virtual size (i.e. the LINSTOR max volume size).
         # When LINSTOR Thin LVM driver is used, the used physical size should
         # be lower than virtual size at creation.
         # The physical size increases after each write in a new block.
-        self.utilisation = volume_info.physical_size
+        self.utilisation = volume_info.allocated_size
         self.capacity = volume_info.virtual_size
 
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
@@ -1691,7 +2120,7 @@ class LinstorVDI(VDI.VDI):
             return
 
         if self.vdi_type == vhdutil.VDI_TYPE_VHD:
-            vhdutil.setHidden(self.path, hidden)
+            self.sr._vhdutil.set_hidden(self.path, hidden)
         else:
             self._linstor.update_volume_metadata(self.uuid, {
                 HIDDEN_TAG: hidden
@@ -1739,25 +2168,19 @@ class LinstorVDI(VDI.VDI):
         else:
             fn = 'attach' if attach else 'detach'
 
-            # We assume the first pool is always the one currently in use.
-            pools = self.session.xenapi.pool.get_all()
-            master = self.session.xenapi.pool.get_master(pools[0])
+            master = util.get_master_ref(self.session)
+
             args = {
                 'groupName': self.sr._group_name,
                 'srUuid': self.sr.uuid,
                 'vdiUuid': self.uuid
             }
-            ret = self.session.xenapi.host.call_plugin(
-                    master, self.sr.MANAGER_PLUGIN, fn, args
-            )
-            util.SMlog(
-                'call-plugin ({} with {}) returned: {}'.format(fn, args, ret)
-            )
-            if ret == 'False':
-                raise xs_errors.XenError(
-                    'VDIUnavailable',
-                    opterr='Plugin {} failed'.format(self.sr.MANAGER_PLUGIN)
-                )
+
+            try:
+                self.sr._exec_manager_command(master, fn, args, 'VDIUnavailable')
+            except Exception:
+                if fn != 'detach':
+                    raise
 
         # Reload size attrs after inflate or deflate!
         self._load_this()
@@ -1807,9 +2230,7 @@ class LinstorVDI(VDI.VDI):
                 'VDIUnavailable',
                 opterr='failed to get vdi_type in metadata'
             )
-        self._update_device_name(
-            self._linstor.get_volume_name(self.uuid)
-        )
+        self._update_device_name(self._linstor.get_volume_name(self.uuid))
 
     def _update_device_name(self, device_name):
         self._device_name = device_name
@@ -1832,7 +2253,7 @@ class LinstorVDI(VDI.VDI):
 
         # 2. Write the snapshot content.
         is_raw = (self.vdi_type == vhdutil.VDI_TYPE_RAW)
-        vhdutil.snapshot(
+        self.sr._vhdutil.snapshot(
             snap_path, self.path, is_raw, self.MAX_METADATA_VIRT_SIZE
         )
 
@@ -1862,7 +2283,7 @@ class LinstorVDI(VDI.VDI):
         volume_info = self._linstor.get_volume_info(snap_uuid)
 
         snap_vdi.size = self.sr._vhdutil.get_size_virt(snap_uuid)
-        snap_vdi.utilisation = volume_info.physical_size
+        snap_vdi.utilisation = volume_info.allocated_size
 
         # 6. Update sm config.
         snap_vdi.sm_config = {}
@@ -1931,6 +2352,9 @@ class LinstorVDI(VDI.VDI):
             )
         elif depth >= vhdutil.MAX_CHAIN_SIZE:
             raise xs_errors.XenError('SnapshotChainTooLong')
+
+        # Ensure we have a valid path if we don't have a local diskful.
+        self._create_chain_paths(self.uuid)
 
         volume_path = self.path
         if not util.pathexists(volume_path):
@@ -2057,7 +2481,7 @@ class LinstorVDI(VDI.VDI):
                     raise
 
             if snap_type != VDI.SNAPSHOT_INTERNAL:
-                self.sr._update_stats(self.capacity)
+                self.sr._update_stats(self.size)
 
             # 10. Return info on the new user-visible leaf VDI.
             ret_vdi = snap_vdi
@@ -2070,7 +2494,7 @@ class LinstorVDI(VDI.VDI):
             self.session.xenapi.VDI.set_sm_config(
                 vdi_ref, active_vdi.sm_config
             )
-        except Exception as e:
+        except Exception:
             util.logException('Failed to snapshot!')
             try:
                 self.sr._handle_interrupted_clone(
@@ -2088,10 +2512,349 @@ class LinstorVDI(VDI.VDI):
 
         return ret_vdi.get_params()
 
+    @staticmethod
+    def _start_persistent_http_server(volume_name):
+        pid_path = None
+        http_server = None
+
+        try:
+            if volume_name == HA_VOLUME_NAME:
+                port = '8076'
+            else:
+                port = '8077'
+
+            try:
+                # Use a timeout call because XAPI may be unusable on startup
+                # or if the host has been ejected. So in this case the call can
+                # block indefinitely.
+                session = util.timeout_call(5, util.get_localAPI_session)
+                host_ip = util.get_this_host_address(session)
+            except:
+                # Fallback using the XHA file if session not available.
+                host_ip, _ = get_ips_from_xha_config_file()
+                if not host_ip:
+                    raise Exception(
+                        'Cannot start persistent HTTP server: no XAPI session, nor XHA config file'
+                    )
+
+            arguments = [
+                'http-disk-server',
+                '--disk',
+                '/dev/drbd/by-res/{}/0'.format(volume_name),
+                '--ip',
+                host_ip,
+                '--port',
+                port
+            ]
+
+            util.SMlog('Starting {} on port {}...'.format(arguments[0], port))
+            http_server = subprocess.Popen(
+                [FORK_LOG_DAEMON] + arguments,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                # Ensure we use another group id to kill this process without
+                # touch the current one.
+                preexec_fn=os.setsid
+            )
+
+            pid_path = '/run/http-server-{}.pid'.format(volume_name)
+            with open(pid_path, 'w') as pid_file:
+                pid_file.write(str(http_server.pid))
+
+            reg_server_ready = re.compile("Server ready!$")
+            def is_ready():
+                while http_server.poll() is None:
+                    line = http_server.stdout.readline()
+                    if reg_server_ready.search(line):
+                        return True
+                return False
+            try:
+                if not util.timeout_call(10, is_ready):
+                    raise Exception('Failed to wait HTTP server startup, bad output')
+            except util.TimeoutException:
+                raise Exception('Failed to wait for HTTP server startup during given delay')
+        except Exception as e:
+            if pid_path:
+                try:
+                    os.remove(pid_path)
+                except Exception:
+                    pass
+
+            if http_server:
+                # Kill process and children in this case...
+                try:
+                    os.killpg(os.getpgid(http_server.pid), signal.SIGTERM)
+                except:
+                    pass
+
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='Failed to start http-server: {}'.format(e)
+            )
+
+    def _start_persistent_nbd_server(self, volume_name):
+        pid_path = None
+        nbd_path = None
+        nbd_server = None
+
+        try:
+            # We use a precomputed device size.
+            # So if the XAPI is modified, we must update these values!
+            if volume_name == HA_VOLUME_NAME:
+                # See: https://github.com/xapi-project/xen-api/blob/703479fa448a8d7141954bb6e8964d8e25c4ac2e/ocaml/xapi/xha_statefile.ml#L32-L37
+                port = '8076'
+                device_size = 4 * 1024 * 1024
+            else:
+                # See: https://github.com/xapi-project/xen-api/blob/703479fa448a8d7141954bb6e8964d8e25c4ac2e/ocaml/database/redo_log.ml#L41-L44
+                port = '8077'
+                device_size = 256 * 1024 * 1024
+
+            try:
+                session = util.timeout_call(5, util.get_localAPI_session)
+                ips = util.get_host_addresses(session)
+            except Exception as e:
+                _, ips = get_ips_from_xha_config_file()
+                if not ips:
+                    raise Exception(
+                        'Cannot start persistent NBD server: no XAPI session, nor XHA config file ({})'.format(e)
+                    )
+                ips = ips.values()
+
+            arguments = [
+                'nbd-http-server',
+                '--socket-path',
+                '/run/{}.socket'.format(volume_name),
+                '--nbd-name',
+                volume_name,
+                '--urls',
+                ','.join(map(lambda ip: 'http://' + ip + ':' + port, ips)),
+                '--device-size',
+                str(device_size)
+            ]
+
+            util.SMlog('Starting {} using port {}...'.format(arguments[0], port))
+            nbd_server = subprocess.Popen(
+                [FORK_LOG_DAEMON] + arguments,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                # Ensure we use another group id to kill this process without
+                # touch the current one.
+                preexec_fn=os.setsid
+            )
+
+            pid_path = '/run/nbd-server-{}.pid'.format(volume_name)
+            with open(pid_path, 'w') as pid_file:
+                pid_file.write(str(nbd_server.pid))
+
+            reg_nbd_path = re.compile("NBD `(/dev/nbd[0-9]+)` is now attached.$")
+            def get_nbd_path():
+                while nbd_server.poll() is None:
+                    line = nbd_server.stdout.readline()
+                    match = reg_nbd_path.search(line)
+                    if match:
+                        return match.group(1)
+            # Use a timeout to never block the smapi if there is a problem.
+            try:
+                nbd_path = util.timeout_call(10, get_nbd_path)
+                if nbd_path is None:
+                    raise Exception('Empty NBD path (NBD server is probably dead)')
+            except util.TimeoutException:
+                raise Exception('Unable to read NBD path')
+
+            util.SMlog('Create symlink: {} -> {}'.format(self.path, nbd_path))
+            os.symlink(nbd_path, self.path)
+        except Exception as e:
+            if pid_path:
+                try:
+                    os.remove(pid_path)
+                except Exception:
+                    pass
+
+            if nbd_path:
+                try:
+                    os.remove(nbd_path)
+                except Exception:
+                    pass
+
+            if nbd_server:
+                # Kill process and children in this case...
+                try:
+                    os.killpg(os.getpgid(nbd_server.pid), signal.SIGTERM)
+                except:
+                    pass
+
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='Failed to start nbd-server: {}'.format(e)
+            )
+
+    @classmethod
+    def _kill_persistent_server(self, type, volume_name, sig):
+        try:
+            path = '/run/{}-server-{}.pid'.format(type, volume_name)
+            if not os.path.exists(path):
+                return
+
+            pid = None
+            with open(path, 'r') as pid_file:
+                try:
+                    pid = int(pid_file.read())
+                except Exception:
+                    pass
+
+            if pid is not None and util.check_pid_exists(pid):
+                util.SMlog('Kill {} server {} (pid={})'.format(type, path, pid))
+                try:
+                    os.killpg(os.getpgid(pid), sig)
+                except Exception as e:
+                    util.SMlog('Failed to kill {} server: {}'.format(type, e))
+
+            os.remove(path)
+        except:
+            pass
+
+    @classmethod
+    def _kill_persistent_http_server(self, volume_name, sig=signal.SIGTERM):
+        return self._kill_persistent_server('nbd', volume_name, sig)
+
+    @classmethod
+    def _kill_persistent_nbd_server(self, volume_name, sig=signal.SIGTERM):
+        return self._kill_persistent_server('http', volume_name, sig)
+
+    def _check_http_nbd_volume_name(self):
+        volume_name = self.path[14:]
+        if volume_name not in [
+            HA_VOLUME_NAME, REDO_LOG_VOLUME_NAME
+        ]:
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='Unsupported path: {}'.format(self.path)
+            )
+        return volume_name
+
+    def _attach_using_http_nbd(self):
+        volume_name = self._check_http_nbd_volume_name()
+
+        # Ensure there is no NBD and HTTP server running.
+        self._kill_persistent_nbd_server(volume_name)
+        self._kill_persistent_http_server(volume_name)
+
+        # 0. Fetch drbd path.
+        must_get_device_path = True
+        if not self.sr._is_master:
+            # We are on a slave, we must try to find a diskful locally.
+            try:
+                volume_info = self._linstor.get_volume_info(self.uuid)
+            except Exception as e:
+                raise xs_errors.XenError(
+                    'VDIUnavailable',
+                    opterr='Cannot get volume info of {}: {}'
+                    .format(self.uuid, e)
+                )
+
+            hostname = socket.gethostname()
+            must_get_device_path = hostname in volume_info.diskful
+
+        drbd_path = None
+        if must_get_device_path or self.sr._is_master:
+            # If we are master, we must ensure we have a diskless
+            # or diskful available to init HA.
+            # It also avoid this error in xensource.log
+            # (/usr/libexec/xapi/cluster-stack/xhad/ha_set_pool_state):
+            # init exited with code 8 [stdout = ''; stderr = 'SF: failed to write in State-File \x10 (fd 4208696). (sys 28)\x0A']
+            # init returned MTC_EXIT_CAN_NOT_ACCESS_STATEFILE (State-File is inaccessible)
+            available = False
+            try:
+                drbd_path = self._linstor.get_device_path(self.uuid)
+                available = util.pathexists(drbd_path)
+            except Exception:
+                pass
+
+            if not available:
+                raise xs_errors.XenError(
+                    'VDIUnavailable',
+                    opterr='Cannot get device path of {}'.format(self.uuid)
+                )
+
+        # 1. Prepare http-nbd folder.
+        try:
+            if not os.path.exists('/dev/http-nbd/'):
+                os.makedirs('/dev/http-nbd/')
+            elif os.path.islink(self.path):
+                os.remove(self.path)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise xs_errors.XenError(
+                    'VDIUnavailable',
+                    opterr='Cannot prepare http-nbd: {}'.format(e)
+                )
+
+        # 2. Start HTTP service if we have a diskful or if we are master.
+        http_service = None
+        if drbd_path:
+            assert(drbd_path in (
+                '/dev/drbd/by-res/{}/0'.format(HA_VOLUME_NAME),
+                '/dev/drbd/by-res/{}/0'.format(REDO_LOG_VOLUME_NAME)
+            ))
+            self._start_persistent_http_server(volume_name)
+
+        # 3. Start NBD server in all cases.
+        try:
+            self._start_persistent_nbd_server(volume_name)
+        except Exception as e:
+            if drbd_path:
+                self._kill_persistent_http_server(volume_name)
+            raise
+
+        self.attached = True
+        return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
+
+    def _detach_using_http_nbd(self):
+        volume_name = self._check_http_nbd_volume_name()
+        self._kill_persistent_nbd_server(volume_name)
+        self._kill_persistent_http_server(volume_name)
+
+    def _create_chain_paths(self, vdi_uuid):
+        # OPTIMIZE: Add a limit_to_first_allocated_block param to limit vhdutil calls.
+        # Useful for the snapshot code algorithm.
+
+        while vdi_uuid:
+            path = self._linstor.get_device_path(vdi_uuid)
+            if not util.pathexists(path):
+                raise xs_errors.XenError(
+                    'VDIUnavailable', opterr='Could not find: {}'.format(path)
+                )
+
+            # Diskless path can be created on the fly, ensure we can open it.
+            def check_volume_usable():
+                while True:
+                    try:
+                        with open(path, 'r+'):
+                            pass
+                    except IOError as e:
+                        if e.errno == errno.ENODATA:
+                            time.sleep(2)
+                            continue
+                        if e.errno == errno.EROFS:
+                            util.SMlog('Volume not attachable because RO. Openers: {}'.format(
+                                self.sr._linstor.get_volume_openers(vdi_uuid)
+                            ))
+                        raise
+                    break
+            util.retry(check_volume_usable, 15, 2)
+
+            vdi_uuid = self.sr._vhdutil.get_vhd_info(vdi_uuid).parentUuid
+
 # ------------------------------------------------------------------------------
 
 
 if __name__ == '__main__':
-    SRCommand.run(LinstorSR, DRIVER_INFO)
+    def run():
+        SRCommand.run(LinstorSR, DRIVER_INFO)
+
+    if not TRACE_PERFS:
+        run()
+    else:
+        util.make_profile('LinstorSR', run)
 else:
     SR.registerSR(LinstorSR)

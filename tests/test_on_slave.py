@@ -13,7 +13,15 @@ import on_slave
 
 class Test_on_slave_is_open(unittest.TestCase):
 
-    MOCK_IMPORTS = ['SRCommand', 'SR', 'NFSSR', 'EXTSR', 'LVHDSR', 'blktap2']
+    MOCK_IMPORTS = [
+        'SRCommand',
+        'SR',
+        'NFSSR',
+        'EXTSR',
+        'LVHDSR',
+        'LinstorSR',
+        'blktap2'
+    ]
 
     def fake_import(self, *args, **kwargs):
         print('Asked to import {}'.format(args[0]))
