@@ -53,8 +53,11 @@ from time import monotonic as _time
 try:
     from linstorjournaler import LinstorJournaler
     from linstorvhdutil import LinstorVhdUtil
-    from linstorvolumemanager \
-        import LinstorVolumeManager, LinstorVolumeManagerError
+    from linstorvolumemanager import get_controller_uri
+    from linstorvolumemanager import LinstorVolumeManager
+    from linstorvolumemanager import LinstorVolumeManagerError
+    from linstorvolumemanager import PERSISTENT_PREFIX as LINSTOR_PERSISTENT_PREFIX
+
     LINSTOR_AVAILABLE = True
 except ImportError:
     LINSTOR_AVAILABLE = False
@@ -477,7 +480,7 @@ class XAPI:
 #
 #  VDI
 #
-class VDI:
+class VDI(object):
     """Object representing a VDI of a VHD-based SR"""
 
     POLL_INTERVAL = 1
@@ -765,6 +768,12 @@ class VDI:
         lock.Lock.cleanupAll(self.uuid)
         self._clear()
 
+    def getParent(self):
+        return vhdutil.getParent(self.path, lambda x: x.strip())
+
+    def repair(self, parent):
+        vhdutil.repair(parent)
+
     def __str__(self):
         strHidden = ""
         if self.hidden:
@@ -882,12 +891,15 @@ class VDI:
             xapi.message.create(msg_name, "3", "SR", vdi.sr.uuid, msg_body)
     _reportCoalesceError = staticmethod(_reportCoalesceError)
 
+    def coalesce(self):
+        # size is returned in sectors
+        return vhdutil.coalesce(self.path) * 512
+
     def _doCoalesceVHD(vdi):
         try:
             startTime = time.time()
             vhdSize = vdi.getAllocatedSize()
-            # size is returned in sectors
-            coalesced_size = vhdutil.coalesce(vdi.path) * 512
+            coalesced_size = vdi.coalesce()
             endTime = time.time()
             vdi.sr.recordStorageSpeed(startTime, endTime, coalesced_size)
         except util.CommandException as ce:
@@ -926,12 +938,12 @@ class VDI:
             # Try a repair and reraise the exception
             parent = ""
             try:
-                parent = vhdutil.getParent(self.path, lambda x: x.strip())
+                parent = self.getParent()
                 if not self._vdi_is_raw(parent):
                     # Repair error is logged and ignored. Error reraised later
                     util.SMlog('Coalesce failed on %s, attempting repair on ' \
                                'parent %s' % (self.uuid, parent))
-                    vhdutil.repair(parent)
+                    self.repair(parent)
             except Exception as e:
                 util.SMlog('(error ignored) Failed to repair parent %s ' \
                            'after failed coalesce on %s, err: %s' %
@@ -1033,10 +1045,10 @@ class VDI:
         self.hidden = hidden
 
     def _increaseSizeVirt(self, size, atomic=True):
-        """ensure the virtual size of 'self' is at least 'size'. Note that 
+        """ensure the virtual size of 'self' is at least 'size'. Note that
         resizing a VHD must always be offline and atomically: the file must
         not be open by anyone and no concurrent operations may take place.
-        Thus we use the Agent API call for performing paused atomic 
+        Thus we use the Agent API call for performing paused atomic
         operations. If the caller is already in the atomic context, it must
         call with atomic = False"""
         if self.sizeVirt >= size:
@@ -1485,8 +1497,6 @@ class LVHDVDI(VDI):
 class LinstorVDI(VDI):
     """Object representing a VDI in a LINSTOR SR"""
 
-    MAX_SIZE = 2 * 1024 * 1024 * 1024 * 1024  # Max VHD size.
-
     VOLUME_LOCK_TIMEOUT = 30
 
     def load(self, info=None):
@@ -1497,11 +1507,6 @@ class LinstorVDI(VDI):
 
         self.fileName = self.sr._linstor.get_volume_name(self.uuid)
         self.path = self.sr._linstor.build_device_path(self.fileName)
-        if not util.pathexists(self.path):
-            raise util.SMException(
-                '{} of {} not found'
-                .format(self.fileName, self.uuid)
-            )
 
         if not info:
             try:
@@ -1514,9 +1519,62 @@ class LinstorVDI(VDI):
 
         self.parentUuid = info.parentUuid
         self.sizeVirt = info.sizeVirt
-        self._sizeVHD = info.sizePhys
+        self._sizeVHD = -1
+        self._sizeAllocated = -1
+        self.drbd_size = -1
         self.hidden = info.hidden
         self.scanError = False
+        self.vdi_type = vhdutil.VDI_TYPE_VHD
+
+    def getSizeVHD(self, fetch=False):
+        if self._sizeVHD < 0 or fetch:
+            self._sizeVHD = self.sr._vhdutil.get_size_phys(self.uuid)
+        return self._sizeVHD
+
+    def getDrbdSize(self, fetch=False):
+        if self.drbd_size < 0 or fetch:
+            self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
+        return self.drbd_size
+
+    def getAllocatedSize(self):
+        if self._sizeAllocated == -1:
+            if not self.raw:
+                self._sizeAllocated = self.sr._vhdutil.get_allocated_size(self.uuid)
+        return self._sizeAllocated
+
+    def inflate(self, size):
+        if self.raw:
+            return
+        self.sr.lock()
+        try:
+            # Ensure we use the real DRBD size and not the cached one.
+            # Why? Because this attribute can be changed if volume is resized by user.
+            self.drbd_size = self.getDrbdSize(fetch=True)
+            self.sr._vhdutil.inflate(self.sr.journaler, self.uuid, self.path, size, self.drbd_size)
+        finally:
+            self.sr.unlock()
+        self.drbd_size = -1
+        self._sizeVHD = -1
+        self._sizeAllocated = -1
+
+    def deflate(self):
+        if self.raw:
+            return
+        self.sr.lock()
+        try:
+            # Ensure we use the real sizes and not the cached info.
+            self.drbd_size = self.getDrbdSize(fetch=True)
+            self._sizeVHD = self.getSizeVHD(fetch=True)
+            self.sr._vhdutil.force_deflate(self.path, self._sizeVHD, self.drbd_size, zeroize=False)
+        finally:
+            self.sr.unlock()
+        self.drbd_size = -1
+        self._sizeVHD = -1
+        self._sizeAllocated = -1
+
+    def inflateFully(self):
+        if not self.raw:
+            self.inflate(LinstorVhdUtil.compute_volume_size(self.sizeVirt, self.vdi_type))
 
     def rename(self, uuid):
         Util.log('Renaming {} -> {} (path={})'.format(
@@ -1538,17 +1596,30 @@ class LinstorVDI(VDI):
             self.sr.unlock()
         VDI.delete(self)
 
-    def pauseVDIs(self, vdiList):
-        self.sr._linstor.ensure_volume_list_is_not_locked(
-            vdiList, timeout=self.VOLUME_LOCK_TIMEOUT
-        )
-        return super(VDI).pauseVDIs(vdiList)
+    def validate(self, fast=False):
+        if not self.raw and not self.sr._vhdutil.check(self.uuid, fast=fast):
+            raise util.SMException('VHD {} corrupted'.format(self))
 
-    def _liveLeafCoalesce(self, vdi):
+    def pause(self, failfast=False):
         self.sr._linstor.ensure_volume_is_not_locked(
-            vdi.uuid, timeout=self.VOLUME_LOCK_TIMEOUT
+            self.uuid, timeout=self.VOLUME_LOCK_TIMEOUT
         )
-        return super(VDI)._liveLeafCoalesce(vdi)
+        return super(LinstorVDI, self).pause(failfast)
+
+    def coalesce(self):
+        # Note: We raise `SMException` here to skip the current coalesce in case of failure.
+        # Using another exception we can't execute the next coalesce calls.
+        return self.sr._vhdutil.force_coalesce(self.path) * 512
+
+    def getParent(self):
+        return self.sr._vhdutil.get_parent(
+            self.sr._linstor.get_volume_uuid_from_device_path(self.path)
+        )
+
+    def repair(self, parent_uuid):
+        self.sr._vhdutil.force_repair(
+            self.sr._linstor.get_device_path(parent_uuid)
+        )
 
     def _relinkSkip(self):
         abortFlag = IPCFlag(self.sr.uuid)
@@ -1574,6 +1645,40 @@ class LinstorVDI(VDI):
                 blktap2.VDI.tap_unpause(session, sr_uuid, vdi_uuid)
         self.children = []
 
+    def _setParent(self, parent):
+        self.sr._linstor.get_device_path(self.uuid)
+        self.sr._vhdutil.force_parent(self.path, parent.path)
+        self.parent = parent
+        self.parentUuid = parent.uuid
+        parent.children.append(self)
+        try:
+            self.setConfig(self.DB_VHD_PARENT, self.parentUuid)
+            Util.log("Updated the vhd-parent field for child %s with %s" % \
+                     (self.uuid, self.parentUuid))
+        except:
+            Util.log("Failed to update %s with vhd-parent field %s" % \
+                     (self.uuid, self.parentUuid))
+
+    def _doCoalesce(self):
+        try:
+            self._activateChain()
+            self.parent.validate()
+            self._inflateParentForCoalesce()
+            VDI._doCoalesce(self)
+        finally:
+            self.parent.deflate()
+
+    def _activateChain(self):
+        vdi = self
+        while vdi:
+            try:
+                p = self.sr._linstor.get_device_path(vdi.uuid)
+            except Exception as e:
+                # Use SMException to skip coalesce.
+                # Otherwise the GC is stopped...
+                raise util.SMException(str(e))
+            vdi = vdi.parent
+
     def _setHidden(self, hidden=True):
         HIDDEN_TAG = 'hidden'
 
@@ -1585,14 +1690,57 @@ class LinstorVDI(VDI):
         else:
             VDI._setHidden(self, hidden)
 
+    def _setSizeVirt(self, size):
+        jfile = self.uuid + '-jvhd'
+        self.sr._linstor.create_volume(
+            jfile, vhdutil.MAX_VHD_JOURNAL_SIZE, persistent=False, volume_name=jfile
+        )
+        try:
+            self.inflate(LinstorVhdUtil.compute_volume_size(size, self.vdi_type))
+            self.sr._vhdutil.set_size_virt(size, jfile)
+        finally:
+            try:
+                self.sr._linstor.destroy_volume(jfile)
+            except Exception:
+                # We can ignore it, in any case this volume is not persistent.
+                pass
+
     def _queryVHDBlocks(self):
         return self.sr._vhdutil.get_block_bitmap(self.uuid)
+
+    def _inflateParentForCoalesce(self):
+        if self.parent.raw:
+            return
+        inc = self._calcExtraSpaceForCoalescing()
+        if inc > 0:
+            self.parent.inflate(self.parent.getDrbdSize() + inc)
+
+    def _calcExtraSpaceForCoalescing(self):
+        if self.parent.raw:
+            return 0
+        size_coalesced = LinstorVhdUtil.compute_volume_size(
+            self._getCoalescedSizeData(), self.vdi_type
+        )
+        Util.log("Coalesced size = %s" % Util.num2str(size_coalesced))
+        return size_coalesced - self.parent.getDrbdSize()
+
+    def _calcExtraSpaceForLeafCoalescing(self):
+        assert self.getDrbdSize() > 0
+        assert self.getSizeVHD() > 0
+        deflate_diff = self.getDrbdSize() - LinstorVolumeManager.round_up_volume_size(self.getSizeVHD())
+        assert deflate_diff >= 0
+        return self._calcExtraSpaceForCoalescing() - deflate_diff
+
+    def _calcExtraSpaceForSnapshotCoalescing(self):
+        assert self.getSizeVHD() > 0
+        return self._calcExtraSpaceForCoalescing() + \
+            LinstorVolumeManager.round_up_volume_size(self.getSizeVHD())
 
 ################################################################################
 #
 # SR
 #
-class SR:
+class SR(object):
     class LogFilter:
         def __init__(self, sr):
             self.sr = sr
@@ -2166,7 +2314,7 @@ class SR:
 
     def _coalesceLeaf(self, vdi):
         """Leaf-coalesce VDI vdi. Return true if we succeed, false if we cannot
-        complete due to external changes, namely vdi_delete and vdi_snapshot 
+        complete due to external changes, namely vdi_delete and vdi_snapshot
         that alter leaf-coalescibility of vdi"""
         tracker = self.CoalesceTracker(self)
         while not vdi.canLiveCoalesce(self.getStorageSpeed()):
@@ -2382,7 +2530,7 @@ class SR:
         self.forgetVDI(origParentUuid)
         self._finishCoalesceLeaf(parent)
         self._updateSlavesOnResize(parent)
-    
+
     def _calcExtraSpaceNeeded(self, child, parent):
         assert(not parent.raw)  # raw parents not supported
         extra = child.getSizeVHD() - parent.getSizeVHD()
@@ -2416,9 +2564,9 @@ class SR:
                 del self.vdis[uuid]
 
     def _handleInterruptedCoalesceLeaf(self):
-        """An interrupted leaf-coalesce operation may leave the VHD tree in an 
-        inconsistent state. If the old-leaf VDI is still present, we revert the 
-        operation (in case the original error is persistent); otherwise we must 
+        """An interrupted leaf-coalesce operation may leave the VHD tree in an
+        inconsistent state. If the old-leaf VDI is still present, we revert the
+        operation (in case the original error is persistent); otherwise we must
         finish the operation"""
         # abstract
         pass
@@ -2499,10 +2647,10 @@ class FileSR(SR):
             self.xapi.markCacheSRsDirty()
 
     def cleanupCache(self, maxAge=-1):
-        """Clean up IntelliCache cache files. Caches for leaf nodes are 
-        removed when the leaf node no longer exists or its allow-caching 
-        attribute is not set. Caches for parent nodes are removed when the 
-        parent node no longer exists or it hasn't been used in more than 
+        """Clean up IntelliCache cache files. Caches for leaf nodes are
+        removed when the leaf node no longer exists or its allow-caching
+        attribute is not set. Caches for parent nodes are removed when the
+        parent node no longer exists or it hasn't been used in more than
         <maxAge> hours.
         Return number of caches removed.
         """
@@ -2992,7 +3140,6 @@ class LinstorSR(SR):
             )
 
         SR.__init__(self, uuid, xapi, createLock, force)
-        self._master_uri = 'linstor://localhost'
         self.path = LinstorVolumeManager.DEV_ROOT_PATH
         self._reloadLinstor()
 
@@ -3019,6 +3166,12 @@ class LinstorSR(SR):
         self.logFilter.logState()
         self._handleInterruptedCoalesceLeaf()
 
+    def pauseVDIs(self, vdiList):
+        self._linstor.ensure_volume_list_is_not_locked(
+            vdiList, timeout=LinstorVDI.VOLUME_LOCK_TIMEOUT
+        )
+        return super(LinstorSR, self).pauseVDIs(vdiList)
+
     def _reloadLinstor(self):
         session = self.xapi.session
         host_ref = util.get_this_host_ref(session)
@@ -3031,12 +3184,13 @@ class LinstorSR(SR):
         dconf = session.xenapi.PBD.get_device_config(pbd)
         group_name = dconf['group-name']
 
+        controller_uri = get_controller_uri()
         self.journaler = LinstorJournaler(
-            self._master_uri, group_name, logger=util.SMlog
+            controller_uri, group_name, logger=util.SMlog
         )
 
         self._linstor = LinstorVolumeManager(
-            self._master_uri,
+            controller_uri,
             group_name,
             repair=True,
             logger=util.SMlog
@@ -3069,40 +3223,79 @@ class LinstorSR(SR):
 
         # TODO: Ensure metadata contains the right info.
 
-        all_volume_info = self._linstor.volumes_with_info
-        volumes_metadata = self._linstor.volumes_with_metadata
+        all_volume_info = self._linstor.get_volumes_with_info()
+        volumes_metadata = self._linstor.get_volumes_with_metadata()
         for vdi_uuid, volume_info in all_volume_info.items():
             try:
-                if not volume_info.name and \
-                        not list(volumes_metadata[vdi_uuid].items()):
+                volume_metadata = volumes_metadata[vdi_uuid]
+                if not volume_info.name and not list(volume_metadata.items()):
                     continue  # Ignore it, probably deleted.
 
-                vdi_type = volumes_metadata[vdi_uuid][VDI_TYPE_TAG]
-                if vdi_type == vhdutil.VDI_TYPE_VHD:
+                if vdi_uuid.startswith('DELETED_'):
+                    # Assume it's really a RAW volume of a failed snap without VHD header/footer.
+                    # We must remove this VDI now without adding it in the VDI list.
+                    # Otherwise `Relinking` calls and other actions can be launched on it.
+                    # We don't want that...
+                    Util.log('Deleting bad VDI {}'.format(vdi_uuid))
+
+                    self.lock()
+                    try:
+                        self._linstor.destroy_volume(vdi_uuid)
+                        try:
+                            self.forgetVDI(vdi_uuid)
+                        except:
+                            pass
+                    except Exception as e:
+                        Util.log('Cannot delete bad VDI: {}'.format(e))
+                    finally:
+                        self.unlock()
+                    continue
+
+                vdi_type = volume_metadata.get(VDI_TYPE_TAG)
+                volume_name = self._linstor.get_volume_name(vdi_uuid)
+                if volume_name.startswith(LINSTOR_PERSISTENT_PREFIX):
+                    # Always RAW!
+                    info = None
+                elif vdi_type == vhdutil.VDI_TYPE_VHD:
                     info = self._vhdutil.get_vhd_info(vdi_uuid)
                 else:
-                    info = None
+                    # Ensure it's not a VHD...
+                    try:
+                        info = self._vhdutil.get_vhd_info(vdi_uuid)
+                    except:
+                        try:
+                            self._vhdutil.force_repair(
+                                self._linstor.get_device_path(vdi_uuid)
+                            )
+                            info = self._vhdutil.get_vhd_info(vdi_uuid)
+                        except:
+                            info = None
+
             except Exception as e:
                 Util.log(
                     ' [VDI {}: failed to load VDI info]: {}'
-                    .format(self.uuid, e)
+                    .format(vdi_uuid, e)
                 )
                 info = vhdutil.VHDInfo(vdi_uuid)
                 info.error = 1
+
             all_vdi_info[vdi_uuid] = info
+
         return all_vdi_info
 
-    # TODO: Maybe implement _liveLeafCoalesce/_prepareCoalesceLeaf/
-    # _finishCoalesceLeaf/_updateSlavesOnResize like LVM plugin.
+    def _prepareCoalesceLeaf(self, vdi):
+        vdi._activateChain()
+        vdi.deflate()
+        vdi._inflateParentForCoalesce()
+
+    def _finishCoalesceLeaf(self, parent):
+        if not parent.isSnapshot() or parent.isAttachedRW():
+            parent.inflateFully()
+        else:
+            parent.deflate()
 
     def _calcExtraSpaceNeeded(self, child, parent):
-        meta_overhead = vhdutil.calcOverheadEmpty(LinstorVDI.MAX_SIZE)
-        bitmap_overhead = vhdutil.calcOverheadBitmap(parent.sizeVirt)
-        virtual_size = LinstorVolumeManager.round_up_volume_size(
-            parent.sizeVirt + meta_overhead + bitmap_overhead
-        )
-        # TODO: Check result.
-        return virtual_size - self._linstor.get_volume_size(parent.uuid)
+        return LinstorVhdUtil.compute_volume_size(parent.sizeVirt, parent.vdi_type) - parent.getDrbdSize()
 
     def _hasValidDevicePath(self, uuid):
         try:
@@ -3111,6 +3304,16 @@ class LinstorSR(SR):
             # TODO: Maybe log exception.
             return False
         return True
+
+    def _liveLeafCoalesce(self, vdi):
+        self.lock()
+        try:
+            self._linstor.ensure_volume_is_not_locked(
+                vdi.uuid, timeout=LinstorVDI.VOLUME_LOCK_TIMEOUT
+            )
+            return super(LinstorSR, self)._liveLeafCoalesce(vdi)
+        finally:
+            self.unlock()
 
     def _handleInterruptedCoalesceLeaf(self):
         entries = self.journaler.get_all(VDI.JRN_LEAF)
@@ -3138,7 +3341,6 @@ class LinstorSR(SR):
                 'Renaming parent back: {} -> {}'.format(childUuid, parentUuid)
             )
             parent.rename(parentUuid)
-        util.fistpoint.activate('LVHDRT_coaleaf_undo_after_rename', self.uuid)
 
         child = self.getVDI(childUuid)
         if not child:
@@ -3154,9 +3356,6 @@ class LinstorSR(SR):
             Util.log('Updating the VDI record')
             child.setConfig(VDI.DB_VHD_PARENT, parentUuid)
             child.setConfig(VDI.DB_VDI_TYPE, vhdutil.VDI_TYPE_VHD)
-            util.fistpoint.activate(
-                'LVHDRT_coaleaf_undo_after_rename2', self.uuid
-            )
 
         # TODO: Maybe deflate here.
 
@@ -3165,10 +3364,7 @@ class LinstorSR(SR):
         if not parent.hidden:
             parent._setHidden(True)
         self._updateSlavesOnUndoLeafCoalesce(parent, child)
-        util.fistpoint.activate('LVHDRT_coaleaf_undo_end', self.uuid)
         Util.log('*** leaf-coalesce undo successful')
-        if util.fistpoint.is_active('LVHDRT_coaleaf_stop_after_recovery'):
-            child.setConfig(VDI.DB_LEAFCLSC, VDI.LEAFCLSC_DISABLED)
 
     def _finishInterruptedCoalesceLeaf(self, childUuid, parentUuid):
         Util.log('*** FINISH LEAF-COALESCE')
@@ -3181,31 +3377,20 @@ class LinstorSR(SR):
         except XenAPI.Failure:
             pass
         self._updateSlavesOnResize(vdi)
-        util.fistpoint.activate('LVHDRT_coaleaf_finish_end', self.uuid)
         Util.log('*** finished leaf-coalesce successfully')
 
     def _checkSlaves(self, vdi):
         try:
-            states = self._linstor.get_usage_states(vdi.uuid)
-            for node_name, state in states.items():
-                self._checkSlave(node_name, vdi, state)
+            all_openers = self._linstor.get_volume_openers(vdi.uuid)
+            for openers in all_openers.itervalues():
+                for opener in openers.values():
+                    if opener['process-name'] != 'tapdisk':
+                        raise util.SMException(
+                            'VDI {} is in use: {}'.format(vdi.uuid, all_openers)
+                        )
         except LinstorVolumeManagerError as e:
             if e.code != LinstorVolumeManagerError.ERR_VOLUME_NOT_EXISTS:
                 raise
-
-    @staticmethod
-    def _checkSlave(node_name, vdi, state):
-        # If state is None, LINSTOR doesn't know the host state
-        # (bad connection?).
-        if state is None:
-            raise util.SMException(
-                'Unknown state for VDI {} on {}'.format(vdi.uuid, node_name)
-            )
-
-        if state:
-            raise util.SMException(
-                'VDI {} is in use on {}'.format(vdi.uuid, node_name)
-            )
 
 
 ################################################################################
@@ -3527,9 +3712,9 @@ def abort(srUuid, soft=False):
 
 
 def gc(session, srUuid, inBackground, dryRun=False):
-    """Garbage collect all deleted VDIs in SR "srUuid". Fork & return 
-    immediately if inBackground=True. 
-    
+    """Garbage collect all deleted VDIs in SR "srUuid". Fork & return
+    immediately if inBackground=True.
+
     The following algorithm is used:
     1. If we are already GC'ing in this SR, return
     2. If we are already coalescing a VDI pair:

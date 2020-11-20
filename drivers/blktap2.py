@@ -50,6 +50,12 @@ import VDI as sm
 from xmlrpc.client import ServerProxy, Transport
 from socket import socket, AF_UNIX, SOCK_STREAM
 
+try:
+    from linstorvolumemanager import log_drbd_openers
+    LINSTOR_AVAILABLE = True
+except ImportError:
+    LINSTOR_AVAILABLE = False
+
 PLUGIN_TAP_PAUSE = "tapdisk-pause"
 
 SOCKPATH = "/var/xapi/xcp-rrdd"
@@ -816,7 +822,22 @@ class Tapdisk(object):
                 TapCtl.attach(pid, minor)
 
                 try:
-                    TapCtl.open(pid, minor, _type, path, options)
+                    retry_open = 0
+                    while True:
+                        try:
+                            TapCtl.open(pid, minor, _type, path, options)
+                        except TapCtl.CommandFailure as e:
+                            err = (
+                                'status' in e.info and e.info['status']
+                            ) or None
+                            if err in (errno.EIO, errno.EROFS, errno.EAGAIN):
+                                if retry_open < 5:
+                                    retry_open += 1
+                                    time.sleep(1)
+                                    continue
+                                if LINSTOR_AVAILABLE and err == errno.EROFS:
+                                    log_drbd_openers(path)
+                            break
                     try:
                         tapdisk = cls.__from_blktap(blktap)
                         node = '/sys/dev/block/%d:%d' % (tapdisk.major(), tapdisk.minor)
@@ -1602,20 +1623,24 @@ class VDI(object):
         """Wraps target.activate and adds a tapdisk"""
 
         #util.SMlog("VDI.activate %s" % vdi_uuid)
+        refresh = False
         if self.tap_wanted():
             if not self._add_tag(vdi_uuid, not options["rdonly"]):
                 return False
-            # it is possible that while the VDI was paused some of its
-            # attributes have changed (e.g. its size if it was inflated; or its
-            # path if it was leaf-coalesced onto a raw LV), so refresh the
-            # object completely
-            params = self.target.vdi.sr.srcmd.params
-            target = sm.VDI.from_uuid(self.target.vdi.session, vdi_uuid)
-            target.sr.srcmd.params = params
-            driver_info = target.sr.srcmd.driver_info
-            self.target = self.TargetDriver(target, driver_info)
+            refresh = True
 
         try:
+            if refresh:
+                # it is possible that while the VDI was paused some of its
+                # attributes have changed (e.g. its size if it was inflated; or its
+                # path if it was leaf-coalesced onto a raw LV), so refresh the
+                # object completely
+                params = self.target.vdi.sr.srcmd.params
+                target = sm.VDI.from_uuid(self.target.vdi.session, vdi_uuid)
+                target.sr.srcmd.params = params
+                driver_info = target.sr.srcmd.driver_info
+                self.target = self.TargetDriver(target, driver_info)
+
             util.fistpoint.activate_custom_fn(
                     "blktap_activate_inject_failure",
                     lambda: util.inject_failure())
