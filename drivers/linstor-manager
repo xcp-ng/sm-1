@@ -14,32 +14,53 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# We must modify default import path, we don't want to import modules
+# installed in plugins folder and instead we must import from LINSTOR driver
+# folder.
+import sys
+sys.path[0] = '/opt/xensource/sm/'
+
 import base64
 import distutils.util
-import subprocess
-import sys
+import os
+import socket
+import XenAPI
 import XenAPIPlugin
 
-sys.path.append('/opt/xensource/sm/')
 from linstorjournaler import LinstorJournaler
-from linstorvolumemanager import LinstorVolumeManager
+from linstorvhdutil import LinstorVhdUtil
+from linstorvolumemanager import get_controller_uri, get_local_volume_openers, LinstorVolumeManager
 from lock import Lock
 import json
 import LinstorSR
+import re
 import util
 import vhdutil
 
+BACKING_DISK_RE = re.compile('^/dev/([^/]+)/(?:[^/]+)$')
+LVM_PLUGIN = 'lvm.py'
+THIN_POOL = 'thin_pool'
 
 FIREWALL_PORT_SCRIPT = '/etc/xapi.d/plugins/firewall-port'
-LINSTOR_PORTS = [3366, 3370, 3376, 3377, '7000:8000']
+LINSTOR_PORTS = [3366, 3370, 3376, 3377, 8076, 8077]
+DRBD_PORTS = '7000:8000'
+
+DRBD_REACTOR_CONF = '/etc/drbd-reactor.d/sm-linstor.toml'
+
+DRBD_REACTOR_CONF_CONTENT = """[[promoter]]
+
+[promoter.resources.xcp-persistent-database]
+start = [ "var-lib-linstor.service", "linstor-controller.service" ]
+"""
+
+DRBD_REACTOR_DEPS = [
+    '/run/systemd/system/linstor-controller.service.d/reactor.conf',
+    '/run/systemd/system/var-lib-linstor.service.d/reactor.conf'
+]
 
 
-def get_linstor_uri(session):
-    return 'linstor://{}'.format(util.get_master_rec(session)['address'])
-
-
-def update_port(port, open):
-    fn = 'open' if open else 'close'
+def update_linstor_port(port, open_ports):
+    fn = 'open' if open_ports else 'close'
     args = (
         FIREWALL_PORT_SCRIPT, fn, str(port), 'tcp'
     )
@@ -50,28 +71,251 @@ def update_port(port, open):
     raise Exception('Failed to {} port: {} {}'.format(fn, out, err))
 
 
-def update_all_ports(open):
-    for port in LINSTOR_PORTS:
-        update_port(port, open)
+def has_iptables_rule(rule):
+    (ret, stdout, stderr) = util.doexec(['iptables', '-C'] + rule)
+    return not ret
 
 
-def update_service(start):
-    fn = 'enable' if start else 'disable'
-    args = ('systemctl', fn, '--now', 'linstor-satellite')
-    (ret, out, err) = util.doexec(args)
-    if ret == 0:
+def update_drbd_ports(open_ports):
+    # We want to use a static rule regarding DRBD volumes,
+    # so we can't use the XAPI firewall port script, we have to manually
+    # check for existing rules before updating iptables service.
+    rule = ['INPUT', '-p', 'tcp', '--dport', DRBD_PORTS, '-j', 'ACCEPT']
+    if open_ports == has_iptables_rule(rule):
         return
-    raise Exception('Failed to {} satellite: {} {}'.format(fn, out, err))
+    if open_ports:
+        rule.insert(1, '1')
+        (ret, stdout, stderr) = util.doexec(['iptables', '-I'] + rule)
+        if ret:
+            raise Exception('Failed to add DRBD rule: {}'.format(stderr))
+    else:
+        (ret, stdout, stderr) = util.doexec(['iptables', '-D'] + rule)
+        if ret:
+            raise Exception('Failed to remove DRBD rule: {}'.format(stderr))
+    (ret, stdout, stderr) = util.doexec(['service', 'iptables', 'save'])
+    if ret:
+        raise Exception('Failed to save DRBD rule: {}'.format(stderr))
 
 
-def enable(session, args):
+def update_all_ports(open_ports):
+    for port in LINSTOR_PORTS:
+        update_linstor_port(port, open_ports)
+    update_drbd_ports(open_ports)
+
+
+def update_linstor_satellite_service(start):
+    service = 'linstor-satellite'
+
+    # Stop services in all cases first.
+    # Ensure we don't have an invalid cache used by a satellite.
+    # (We found an issue with a new added disk which used a volume group name
+    # formerly involved by another disk. To avoid this kind of problem, we
+    # always restart the satellite.)
+    util.enable_and_start_service(service, False)
+    if start:
+        util.enable_and_start_service(service, True)
+
+
+def update_drbd_reactor_service(start):
+    if start:
+        util.atomicFileWrite(DRBD_REACTOR_CONF, None, DRBD_REACTOR_CONF_CONTENT)
+    else:
+        try:
+            os.remove(DRBD_REACTOR_CONF)
+        except Exception:
+            pass
+
+        util.stop_service('drbd-reactor')
+
+        try:
+            util.stop_service('drbd-promote@xcp\x2dpersistent\x2ddatabase.service')
+        except Exception as e:
+            if str(e).rstrip().endswith(' not loaded.'):
+                pass
+            raise e
+
+        util.stop_service('linstor-controller')
+        util.stop_service('var-lib-linstor.service')
+
+        for dep in DRBD_REACTOR_DEPS:
+            try:
+                os.remove(dep)
+            except Exception:
+                pass
+
+    util.doexec(['systemctl', 'daemon-reload'])
+    util.enable_and_start_service('drbd-reactor', start)
+
+
+def exec_create_sr(session, name, description, disks, volume_group, redundancy, provisioning, force):
+    disk_hostnames = disks.keys()
+    thin = provisioning == 'thin'
+
+    # Create volumes.
+    hosts = session.xenapi.host.get_all_records()
+    hostnames = []
+    for host_ref, host_record in hosts.items():
+        hostname = host_record['hostname']
+        hostnames.append(hostname)
+
+        if force:
+            try:
+                session.xenapi.host.call_plugin(
+                    host_ref, LVM_PLUGIN, 'destroy_volume_group', {
+                        'vg_name': volume_group,
+                        'force': 'True'
+                    }
+                )
+            except Exception as e:
+                try:
+                    response = session.xenapi.host.call_plugin(
+                        host_ref, LVM_PLUGIN, 'list_volume_groups', {
+                            'vg_name': volume_group
+                        }
+                    )
+                    if response != '{}':
+                        raise e
+                except Exception:
+                    raise e
+
+        if hostname not in disk_hostnames or not disks[hostname]:
+            if force or session.xenapi.host.call_plugin(
+                host_ref, LVM_PLUGIN, 'list_volume_groups', {
+                    'vg_name': volume_group
+                }
+            ) == '{}':
+                continue
+            raise Exception('Volume group should not exist on `{}`, you must remove it manually'.format(hostname))
+
+        host_disks = disks[hostname]
+        if type(host_disks) is list:
+            host_disks = ','.join(disks[hostname])
+        else:
+            raise Exception('Disk value of `{}` must be a disk list'.format(hostname))
+
+        session.xenapi.host.call_plugin(
+            host_ref, LVM_PLUGIN, 'create_physical_volume', {
+                'devices': host_disks,
+                'force': str(force)
+            }
+        )
+
+        session.xenapi.host.call_plugin(
+            host_ref, LVM_PLUGIN, 'create_volume_group', {
+                'vg_name': volume_group,
+                'devices': host_disks
+            }
+        )
+
+        if thin:
+            session.xenapi.host.call_plugin(
+                host_ref, LVM_PLUGIN, 'create_thin_pool', {
+                    'vg_name': volume_group,
+                    'lv_name': THIN_POOL
+                }
+            )
+
+    # Create SR.
+    master_ref = session.xenapi.pool.get_all_records().values()[0]['master']
+
+    device_config = {
+        'redundancy': str(redundancy),
+        'provisioning': 'thin' if thin else 'thick',
+        'group-name': '{}/{}'.format(volume_group, THIN_POOL) if thin else volume_group,
+        'hosts': ','.join(hostnames),
+        'monitor-db-quorum': str(len(hostnames) > 2)
+    }
+    sr_ref = session.xenapi.SR.create(
+        master_ref, device_config, '0', name, description, 'linstor', '', True, {}
+    )
+    return session.xenapi.SR.get_uuid(sr_ref)
+
+
+def get_drbd_volumes(volume_group=None):
+    drbd_volumes = {}
+    (ret, stdout, stderr) = util.doexec(['drbdsetup', 'show', '--json'])
+    if ret:
+        raise Exception('Failed to get JSON object: {}'.format(stderr))
+
+    config = json.loads(stdout)
+    for resource in config:
+        for volume in resource['_this_host']['volumes']:
+            backing_disk = volume['backing-disk']
+            match = BACKING_DISK_RE.match(backing_disk)
+            if not match:
+                continue
+
+            cur_volume_group = match.groups()[0]
+            if volume_group and cur_volume_group != volume_group:
+                continue
+
+            minor = int(volume['device_minor'])
+            if cur_volume_group in drbd_volumes:
+                drbd_volumes[cur_volume_group].append(minor)
+            else:
+                drbd_volumes[cur_volume_group] = [minor]
+    return drbd_volumes
+
+
+def force_destroy_drbd_volume(minor):
+    (ret, stdout, stderr) = util.doexec(['drbdsetup', 'detach', minor, '--force'])
+    if ret:
+        raise Exception('Failed to detach volume: {}'.format(stderr))
+    (ret, stdout, stderr) = util.doexec(['drbdsetup', 'del-minor', minor])
+    if ret:
+        raise Exception('Failed to destroy volume: {}'.format(stderr))
+
+
+def get_ip_addr_of_pif(session, pif_uuid):
+    pif_ref = session.xenapi.PIF.get_by_uuid(pif_uuid)
+    pif = session.xenapi.PIF.get_record(pif_ref)
+
+    if not pif['currently_attached']:
+        raise XenAPIPlugin.Failure('-1', ['PIF is not plugged'])
+
+    ip_addr = pif['IP'] if pif['primary_address_type'].lower() == 'ipv4' else pif['IPv6'].split('/')[0]
+    if ip_addr == '':
+        raise XenAPIPlugin.Failure('-1', ['PIF has no IP'])
+    return ip_addr
+
+# ------------------------------------------------------------------------------
+
+
+def prepare_sr(session, args):
     try:
-        enabled = distutils.util.strtobool(args['enabled'])
-        update_all_ports(open=enabled)
-        update_service(start=enabled)
+        LinstorSR.activate_lvm_group(args['groupName'])
+
+        update_all_ports(open_ports=True)
+        # We don't want to enable and start drbd-reactor daemon during
+        # SR creation.
+        update_drbd_reactor_service(start=False)
+        update_linstor_satellite_service(start=True)
         return str(True)
     except Exception as e:
-        util.SMlog('linstor-manager:disable error: {}'.format(e))
+        util.SMlog('linstor-manager:prepare_sr error: {}'.format(e))
+    return str(False)
+
+
+def release_sr(session, args):
+    try:
+        update_linstor_satellite_service(start=False)
+        update_drbd_reactor_service(start=False)
+        update_all_ports(open_ports=False)
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:release_sr error: {}'.format(e))
+    return str(False)
+
+
+def update_drbd_reactor(session, args):
+    try:
+        enabled = distutils.util.strtobool(args['enabled'])
+        update_drbd_reactor_service(start=enabled)
+        return str(True)
+    except Exception as e:
+        util.SMlog(
+            'linstor-manager:update_drbd_reactor error: {}'.format(e)
+        )
     return str(False)
 
 
@@ -81,12 +325,12 @@ def attach(session, args):
         vdi_uuid = args['vdiUuid']
         group_name = args['groupName']
 
-        linstor_uri = get_linstor_uri(session)
+        controller_uri = get_controller_uri()
         journaler = LinstorJournaler(
-            linstor_uri, group_name, logger=util.SMlog
+            controller_uri, group_name, logger=util.SMlog
         )
         linstor = LinstorVolumeManager(
-            linstor_uri,
+            controller_uri,
             group_name,
             logger=util.SMlog
         )
@@ -104,7 +348,7 @@ def detach(session, args):
         group_name = args['groupName']
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -115,10 +359,37 @@ def detach(session, args):
     return str(False)
 
 
+def destroy(session, args):
+    try:
+        group_name = args['groupName']
+
+        # When destroy is called, there are no running drbd-reactor daemons.
+        # So the controllers are stopped too, we must start an instance.
+        util.restart_service('var-lib-linstor.service')
+        util.restart_service('linstor-controller')
+
+        linstor = LinstorVolumeManager(
+            'linstor://localhost',
+            group_name,
+            logger=util.SMlog
+        )
+        linstor.destroy()
+        return str(True)
+    except Exception as e:
+        util.stop_service('linstor-controller')
+        util.stop_service('var-lib-linstor.service')
+        util.SMlog('linstor-manager:destroy error: {}'.format(e))
+    return str(False)
+
+
 def check(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.check(device_path))
+        ignore_missing_footer = distutils.util.strtobool(
+            args['ignoreMissingFooter']
+        )
+        fast = distutils.util.strtobool(args['fast'])
+        return str(vhdutil.check(device_path, ignore_missing_footer, fast))
     except Exception as e:
         util.SMlog('linstor-manager:check error: {}'.format(e))
         raise
@@ -131,7 +402,7 @@ def get_vhd_info(session, args):
         include_parent = distutils.util.strtobool(args['includeParent'])
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -143,7 +414,7 @@ def get_vhd_info(session, args):
             )
 
         vhd_info = vhdutil.getVHDInfo(
-            device_path, extract_uuid, include_parent
+            device_path, extract_uuid, include_parent, False
         )
         return json.dumps(vhd_info.__dict__)
     except Exception as e:
@@ -166,7 +437,7 @@ def get_parent(session, args):
         group_name = args['groupName']
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -201,6 +472,15 @@ def get_size_phys(session, args):
         raise
 
 
+def get_allocated_size(session, args):
+    try:
+        device_path = args['devicePath']
+        return str(vhdutil.getAllocatedSize(device_path))
+    except Exception as e:
+        util.SMlog('linstor-manager:get_allocated_size error: {}'.format(e))
+        raise
+
+
 def get_depth(session, args):
     try:
         device_path = args['devicePath']
@@ -228,6 +508,68 @@ def get_block_bitmap(session, args):
         raise
 
 
+def get_drbd_size(session, args):
+    try:
+        device_path = args['devicePath']
+        (ret, stdout, stderr) = util.doexec(['blockdev', '--getsize64', device_path])
+        if ret == 0:
+            return stdout.strip()
+        raise Exception('Failed to get DRBD size: {}'.format(stderr))
+    except Exception:
+        util.SMlog('linstor-manager:get_drbd_size error: {}'.format(stderr))
+        raise
+
+
+def set_parent(session, args):
+    try:
+        device_path = args['devicePath']
+        parent_path = args['parentPath']
+        vhdutil.setParent(device_path, parent_path, False)
+        return ''
+    except Exception as e:
+        util.SMlog('linstor-manager:set_parent error: {}'.format(e))
+        raise
+
+
+def coalesce(session, args):
+    try:
+        device_path = args['devicePath']
+        return str(vhdutil.coalesce(device_path))
+    except Exception as e:
+        util.SMlog('linstor-manager:coalesce error: {}'.format(e))
+        raise
+
+
+def repair(session, args):
+    try:
+        device_path = args['devicePath']
+        vhdutil.repair(device_path)
+        return ''
+    except Exception as e:
+        util.SMlog('linstor-manager:repair error: {}'.format(e))
+        raise
+
+
+def deflate(session, args):
+    try:
+        device_path = args['devicePath']
+        new_size = int(args['newSize'])
+        old_size = int(args['oldSize'])
+        zeroize = distutils.util.strtobool(args['zeroize'])
+        group_name = args['groupName']
+
+        linstor = LinstorVolumeManager(
+            get_controller_uri(),
+            group_name,
+            logger=util.SMlog
+        )
+        LinstorVhdUtil(session, linstor).deflate(device_path, new_size, old_size, zeroize)
+        return ''
+    except Exception as e:
+        util.SMlog('linstor-manager:deflate error: {}'.format(e))
+        raise
+
+
 def lock_vdi(session, args):
     lock = None
     try:
@@ -236,10 +578,13 @@ def lock_vdi(session, args):
         group_name = args['groupName']
         locked = distutils.util.strtobool(args['locked'])
 
+        # We must lock to mark the VDI.
         lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
+        if locked:
+            lock.acquire()
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -249,24 +594,552 @@ def lock_vdi(session, args):
     except Exception as e:
         util.SMlog('linstor-manager:lock_vdi error: {}'.format(e))
     finally:
-        if lock:
+        if locked and lock:
             lock.release()
     return str(False)
 
 
+def has_controller_running(session, args):
+    (ret, stdout, stderr) = util.doexec([
+        'systemctl', 'is-active', '--quiet', 'linstor-controller'
+    ])
+    return str(ret == 0)
+
+
+def add_host(session, args):
+    group_name = args['groupName']
+
+    # 1. Find all LINSTOR SRs and PBDs.
+    srs = dict()
+    for sr_ref, sr in session.xenapi.SR.get_all_records().items():
+        if sr.get('type') == 'linstor':
+            srs[sr_ref] = sr
+
+    pbds = dict()
+    for pbd_ref, pbd in session.xenapi.PBD.get_all_records().items():
+        device_config = pbd.get('device_config')
+        if (
+            device_config and
+            device_config.get('group-name') == group_name
+            and pbd['SR'] in srs
+        ):
+            pbds[pbd_ref] = pbd
+
+    # 2. Ensure there is at least one PBD and all PBDs are used in
+    # the same SR.
+    if not pbds:
+        raise Exception(
+            'Failed to find PBDs of group `{}`'.format(group_name)
+        )
+
+    sr_ref = None
+    for pbd in pbds.values():
+        if not sr_ref:
+            sr_ref = pbd['SR']
+        elif pbd['SR'] != sr_ref:
+            raise Exception(
+                'Group `{}` is used by many SRs!'.format(group_name)
+            )
+
+    # 3. Ensure node doesn't exist.
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+
+    node_name = socket.gethostname()
+    has_node = linstor.has_node(node_name)
+
+    new_pbd_ref = None
+
+    try:
+        # 4. Enable services.
+        update_all_ports(open_ports=True)
+        update_drbd_reactor_service(start=True)
+        update_linstor_satellite_service(start=True)
+
+        # 5. Try to create local node.
+        if not has_node:
+            linstor.create_node(node_name, util.get_this_host_address(session))
+
+        # 6. Try to create PBD.
+        this_host = util.get_this_host_ref(session)
+        create_new_pbd = True
+
+        assert pbds
+        for pbd in pbds.values():
+            if pbd['host'] == this_host:
+                create_new_pbd = False
+                break
+
+            device_config = pbd['device_config']
+            # Should be the same on all hosts.
+            provisioning = device_config['provisioning']
+
+        # 7. Create new PBD.
+        if create_new_pbd:
+            new_pbd_ref = session.xenapi.PBD.create({
+                'host': this_host,
+                'SR': sr_ref,
+                'device_config': {
+                    'group-name': group_name,
+                    'redundancy': linstor.redundancy,
+                    'provisioning': provisioning
+                }
+            })
+            try:
+                session.xenapi.PBD.plug(new_pbd_ref)
+            except Exception as e:
+                util.SMlog('Failed to plug new PBD: {}'.format(e))
+
+        return str(True)
+    except Exception as e:
+        stop_services = not has_node
+        if stop_services:
+            try:
+                linstor.destroy_node(node_name)
+            except Exception:
+                pass
+
+        if new_pbd_ref:
+            try:
+                session.xenapi.PBD.unplug(new_pbd_ref)
+            except Exception:
+                pass
+
+            try:
+                session.xenapi.PBD.destroy(new_pbd_ref)
+            except Exception:
+                pass
+
+        try:
+            # If we failed to remove the node, we don't stop services.
+            if stop_services and not linstor.has_node(node_name):
+                update_linstor_satellite_service(start=False)
+                update_drbd_reactor_service(start=False)
+                update_all_ports(open_ports=False)
+        except Exception:
+            pass
+
+        raise e
+
+
+def remove_host(session, args):
+    group_name = args['groupName']
+
+    # 1. Find all LINSTOR SRs and PBDs.
+    srs = dict()
+    for sr_ref, sr in session.xenapi.SR.get_all_records().items():
+        if sr.get('type') == 'linstor':
+            srs[sr_ref] = sr
+
+    pbds = dict()
+    for pbd_ref, pbd in session.xenapi.PBD.get_all_records().items():
+        device_config = pbd.get('device_config')
+        if (
+            device_config and
+            device_config.get('group-name') == group_name
+            and pbd['SR'] in srs
+        ):
+            pbds[pbd_ref] = pbd
+
+    # 2. Remove node.
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+
+    node_name = socket.gethostname()
+    if linstor.has_node(node_name):
+        linstor.destroy_node(node_name)
+        if linstor.has_node(node_name):
+            raise Exception('Failed to remove node! Unknown error.')
+
+    this_host = util.get_this_host_ref(session)
+
+    # 3. Remove PBD.
+    for pbd_ref, pbd in pbds.items():
+        host = pbd['host']
+        if host == this_host:
+            if pbd['currently_attached']:
+                session.xenapi.PBD.unplug(pbd_ref)
+            session.xenapi.PBD.destroy(pbd_ref)
+            break
+
+    # 3. Stop services.
+    try:
+        update_linstor_satellite_service(start=False)
+        update_drbd_reactor_service(start=False)
+        update_all_ports(open_ports=False)
+    except Exception as e:
+        util.SMlog('Error while stopping services: {}'.format(e))
+        pass
+
+    return str('True')
+
+
+def create_sr(session, args):
+    try:
+        # Use a complex parsing contrary to the other functions because
+        # this helper is a public method and is not easy to use.
+        name = args.get('name')
+        if not name:
+            raise Exception('`name` is empty')
+
+        description = args.get('description') or ''
+
+        disks = args.get('disks')
+        if not disks:
+            raise Exception('`disks` is empty')
+        try:
+            disks = json.loads(disks)
+        except Exception as e:
+            raise Exception('failed to decode `disks`: {}'.format(e))
+        if type(disks) is not dict:
+            raise Exception('`disks` must be a JSON object')
+
+        volume_group = args.get('volume_group')
+        if not volume_group:
+            raise Exception('`volume_group` is empty')
+
+        redundancy = args.get('redundancy')
+        if not redundancy:
+            raise Exception('`redundancy` is empty')
+
+        try:
+            redundancy = int(redundancy)
+        except Exception:
+            raise Exception('`redundancy` is not a number')
+
+        provisioning = args.get('provisioning')
+        if not provisioning:
+            provisioning = 'thin'
+        elif provisioning != 'thin' and provisioning != 'thick':
+            raise Exception('unsupported provisioning')
+
+        force = distutils.util.strtobool(args.get('force') or '0')
+
+        return exec_create_sr(
+            session, name, description, disks, volume_group, redundancy, provisioning, force
+        )
+    except Exception as e:
+        util.SMlog('linstor-manager:create_sr error: {}'.format(e))
+        raise
+
+
+def demote_drbd_resource(session, args):
+    try:
+        resource_name = args['resource_name']
+        (ret, stdout, stderr) = util.doexec(['drbdsetup', 'secondary', resource_name])
+        if ret:
+            raise Exception('Failed to demote resource: {}'.format(stderr))
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:demote_drbd_resource error: {}'.format(e))
+    return str(False)
+
+
+def list_drbd_volumes(session, args):
+    try:
+        volume_group = args.get('volume_group')
+        return json.dumps(get_drbd_volumes(volume_group))
+    except Exception as e:
+        util.SMlog('linstor-manager:list_drbd_volumes error: {}'.format(e))
+        raise
+
+
+def destroy_drbd_volume(session, args):
+    try:
+        minor = args.get('minor')
+        if not minor:
+            raise Exception('Cannot destroy DRBD volume without minor.')
+        force_destroy_drbd_volume(minor)
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:destroy_drbd_volume error: {}'.format(e))
+    return str(False)
+
+
+def destroy_drbd_volumes(session, args):
+    try:
+        volume_group = args.get('volume_group')
+        if not volume_group:
+            raise Exception('Cannot destroy DRBD volumes without volume group.')
+        for minor in get_drbd_volumes(volume_group).get(volume_group, []):
+            force_destroy_drbd_volume(str(minor))
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:destroy_drbd_volumes error: {}'.format(e))
+    return str(False)
+
+
+def get_drbd_openers(session, args):
+    try:
+        resource_name = args.get('resourceName')
+        volume = args.get('volume')
+        return get_local_volume_openers(resource_name, volume)
+    except Exception as e:
+        util.SMlog('linstor-manager:get_drbd_openers error: {}'.format(e))
+        raise
+
+
+def health_check(session, args):
+    group_name = args['groupName']
+
+    result = {
+       'controller-uri': '',
+       'nodes': {},
+       'storage-pools': {},
+       'warnings': [],
+       'errors': []
+    }
+
+    def format_result():
+        return json.dumps(result)
+
+    # 1. Get controller.
+    try:
+        controller_uri = get_controller_uri()
+
+        result['controller-uri'] = controller_uri
+        try:
+            if controller_uri == 'linstor://localhost':
+                # Replace `localhost` with IP to give a better info for users.
+                result['controller-uri'] = 'linstor://' + util.get_this_host_address(session)
+        except Exception:
+            # Ignore error: can be a XAPI restart or something else.
+            pass
+
+        linstor = LinstorVolumeManager(
+            controller_uri,
+            group_name,
+            logger=util.SMlog
+        )
+    except Exception as e:
+        # Probably a network issue, or offline controller.
+        result['errors'].append('Cannot join SR: `{}`.'.format(e))
+        return format_result()
+
+    try:
+        # 2. Check node statuses.
+        nodes = linstor.get_nodes_info()
+        result['nodes'] = nodes
+        for node_name, status in nodes.items():
+            if status != 'ONLINE':
+                result['warnings'].append('Node `{}` is {}.'.format(node_name, status))
+
+        # 3. Check storage pool statuses.
+        storage_pools_per_node = linstor.get_storage_pools_info()
+        result['storage-pools'] = storage_pools_per_node
+        for node_name, storage_pools in storage_pools_per_node.items():
+            for storage_pool in storage_pools:
+                free_size = storage_pool['free-size']
+                capacity = storage_pool['capacity']
+                if free_size < 0 or capacity <= 0:
+                    result['errors'].append(
+                        'Cannot get free size and/or capacity of storage pool `{}`.'
+                        .format(storage_pool['uuid'])
+                    )
+                elif free_size > capacity:
+                    result['errors'].append(
+                        'Free size of storage pool `{}` is greater than capacity.'
+                        .format(storage_pool['uuid'])
+                    )
+                else:
+                    remaining_percent = free_size / float(capacity) * 100.0
+                    threshold = 10.0
+                    if remaining_percent < threshold:
+                        result['warnings'].append(
+                            'Remaining size of storage pool `{}` is below {}% of its capacity.'
+                            .format(storage_pool['uuid'], threshold)
+                        )
+
+        # 4. Check resource statuses.
+        all_resources = linstor.get_resources_info()
+        result['resources'] = all_resources
+
+        for resource_name, resource_by_node in all_resources.items():
+            for node_name, resource in resource_by_node.items():
+                for volume_index, volume in enumerate(resource['volumes']):
+                    disk_state = volume['disk-state']
+                    if disk_state in ['UpToDate', 'Created', 'Attached']:
+                        continue
+                    if disk_state == 'DUnknown':
+                        result['warnings'].append(
+                            'Unknown state for volume `{}` at index {} for resource `{}` on node `{}`'
+                            .format(volume['device-path'], volume_index, resource_name, node_name)
+                        )
+                        continue
+                    if disk_state in ['Inconsistent', 'Failed', 'To: Creating', 'To: Attachable', 'To: Attaching']:
+                        result['errors'].append(
+                            'Invalid state `{}` for volume `{}` at index {} for resource `{}` on node `{}`'
+                            .format(disk_state, volume['device-path'], volume_index, resource_name, node_name)
+                        )
+                        continue
+                    if disk_state == 'Diskless':
+                        if resource['diskful']:
+                            result['errors'].append(
+                                'Unintentional diskless state detected for volume `{}` at index {} for resource `{}` on node `{}`'
+                                .format(volume['device-path'], volume_index, resource_name, node_name)
+                            )
+                        elif resource['tie-breaker']:
+                            volume['disk-state'] = 'TieBreaker'
+                        continue
+                    result['warnings'].append(
+                        'Unhandled state `{}` for volume `{}` at index {} for resource `{}` on node `{}`'
+                        .format(disk_state, volume['device-path'], volume_index, resource_name, node_name)
+                    )
+
+    except Exception as e:
+        result['errors'].append('Unexpected error: `{}`'.format(e))
+
+    return format_result()
+
+
+def create_node_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+    name = args['name']
+    pif_uuid = args['pifUuid']
+
+    ip_addr = get_ip_addr_of_pif(session, pif_uuid)
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        linstor.create_node_interface(hostname, name, ip_addr)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(True)
+
+
+def destroy_node_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+    name = args['name']
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        linstor.destroy_node_interface(hostname, name)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(True)
+
+
+def modify_node_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+    name = args['name']
+    pif_uuid = args['pifUuid']
+
+    ip_addr = get_ip_addr_of_pif(session, pif_uuid)
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        linstor.modify_node_interface(hostname, name, ip_addr)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(True)
+
+
+def list_node_interfaces(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        return json.dumps(linstor.list_node_interfaces(hostname))
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+
+
+def set_node_preferred_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+    name = args['name']
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        linstor.set_node_preferred_interface(hostname, name)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(True)
+
+
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
-        'enable': enable,
+        'prepareSr': prepare_sr,
+        'releaseSr': release_sr,
+        'updateDrbdReactor': update_drbd_reactor,
         'attach': attach,
         'detach': detach,
+        'destroy': destroy,
+
+        # vhdutil wrappers called by linstorvhdutil.
+        # Note: When a VHD is open in RO mode (so for all vhdutil getters),
+        # the LVM layer is used directly to bypass DRBD verifications.
+        # In this case there can't be EROFS errors.
+        # Note 2: We assume linstorvhdutil executes remote calls on diskful
+        # DRBDs, otherwise we still have EROFS errors...
         'check': check,
         'getVHDInfo': get_vhd_info,
         'hasParent': has_parent,
         'getParent': get_parent,
         'getSizeVirt': get_size_virt,
         'getSizePhys': get_size_phys,
+        'getAllocatedSize': get_allocated_size,
         'getDepth': get_depth,
         'getKeyHash': get_key_hash,
         'getBlockBitmap': get_block_bitmap,
-        'lockVdi': lock_vdi
+
+        # Small helper to get the DRBD blockdev size.
+        'getDrbdSize': get_drbd_size,
+
+        # Called by cleanup.py to coalesce when a primary
+        # is opened on a non-local host.
+        'setParent': set_parent,
+        'coalesce': coalesce,
+        'repair': repair,
+
+        # Misc writters.
+        'deflate': deflate,
+
+        'lockVdi': lock_vdi,
+        'hasControllerRunning': has_controller_running,
+        'addHost': add_host,
+        'removeHost': remove_host,
+        'createSr': create_sr,
+        'listDrbdVolumes': list_drbd_volumes,
+        'demoteDrbdResource': demote_drbd_resource,
+        'destroyDrbdVolume': destroy_drbd_volume,
+        'destroyDrbdVolumes': destroy_drbd_volumes,
+        'getDrbdOpeners': get_drbd_openers,
+        'healthCheck': health_check,
+
+        'createNodeInterface': create_node_interface,
+        'destroyNodeInterface': destroy_node_interface,
+        'modifyNodeInterface': modify_node_interface,
+        'listNodeInterfaces': list_node_interfaces,
+        'setNodePreferredInterface': set_node_preferred_interface
     })

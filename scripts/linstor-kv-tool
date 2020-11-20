@@ -1,0 +1,84 @@
+#!/usr/bin/env python
+#
+# Copyright (C) 2022  Vates SAS
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+import sys
+sys.path[0] = '/opt/xensource/sm/'
+
+from linstorvolumemanager import get_controller_uri
+
+import argparse
+import json
+import linstor
+
+
+def dump_kv(controller_uri, group_name, namespace):
+    kv = linstor.KV(
+        group_name,
+        uri=controller_uri,
+        namespace=namespace
+    )
+    print(json.dumps(kv, sort_keys=True, indent=2))
+
+
+def remove_volume(controller_uri, group_name, vdi_name):
+    assert vdi_name
+    kv = linstor.KV(
+        group_name,
+        uri=controller_uri,
+        namespace='/xcp/volume/{}'.format(vdi_name)
+    )
+
+    for key, value in list(kv.items()):
+        del kv[key]
+
+
+def remove_all_volumes(controller_uri, group_name):
+    kv = linstor.KV(
+        group_name,
+        uri=controller_uri,
+        namespace='/'
+    )
+
+    for key, value in list(kv.items()):
+        if key.startswith('xcp/volume/') or key.startswith('xcp/sr/journal/'):
+            size = key.rindex('/')
+            kv.namespace = key[:size]
+            del kv[key[size + 1:]]
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-u', '--uri', required=False)
+    parser.add_argument('-g', '--group-name', required=True)
+    parser.add_argument('-n', '--namespace', default='/')
+
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument('--dump-volumes', action='store_true')
+    action.add_argument('--remove-volume', metavar='VDI_UUID')
+    action.add_argument('--remove-all-volumes', action='store_true')
+
+    args = parser.parse_args()
+    controller_uri = get_controller_uri() if args.uri is None else args.uri
+
+    if args.dump_volumes:
+        dump_kv(controller_uri, args.group_name, args.namespace)
+    elif args.remove_volume:
+        remove_volume(controller_uri, args.group_name, args.remove_volume)
+    elif args.remove_all_volumes:
+        remove_all_volumes(controller_uri, args.group_name)
+
+
+if __name__ == '__main__':
+    main()
