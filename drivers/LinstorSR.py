@@ -388,10 +388,16 @@ class LinstorSR(SR.SR):
 
             try:
                 # Try to open SR if exists.
+                # We can repair only if we are on the master AND if
+                # we are trying to execute an exclusive operation.
+                # Otherwise we could try to delete a VDI being created or
+                # during a snapshot. An exclusive op is the guarantee that the
+                # SR is locked.
                 self._linstor = LinstorVolumeManager(
                     self._master_uri,
                     self._group_name,
-                    repair=self._is_master,
+                    repair=self._is_master and
+                            self.srcmd.cmd in self.ops_exclusive,
                     logger=util.SMlog
                 )
                 self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
