@@ -89,13 +89,33 @@ def linstorhostcall(local_method, remote_method):
     return decorated
 
 
+def linstormodifier():
+    def decorated(func):
+        def wrapper(*args, **kwargs):
+            self = args[0]
+
+            ret = func(*args, **kwargs)
+            self._linstor.invalidate_resource_cache()
+            return ret
+        return wrapper
+    return decorated
+
+
 class LinstorVhdUtil:
     def __init__(self, session, linstor):
         self._session = session
         self._linstor = linstor
 
+    # --------------------------------------------------------------------------
+    # Getters.
+    # --------------------------------------------------------------------------
+
+    def check(self, vdi_uuid, ignore_missing_footer=False, fast=False):
+        kwargs = {'ignoreMissingFooter': ignore_missing_footer, 'fast': fast}
+        return self._check(vdi_uuid, **kwargs)
+
     @linstorhostcall(vhdutil.check, 'check')
-    def check(self, vdi_uuid, **kwargs):
+    def _check(self, vdi_uuid, **kwargs):
         return distutils.util.strtobool(kwargs['response'])
 
     def get_vhd_info(self, vdi_uuid, include_parent=True):
@@ -147,6 +167,42 @@ class LinstorVhdUtil:
     @linstorhostcall(vhdutil.getBlockBitmap, 'getBlockBitmap')
     def get_block_bitmap(self, vdi_uuid, **kwargs):
         return base64.b64decode(kwargs['response'])
+
+    # --------------------------------------------------------------------------
+    # Setters.
+    # --------------------------------------------------------------------------
+
+    @linstormodifier()
+    def create(self, path, size, static, msize=0):
+        return vhdutil.create(path, size, static, msize)
+
+    @linstormodifier()
+    def set_size_virt_fast(self, path, size):
+        return vhdutil.setSizeVirtFast(path, size)
+
+    @linstormodifier()
+    def set_size_phys(self, path, size, debug=True):
+        return vhdutil.setSizePhys(path, size, debug)
+
+    @linstormodifier()
+    def set_parent(self, path, parentPath, parentRaw):
+        return vhdutil.setParent(path, parentPath, parentRaw)
+
+    @linstormodifier()
+    def set_hidden(self, path, hidden=True):
+        return vhdutil.setHidden(path, hidden)
+
+    @linstormodifier()
+    def set_key(self, path, key_hash):
+        return vhdutil.setKey(path, key_hash)
+
+    @linstormodifier()
+    def kill_data(self, path):
+        return vhdutil.killData(path)
+
+    @linstormodifier()
+    def snapshot(self, path, parent, parentRaw, msize=0, checkEmpty=True):
+        return vhdutil.snapshot(path, parent, parentRaw, msize, checkEmpty)
 
     # --------------------------------------------------------------------------
     # Helpers.
