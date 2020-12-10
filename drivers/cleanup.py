@@ -449,7 +449,7 @@ class XAPI:
 #
 #  VDI
 #
-class VDI:
+class VDI(object):
     """Object representing a VDI of a VHD-based SR"""
 
     POLL_INTERVAL = 1
@@ -1425,17 +1425,15 @@ class LinstorVDI(VDI):
             self.sr.unlock()
         VDI.delete(self)
 
-    def pauseVDIs(self, vdiList):
-        self.sr._linstor.ensure_volume_list_is_not_locked(
-            vdiList, timeout=self.VOLUME_LOCK_TIMEOUT
-        )
-        return super(VDI).pauseVDIs(vdiList)
+    def validate(self, fast=False):
+        if not self.sr._vhdutil.check(self.uuid, fast=fast):
+            raise util.SMException('VHD {} corrupted'.format(self))
 
-    def _liveLeafCoalesce(self, vdi):
+    def pause(self, failfast=False):
         self.sr._linstor.ensure_volume_is_not_locked(
-            vdi.uuid, timeout=self.VOLUME_LOCK_TIMEOUT
+            self.uuid, timeout=self.VOLUME_LOCK_TIMEOUT
         )
-        return super(VDI)._liveLeafCoalesce(vdi)
+        return super(LinstorVDI, self).pause(failfast)
 
     def _relinkSkip(self):
         abortFlag = IPCFlag(self.sr.uuid)
@@ -1479,7 +1477,7 @@ class LinstorVDI(VDI):
 #
 # SR
 #
-class SR:
+class SR(object):
     class LogFilter:
         def __init__(self, sr):
             self.sr = sr
@@ -2893,6 +2891,12 @@ class LinstorSR(SR):
         self.logFilter.logState()
         self._handleInterruptedCoalesceLeaf()
 
+    def pauseVDIs(self, vdiList):
+        self._linstor.ensure_volume_list_is_not_locked(
+            vdiList, timeout=LinstorVDI.VOLUME_LOCK_TIMEOUT
+        )
+        return super(LinstorSR, self).pauseVDIs(vdiList)
+
     def _reloadLinstor(self):
         session = self.xapi.session
         host_ref = util.get_this_host_ref(session)
@@ -2943,8 +2947,8 @@ class LinstorSR(SR):
 
         # TODO: Ensure metadata contains the right info.
 
-        all_volume_info = self._linstor.volumes_with_info
-        volumes_metadata = self._linstor.volumes_with_metadata
+        all_volume_info = self._linstor.get_volumes_with_info()
+        volumes_metadata = self._linstor.get_volumes_with_metadata()
         for vdi_uuid, volume_info in all_volume_info.items():
             try:
                 if not volume_info.name and \
@@ -2975,8 +2979,10 @@ class LinstorSR(SR):
         virtual_size = LinstorVolumeManager.round_up_volume_size(
             parent.sizeVirt + meta_overhead + bitmap_overhead
         )
-        # TODO: Check result.
-        return virtual_size - self._linstor.get_volume_size(parent.uuid)
+        volume_size = self._linstor.get_volume_size(parent.uuid)
+
+        assert virtual_size >= volume_size
+        return virtual_size - volume_size
 
     def _hasValidDevicePath(self, uuid):
         try:
@@ -2985,6 +2991,16 @@ class LinstorSR(SR):
             # TODO: Maybe log exception.
             return False
         return True
+
+    def _liveLeafCoalesce(self, vdi):
+        self.lock()
+        try:
+            self._linstor.ensure_volume_is_not_locked(
+                vdi.uuid, timeout=LinstorVDI.VOLUME_LOCK_TIMEOUT
+            )
+            return super(LinstorSR, self)._liveLeafCoalesce(vdi)
+        finally:
+            self.unlock()
 
     def _handleInterruptedCoalesceLeaf(self):
         entries = self.journaler.get_all(VDI.JRN_LEAF)
@@ -3012,7 +3028,6 @@ class LinstorSR(SR):
                 'Renaming parent back: {} -> {}'.format(childUuid, parentUuid)
             )
             parent.rename(parentUuid)
-        util.fistpoint.activate('LVHDRT_coaleaf_undo_after_rename', self.uuid)
 
         child = self.getVDI(childUuid)
         if not child:
@@ -3028,9 +3043,6 @@ class LinstorSR(SR):
             Util.log('Updating the VDI record')
             child.setConfig(VDI.DB_VHD_PARENT, parentUuid)
             child.setConfig(VDI.DB_VDI_TYPE, vhdutil.VDI_TYPE_VHD)
-            util.fistpoint.activate(
-                'LVHDRT_coaleaf_undo_after_rename2', self.uuid
-            )
 
         # TODO: Maybe deflate here.
 
@@ -3039,10 +3051,7 @@ class LinstorSR(SR):
         if not parent.hidden:
             parent._setHidden(True)
         self._updateSlavesOnUndoLeafCoalesce(parent, child)
-        util.fistpoint.activate('LVHDRT_coaleaf_undo_end', self.uuid)
         Util.log('*** leaf-coalesce undo successful')
-        if util.fistpoint.is_active('LVHDRT_coaleaf_stop_after_recovery'):
-            child.setConfig(VDI.DB_LEAFCLSC, VDI.LEAFCLSC_DISABLED)
 
     def _finishInterruptedCoalesceLeaf(self, childUuid, parentUuid):
         Util.log('*** FINISH LEAF-COALESCE')
@@ -3055,7 +3064,6 @@ class LinstorSR(SR):
         except XenAPI.Failure:
             pass
         self._updateSlavesOnResize(vdi)
-        util.fistpoint.activate('LVHDRT_coaleaf_finish_end', self.uuid)
         Util.log('*** finished leaf-coalesce successfully')
 
     def _checkSlaves(self, vdi):

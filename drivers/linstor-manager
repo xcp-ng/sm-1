@@ -118,7 +118,9 @@ def detach(session, args):
 def check(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.check(device_path))
+        ignore_missing_footer = args['ignoreMissingFooter']
+        fast = args['fast']
+        return str(vhdutil.check(device_path, ignore_missing_footer, fast))
     except Exception as e:
         util.SMlog('linstor-manager:check error: {}'.format(e))
         raise
@@ -236,7 +238,10 @@ def lock_vdi(session, args):
         group_name = args['groupName']
         locked = distutils.util.strtobool(args['locked'])
 
+        # We must lock to mark the VDI.
         lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
+        if locked:
+            lock.acquire()
 
         linstor = LinstorVolumeManager(
             get_linstor_uri(session),
@@ -249,7 +254,7 @@ def lock_vdi(session, args):
     except Exception as e:
         util.SMlog('linstor-manager:lock_vdi error: {}'.format(e))
     finally:
-        if lock:
+        if locked and lock:
             lock.release()
     return str(False)
 
