@@ -325,6 +325,7 @@ class LinstorSR(SR.SR):
 
         self._initialized = False
 
+        self._vdis_loaded = False
         self._all_volume_info_cache = None
         self._all_volume_metadata_cache = None
 
@@ -463,19 +464,13 @@ class LinstorSR(SR.SR):
                         )
 
                         if load_vdis:
-                            # We use a cache to avoid repeated JSON parsing.
-                            # The performance gain is not big but we can still
-                            # enjoy it with a few lines.
-                            self._create_linstor_cache()
                             self._load_vdis()
-                            self._destroy_linstor_cache()
 
-                            self._undo_all_journal_transactions()
                         self._linstor.remove_resourceless_volumes()
 
                     self._synchronize_metadata()
                 except Exception as e:
-                    if self.cmd == 'sr_scan':
+                    if self.cmd == 'sr_scan' or self.cmd == 'sr_attach':
                         # Always raise, we don't want to remove VDIs
                         # from the XAPI database otherwise.
                         raise e
@@ -612,6 +607,9 @@ class LinstorSR(SR.SR):
                 opterr='no such volume group: {}'.format(self._group_name)
             )
 
+        # Note: `scan` can be called outside this module, so ensure the VDIs
+        # are loaded.
+        self._load_vdis()
         self._update_physical_size()
 
         for vdi_uuid in self.vdis.keys():
@@ -799,9 +797,22 @@ class LinstorSR(SR.SR):
     # --------------------------------------------------------------------------
 
     def _load_vdis(self):
-        if self.vdis:
+        if self._vdis_loaded:
             return
+        self._vdis_loaded = True
 
+        assert self._is_master
+
+        # We use a cache to avoid repeated JSON parsing.
+        # The performance gain is not big but we can still
+        # enjoy it with a few lines.
+        self._create_linstor_cache()
+        self._load_vdis_ex()
+        self._destroy_linstor_cache()
+
+        self._undo_all_journal_transactions()
+
+    def _load_vdis_ex(self):
         # 1. Get existing VDIs in XAPI.
         xenapi = self.session.xenapi
         xapi_vdi_uuids = set()
@@ -822,7 +833,8 @@ class LinstorSR(SR.SR):
 
         introduce = False
 
-        if self.cmd == 'sr_scan':
+        # Try to introduce VDIs only during scan/attach.
+        if self.cmd == 'sr_scan' or self.cmd == 'sr_attach':
             has_clone_entries = list(self._journaler.get_all(
                 LinstorJournaler.CLONE
             ).items())
