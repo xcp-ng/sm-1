@@ -770,27 +770,19 @@ class LinstorSR(SR.SR):
         # Update size attributes of the SR parent class.
         self.virtual_allocation = valloc + virt_alloc_delta
 
-        # Physical size contains the total physical size.
-        # i.e. the sum of the sizes of all devices on all hosts, not the AVG.
         self._update_physical_size()
 
         # Notify SR parent class.
         self._db_update()
 
     def _update_physical_size(self):
-        # Physical size contains the total physical size.
-        # i.e. the sum of the sizes of all devices on all hosts, not the AVG.
-        self.physical_size = self._linstor.physical_size
+        # We use the size of the smallest disk, this is an approximation that
+        # ensures the displayed physical size is reachable by the user.
+        self.physical_size = \
+            self._linstor.min_physical_size * len(self._hosts) / \
+            self._redundancy
 
-        # `self._linstor.physical_free_size` contains the total physical free
-        # memory. If Thin provisioning is used we can't use it, we must use
-        # LINSTOR volume size to gives a good idea of the required
-        # usable memory to the users.
-        self.physical_utilisation = self._linstor.total_allocated_volume_size
-
-        # If Thick provisioning is used, we can use this line instead:
-        # self.physical_utilisation = \
-        #     self.physical_size - self._linstor.physical_free_size
+        self.physical_utilisation = self._linstor.allocated_volume_size
 
     # --------------------------------------------------------------------------
     # VDIs.
@@ -912,10 +904,10 @@ class LinstorSR(SR.SR):
 
                 util.SMlog(
                     'Introducing VDI {} '.format(vdi_uuid) +
-                    ' (name={}, virtual_size={}, physical_size={})'.format(
+                    ' (name={}, virtual_size={}, allocated_size={})'.format(
                         name_label,
                         volume_info.virtual_size,
-                        volume_info.physical_size
+                        volume_info.allocated_size
                     )
                 )
 
@@ -933,7 +925,7 @@ class LinstorSR(SR.SR):
                     sm_config,
                     managed,
                     str(volume_info.virtual_size),
-                    str(volume_info.physical_size)
+                    str(volume_info.allocated_size)
                 )
 
                 is_a_snapshot = volume_metadata.get(IS_A_SNAPSHOT_TAG)
@@ -1016,7 +1008,7 @@ class LinstorSR(SR.SR):
                 else:
                     geneology[vdi.parent] = [vdi_uuid]
             if not vdi.hidden:
-                self.virtual_allocation += vdi.utilisation
+                self.virtual_allocation += vdi.size
 
         # 9. Remove all hidden leaf nodes to avoid introducing records that
         # will be GC'ed.
@@ -1453,11 +1445,11 @@ class LinstorVDI(VDI.VDI):
                         '{}'.format(e)
                     )
 
-        self.utilisation = volume_info.physical_size
+        self.utilisation = volume_info.allocated_size
         self.sm_config['vdi_type'] = self.vdi_type
 
         self.ref = self._db_introduce()
-        self.sr._update_stats(volume_info.virtual_size)
+        self.sr._update_stats(self.size)
 
         return VDI.VDI.get_params(self)
 
@@ -1496,7 +1488,7 @@ class LinstorVDI(VDI.VDI):
             del self.sr.vdis[self.uuid]
 
         # TODO: Check size after delete.
-        self.sr._update_stats(-self.capacity)
+        self.sr._update_stats(-self.size)
         self.sr._kick_gc()
         return super(LinstorVDI, self).delete(sr_uuid, vdi_uuid, data_only)
 
@@ -1622,7 +1614,7 @@ class LinstorVDI(VDI.VDI):
         space_needed = new_volume_size - old_volume_size
         self.sr._ensure_space_available(space_needed)
 
-        old_capacity = self.capacity
+        old_size = self.size
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
             self._linstor.resize(self.uuid, new_volume_size)
         else:
@@ -1641,7 +1633,7 @@ class LinstorVDI(VDI.VDI):
         self.session.xenapi.VDI.set_physical_utilisation(
             vdi_ref, str(self.utilisation)
         )
-        self.sr._update_stats(self.capacity - old_capacity)
+        self.sr._update_stats(self.size - old_size)
         return VDI.VDI.get_params(self)
 
     def clone(self, sr_uuid, vdi_uuid):
@@ -1756,13 +1748,13 @@ class LinstorVDI(VDI.VDI):
         if volume_info is None:
             volume_info = self._linstor.get_volume_info(self.uuid)
 
-        # Contains the physical size used on all disks.
+        # Contains the max physical size used on a disk.
         # When LINSTOR LVM driver is used, the size should be similar to
         # virtual size (i.e. the LINSTOR max volume size).
         # When LINSTOR Thin LVM driver is used, the used physical size should
         # be lower than virtual size at creation.
         # The physical size increases after each write in a new block.
-        self.utilisation = volume_info.physical_size
+        self.utilisation = volume_info.allocated_size
         self.capacity = volume_info.virtual_size
 
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
@@ -1958,7 +1950,7 @@ class LinstorVDI(VDI.VDI):
         volume_info = self._linstor.get_volume_info(snap_uuid)
 
         snap_vdi.size = self.sr._vhdutil.get_size_virt(snap_uuid)
-        snap_vdi.utilisation = volume_info.physical_size
+        snap_vdi.utilisation = volume_info.allocated_size
 
         # 6. Update sm config.
         snap_vdi.sm_config = {}
@@ -2156,7 +2148,7 @@ class LinstorVDI(VDI.VDI):
                     raise
 
             if snap_type != VDI.SNAPSHOT_INTERNAL:
-                self.sr._update_stats(self.capacity)
+                self.sr._update_stats(self.size)
 
             # 10. Return info on the new user-visible leaf VDI.
             ret_vdi = snap_vdi
