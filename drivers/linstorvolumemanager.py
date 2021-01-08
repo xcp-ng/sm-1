@@ -131,20 +131,19 @@ class LinstorVolumeManager(object):
     class VolumeInfo(object):
         __slots__ = (
             'name',
-            'physical_size',  # Total physical size used by this volume on
-                              # all disks.
+            'allocated_size',  # Allocated size, place count is not used.
             'virtual_size'    # Total virtual available size of this volume
                               # (i.e. the user size at creation).
         )
 
         def __init__(self, name):
             self.name = name
-            self.physical_size = 0
+            self.allocated_size = 0
             self.virtual_size = 0
 
         def __repr__(self):
             return 'VolumeInfo("{}", {}, {})'.format(
-                self.name, self.physical_size, self.virtual_size
+                self.name, self.allocated_size, self.virtual_size
             )
 
     # --------------------------------------------------------------------------
@@ -248,9 +247,31 @@ class LinstorVolumeManager(object):
         return self._compute_size('free_capacity')
 
     @property
-    def total_allocated_volume_size(self):
+    def min_physical_size(self):
         """
-        Give the sum of all created volumes.
+        Give the minimum physical size of the SR.
+        I.e. the size of the smallest disk.
+        :return: The physical min size.
+        :rtype: int
+        """
+        size = None
+        for pool in self._get_storage_pools(force=True):
+            space = pool.free_space
+            if space:
+                current_size = space.total_capacity
+                if current_size < 0:
+                    raise LinstorVolumeManagerError(
+                        'Failed to get pool total_capacity attr of `{}`'
+                        .format(pool.node_name)
+                    )
+                if size is None or current_size < size:
+                    size = current_size
+        return size * 1024
+
+    @property
+    def total_volume_size(self):
+        """
+        Give the sum of all created volumes. The place count is used.
         :return: The physical required size to use the volumes.
         :rtype: int
         """
@@ -267,6 +288,37 @@ class LinstorVolumeManager(object):
                            .format(resource.name, volume.storage_pool_name)
                         )
                     size += current_size
+        return size * 1024
+
+    @property
+    def allocated_volume_size(self):
+        """
+        Give the allocated size for all volumes. The place count is not
+        used here. When thick lvm is used, the size for one volume should
+        be equal to the virtual volume size. With thin lvm, the size is equal
+        or lower to the volume size.
+        :return: The allocated size of all volumes.
+        :rtype: int
+        """
+
+        size = 0
+        for resource in self._get_resource_cache().resources:
+            volume_size = None
+            for volume in resource.volumes:
+                # We ignore diskless pools of the form "DfltDisklessStorPool".
+                if volume.storage_pool_name == self._group_name:
+                    current_size = volume.allocated_size
+                    if current_size < 0:
+                        raise LinstorVolumeManagerError(
+                           'Failed to get allocated size of `{}` on `{}`'
+                           .format(resource.name, volume.storage_pool_name)
+                        )
+
+                    if volume_size is None or current_size > volume_size:
+                        volume_size = current_size
+            if volume_size is not None:
+                size += volume_size
+
         return size * 1024
 
     @property
@@ -1328,7 +1380,11 @@ class LinstorVolumeManager(object):
                            'Failed to get allocated size of `{}` on `{}`'
                            .format(resource.name, volume.storage_pool_name)
                         )
-                    current.physical_size += volume.allocated_size
+                    allocated_size = volume.allocated_size
+
+                    current.allocated_size = current.allocated_size and \
+                        max(current.allocated_size, allocated_size) or \
+                        allocated_size
 
                     if volume.usable_size < 0:
                         raise LinstorVolumeManagerError(
@@ -1341,7 +1397,7 @@ class LinstorVolumeManager(object):
                         min(current.virtual_size, virtual_size) or virtual_size
 
         for current in all_volume_info.values():
-            current.physical_size *= 1024
+            current.allocated_size *= 1024
             current.virtual_size *= 1024
 
         self._volume_info_cache_dirty = False
