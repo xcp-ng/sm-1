@@ -14,8 +14,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <poll.h>
 #include <stdio.h>
@@ -39,7 +41,8 @@
 #define POOL_CONF_ABS_FILE POOL_CONF_DIR "/" POOL_CONF_FILE
 
 // In milliseconds.
-#define POLL_TIMEOUT 2000
+#define UPDATE_LINSTOR_NODE_TIMEOUT 2000
+#define SR_SCAN_TIMEOUT 720000
 
 // -----------------------------------------------------------------------------
 
@@ -130,24 +133,120 @@ static inline int isMasterHost (int *error) {
 
 typedef struct {
   int inotifyFd;
+  struct timespec lastScanTime;
+  int isMaster;
   // TODO: Should be completed with at least a hostname field.
 } State;
 
 // -----------------------------------------------------------------------------
 
-static inline int execCommand (char *argv[]) {
+typedef struct {
+  char *data;
+  size_t size;
+  size_t capacity;
+} Buffer;
+
+#define max(a, b) ({ \
+  __typeof__(a) _a = (a); \
+  __typeof__(b) _b = (b); \
+  _a > _b ? _a : _b; \
+})
+
+static inline ssize_t readAll (int fd, Buffer *buffer) {
+  assert(buffer->capacity >= buffer->size);
+
+  ssize_t ret = 0;
+  do {
+    size_t byteCount = buffer->capacity - buffer->size;
+    if (byteCount < 16) {
+      const size_t newCapacity = max(buffer->capacity << 1, 64);
+      char *p = realloc(buffer->data, newCapacity);
+      if (!p)
+        return -errno;
+
+      buffer->data = p;
+      buffer->capacity = newCapacity;
+
+      byteCount = buffer->capacity - buffer->size;
+    }
+
+    ret = read(fd, buffer->data + buffer->size, byteCount);
+    if (ret > 0)
+      buffer->size += ret;
+    else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+      ret = 0;
+  } while (ret > 0);
+
+  return ret;
+}
+
+// -----------------------------------------------------------------------------
+
+static inline int execCommand (char *argv[], Buffer *buffer) {
+  int pipefd[2];
+  if (buffer) {
+    if (pipe(pipefd) < 0) {
+      syslog(LOG_ERR, "Failed to exec pipe: `%s`.", strerror(errno));
+      return -errno;
+    }
+
+    if (fcntl(pipefd[0], F_SETFL, O_NONBLOCK) < 0) {
+      syslog(LOG_ERR, "Failed to exec fcntl on pipe in: `%s`.", strerror(errno));
+      close(pipefd[0]);
+      close(pipefd[1]);
+      return -errno;
+    }
+  }
+
   const pid_t pid = fork();
-  if (pid < 0)
+  if (pid < 0) {
+    syslog(LOG_ERR, "Failed to fork: `%s`.", strerror(errno));
+    if (buffer) {
+      close(pipefd[0]);
+      close(pipefd[1]);
+    }
     return -errno;
+  }
 
   // Child process.
   if (pid == 0) {
+    if (buffer) {
+      close(STDOUT_FILENO);
+      dup(pipefd[1]);
+
+      close(pipefd[0]);
+      close(pipefd[1]);
+    }
+
     if (execvp(*argv, argv) < 0)
       syslog(LOG_ERR, "Failed to exec `%s` command.", *argv);
     exit(EXIT_FAILURE);
   }
 
   // Main process.
+  int ret = 0;
+  if (buffer) {
+    close(pipefd[1]);
+
+    do {
+      struct pollfd fds = { pipefd[0], POLLIN | POLLHUP, 0 };
+      const int res = poll(&fds, 1, 0);
+      if (res < 0) {
+        if (errno == EAGAIN)
+          continue;
+        syslog(LOG_ERR, "Failed to poll from command: `%s`.", strerror(errno));
+        ret = -errno;
+      } else if (res > 0) {
+        if (fds.revents & POLLIN)
+          ret = readAll(pipefd[0], buffer);
+        if (fds.revents & POLLHUP)
+          break; // Input has been closed.
+      }
+    } while (ret >= 0);
+
+    close(pipefd[0]);
+  }
+
   int status;
   if (waitpid(pid, &status, 0) < 0) {
     syslog(LOG_ERR, "Failed to wait command: `%s`.", *argv);
@@ -163,7 +262,7 @@ static inline int execCommand (char *argv[]) {
   } else if (WIFSIGNALED(status))
     syslog(LOG_ERR, "`%s` terminated by signal %d.", *argv, WTERMSIG(status));
 
-  return 0;
+  return ret;
 }
 
 // -----------------------------------------------------------------------------
@@ -188,12 +287,7 @@ static inline int addInotifyWatch (int inotifyFd, const char *filepath, uint32_t
 
 // -----------------------------------------------------------------------------
 
-static inline int updateLinstorServices () {
-  int error;
-  const int isMaster = isMasterHost(&error);
-  if (error)
-    return error;
-
+static inline int updateLinstorController (int isMaster) {
   syslog(LOG_INFO, "%s linstor-controller...", isMaster ? "Enabling" : "Disabling");
   char *argv[] = {
     "systemctl",
@@ -202,7 +296,7 @@ static inline int updateLinstorServices () {
     "linstor-controller",
     NULL
   };
-  return execCommand(argv);
+  return execCommand(argv, NULL);
 }
 
 static inline int updateLinstorNode (State *state) {
@@ -219,14 +313,53 @@ static inline int updateLinstorNode (State *state) {
 
 // -----------------------------------------------------------------------------
 
+#define UUID_PARAM "uuid="
+#define UUID_PARAM_LEN (sizeof(UUID_PARAM) - 1)
+#define UUID_LENGTH 36
+
+static inline void scanLinstorSr (const char *uuid) {
+  char uuidBuf[UUID_LENGTH + UUID_PARAM_LEN + 1] = UUID_PARAM;
+  strncpy(uuidBuf + UUID_PARAM_LEN, uuid, UUID_LENGTH);
+  uuidBuf[UUID_LENGTH + UUID_PARAM_LEN] = '\0';
+  execCommand((char *[]){ "xe", "sr-scan", uuidBuf, NULL }, NULL);
+}
+
+// Called to update the physical/virtual size used by LINSTOR SRs in XAPI DB.
+static inline int scanLinstorSrs () {
+  Buffer srs = {};
+  const int ret = execCommand((char *[]){ "xe", "sr-list", "type=linstor", "--minimal", NULL }, &srs);
+  if (ret) {
+    free(srs.data);
+    return ret;
+  }
+
+  const char *end = srs.data + srs.size;
+  char *pos = srs.data;
+  for (char *off; (off = memchr(pos, ',', end - pos)); pos = off + 1)
+    if (off - pos == UUID_LENGTH)
+      scanLinstorSr(pos);
+
+  if (end - pos >= UUID_LENGTH) {
+    for (--end; end - pos >= UUID_LENGTH && isspace(*end); --end) {}
+    if (isalnum(*end))
+      scanLinstorSr(pos);
+  }
+
+  free(srs.data);
+
+  return 0;
+}
+
+// -----------------------------------------------------------------------------
+
 #define PROCESS_MODE_DEFAULT 0
 #define PROCESS_MODE_WAIT_FILE_CREATION 1
 
 static inline int waitForPoolConfCreation (State *state, int *wdFile);
 
-static inline int processPoolConfEvents (int inotifyFd, int wd, char **buffer, size_t *bufferSize, int mode, int *process) {
+static inline int processPoolConfEvents (State *state, int wd, char **buffer, size_t *bufferSize, int mode, int *process) {
   size_t size = 0;
-  if (ioctl(inotifyFd, FIONREAD, (char *)&size) == -1) {
+  if (ioctl(state->inotifyFd, FIONREAD, (char *)&size) == -1) {
     syslog(LOG_ERR, "Failed to get buffer size from inotify descriptor: `%s`.", strerror(errno));
     return -errno;
   }
@@ -241,7 +374,7 @@ static inline int processPoolConfEvents (int inotifyFd, int wd, char **buffer, s
     *bufferSize = size;
   }
 
-  if ((size = (size_t)read(inotifyFd, *buffer, size)) == (size_t)-1) {
+  if ((size = (size_t)read(state->inotifyFd, *buffer, size)) == (size_t)-1) {
     syslog(LOG_ERR, "Failed to read buffer from inotify descriptor: `%s`.", strerror(errno));
     return -errno;
   }
@@ -280,10 +413,10 @@ static inline int processPoolConfEvents (int inotifyFd, int wd, char **buffer, s
     syslog(LOG_INFO, "Updating linstor services... (Inotify mask=%" PRIu32 ")", mask);
     if (mask & (IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT)) {
       syslog(LOG_ERR, "Watched `" POOL_CONF_ABS_FILE "` file has been removed!");
-      inotify_rm_watch(inotifyFd, wd); // Do not forget to remove watch to avoid leaks.
+      inotify_rm_watch(state->inotifyFd, wd); // Do not forget to remove watch to avoid leaks.
       return -EIO;
     }
-    ret = updateLinstorServices();
+    ret = updateLinstorController(state->isMaster);
   } else {
     if (mask & (IN_CREATE | IN_MOVED_TO)) {
       syslog(LOG_ERR, "Watched `" POOL_CONF_ABS_FILE "` file has been recreated!");
@@ -303,16 +436,24 @@ static inline int waitAndProcessEvents (State *state, int wd, int mode) {
 
   struct timespec previousTime = getCurrentTime();
   do {
-    struct timespec currentTime = getCurrentTime();
+    const struct timespec currentTime = getCurrentTime();
     const int64_t elapsedTime = convertToMilliseconds(getTimeDiff(&currentTime, &previousTime));
 
     int timeout;
-    if (elapsedTime >= POLL_TIMEOUT) {
+    if (elapsedTime >= UPDATE_LINSTOR_NODE_TIMEOUT) {
       updateLinstorNode(state);
-      timeout = POLL_TIMEOUT;
+      timeout = UPDATE_LINSTOR_NODE_TIMEOUT;
       previousTime = getCurrentTime();
     } else {
-      timeout = POLL_TIMEOUT - elapsedTime;
+      timeout = UPDATE_LINSTOR_NODE_TIMEOUT - elapsedTime;
+    }
+
+    const int64_t elapsedScanTime = convertToMilliseconds(getTimeDiff(&currentTime, &state->lastScanTime));
+    if (elapsedScanTime >= SR_SCAN_TIMEOUT) {
+      state->isMaster = isMasterHost(&ret);
+      if (state->isMaster)
+        scanLinstorSrs();
+      state->lastScanTime = getCurrentTime();
     }
 
     struct pollfd fds = { state->inotifyFd, POLLIN, 0 };
@@ -323,7 +464,9 @@ static inline int waitAndProcessEvents (State *state, int wd, int mode) {
       syslog(LOG_ERR, "Failed to poll from inotify descriptor: `%s`.", strerror(errno));
       ret = -errno;
     } else if (res > 0) {
-      ret = processPoolConfEvents(state->inotifyFd, wd, &buffer, &bufferSize, mode, &process);
+      state->isMaster = isMasterHost(&ret);
+      if (!ret)
+        ret = processPoolConfEvents(state, wd, &buffer, &bufferSize, mode, &process);
     }
   } while (ret >= 0 && process);
 
@@ -350,7 +493,10 @@ static inline int waitForPoolConfCreation (State *state, int *wdFile) {
   do {
     do {
       // Update LINSTOR services...
-      ret = updateLinstorServices();
+      int ret;
+      state->isMaster = isMasterHost(&ret);
+      if (!ret)
+        ret = updateLinstorController(state->isMaster);
 
       // Ok we can't read the pool configuration file.
       // Maybe the file doesn't exist. Waiting its creation...
@@ -378,7 +524,9 @@ int main (int argc, char *argv[]) {
   setlogmask(LOG_UPTO(LOG_INFO));
 
   State state = {
-    .inotifyFd = -1
+    .inotifyFd = -1,
+    .lastScanTime = getCurrentTime(),
+    .isMaster = 0
   };
 
   const int inotifyFd = createInotifyInstance();
