@@ -347,19 +347,12 @@ class LinstorSR(SR.SR):
                         self._master_uri, self._group_name, logger=util.SMlog
                     )
 
-                    try:
-                        self._linstor = LinstorVolumeManager(
-                            self._master_uri,
-                            self._group_name,
-                            logger=util.SMlog
-                        )
-                        return
-                    except Exception as e:
-                        util.SMlog(
-                            'Ignore exception. Failed to build LINSTOR '
-                            'instance without session: {}'.format(e)
-                        )
-                return
+                    self._linstor = LinstorVolumeManager(
+                        self._master_uri,
+                        self._group_name,
+                        logger=util.SMlog
+                    )
+                return method(self, *args, **kwargs)
 
             self._master_uri = 'linstor://{}'.format(
                 util.get_master_rec(self.session)['address']
