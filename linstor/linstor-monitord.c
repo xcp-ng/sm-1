@@ -287,18 +287,6 @@ static inline int addInotifyWatch (int inotifyFd, const char *filepath, uint32_t
 
 // -----------------------------------------------------------------------------
 
-static inline int updateLinstorController (int isMaster) {
-  syslog(LOG_INFO, "%s linstor-controller...", isMaster ? "Enabling" : "Disabling");
-  char *argv[] = {
-    "systemctl",
-    isMaster ? "enable" : "disable",
-    "--now",
-    "linstor-controller",
-    NULL
-  };
-  return execCommand(argv, NULL);
-}
-
 static inline int updateLinstorNode (State *state) {
   char buffer[256];
   if (gethostname(buffer, sizeof buffer) == -1) {
@@ -416,7 +404,6 @@ static inline int processPoolConfEvents (State *state, int wd, char **buffer, si
       inotify_rm_watch(state->inotifyFd, wd); // Do not forget to remove watch to avoid leaks.
       return -EIO;
     }
-    ret = updateLinstorController(state->isMaster);
   } else {
     if (mask & (IN_CREATE | IN_MOVED_TO)) {
       syslog(LOG_ERR, "Watched `" POOL_CONF_ABS_FILE "` file has been recreated!");
@@ -495,8 +482,6 @@ static inline int waitForPoolConfCreation (State *state, int *wdFile) {
       // Update LINSTOR services...
       int ret;
       state->isMaster = isMasterHost(&ret);
-      if (!ret)
-        ret = updateLinstorController(state->isMaster);
 
       // Ok we can't read the pool configuration file.
       // Maybe the file doesn't exist. Waiting its creation...
