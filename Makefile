@@ -90,6 +90,7 @@ PLUGIN_SCRIPT_DEST := /etc/xapi.d/plugins/
 LIBEXEC := /opt/xensource/libexec/
 UDEV_RULES_DIR := /etc/udev/rules.d/
 UDEV_SCRIPTS_DIR := /etc/udev/scripts/
+SYSTEMD_CONF_DIR := /etc/systemd/system/
 SYSTEMD_SERVICE_DIR := /usr/lib/systemd/system/
 INIT_DIR := /etc/rc.d/init.d/
 MPATH_CONF_DIR := /etc/multipath.xenserver/
@@ -97,6 +98,7 @@ MPATH_CUSTOM_CONF_DIR := /etc/multipath/conf.d/
 MODPROBE_DIR := /etc/modprobe.d/
 EXTENSION_SCRIPT_DEST := /etc/xapi.d/extensions/
 LOGROTATE_DIR := /etc/logrotate.d/
+MINI_DRBD_CLUSTER_CONF_DIR := /etc/
 
 SM_STAGING := $(DESTDIR)
 SM_STAMP := $(MY_OBJ_DIR)/.staging_stamp
@@ -145,11 +147,14 @@ install: precheck
 	mkdir -p $(SM_STAGING)$(UDEV_RULES_DIR)
 	mkdir -p $(SM_STAGING)$(UDEV_SCRIPTS_DIR)
 	mkdir -p $(SM_STAGING)$(INIT_DIR)
+	mkdir -p $(SM_STAGING)$(SYSTEMD_CONF_DIR)
+	mkdir -p $(SM_STAGING)$(SYSTEMD_CONF_DIR)/linstor-satellite.service.d
 	mkdir -p $(SM_STAGING)$(SYSTEMD_SERVICE_DIR)
 	mkdir -p $(SM_STAGING)$(MPATH_CONF_DIR)
 	mkdir -p $(SM_STAGING)$(MPATH_CUSTOM_CONF_DIR)
 	mkdir -p $(SM_STAGING)$(MODPROBE_DIR)
 	mkdir -p $(SM_STAGING)$(LOGROTATE_DIR)
+	mkdir -p $(SM_STAGING)$(MINI_DRBD_CLUSTER_CONF_DIR)
 	mkdir -p $(SM_STAGING)$(DEBUG_DEST)
 	mkdir -p $(SM_STAGING)$(BIN_DEST)
 	mkdir -p $(SM_STAGING)$(MASTER_SCRIPT_DEST)
@@ -173,6 +178,12 @@ install: precheck
 	  $(SM_STAGING)/$(SM_DEST)
 	install -m 644 etc/logrotate.d/$(SMLOG_CONF) \
 	  $(SM_STAGING)/$(LOGROTATE_DIR)
+	install -m 644 etc/systemd/system/linstor-satellite.service.d/override.conf \
+	  $(SM_STAGING)/$(SYSTEMD_CONF_DIR)/linstor-satellite.service.d/
+	install -m 644 etc/systemd/system/var-lib-linstor.mount \
+	  $(SM_STAGING)/$(SYSTEMD_CONF_DIR)
+	install -m 644 etc/minidrbdcluster.ini \
+	  $(SM_STAGING)/$(MINI_DRBD_CLUSTER_CONF_DIR)
 	install -m 644 etc/make-dummy-sr.service \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	install -m 644 systemd/xs-sm.service \
@@ -186,6 +197,8 @@ install: precheck
 	install -m 644 systemd/storage-init.service \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	install -m 644 systemd/linstor-monitor.service \
+	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
+	install -m 644 systemd/minidrbdcluster.service \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	for i in $(UDEV_RULES); do \
 	  install -m 644 udev/$$i.rules \
@@ -236,6 +249,7 @@ install: precheck
 	install -m 755 scripts/xe-getlunidentifier $(SM_STAGING)$(BIN_DEST)
 	install -m 755 scripts/make-dummy-sr $(SM_STAGING)$(LIBEXEC)
 	install -m 755 scripts/storage-init $(SM_STAGING)$(LIBEXEC)
+	install -m 755 scripts/minidrbdcluster $(SM_STAGING)$(LIBEXEC)
 
 .PHONY: clean
 clean:
