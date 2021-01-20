@@ -1,0 +1,18 @@
+[Unit]
+Description=Minimalistic high-availability cluster resource manager
+Before=xs-sm.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/xensource/libexec/minidrbdcluster
+KillMode=process
+KillSignal=SIGINT
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minidrbdcluster
+
+[Install]
+WantedBy=multi-user.target
