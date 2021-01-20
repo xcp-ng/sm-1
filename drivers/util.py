@@ -657,29 +657,8 @@ def get_master_ref(session):
     return session.xenapi.pool.get_master(pools[0])
 
 
-def get_master_rec(session):
-    return session.xenapi.host.get_record(get_master_ref(session))
-
-
 def is_master(session):
     return get_this_host_ref(session) == get_master_ref(session)
-
-
-def get_master_address():
-    address = None
-    try:
-        fd = open('/etc/xensource/pool.conf', 'r')
-        try:
-            items = fd.readline().split(':')
-            if items[0].strip() == 'master':
-                address = 'localhost'
-            else:
-                address = items[1].strip()
-        finally:
-            fd.close()
-    except Exception:
-        pass
-    return address
 
 
 # XXX: this function doesn't do what it claims to do
