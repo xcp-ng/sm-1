@@ -52,8 +52,10 @@ from srmetadata import LVMMetadataHandler, VDI_TYPE_TAG
 try:
     from linstorjournaler import LinstorJournaler
     from linstorvhdutil import LinstorVhdUtil
-    from linstorvolumemanager \
-        import LinstorVolumeManager, LinstorVolumeManagerError
+    from linstorvolumemanager import get_controller_uri
+    from linstorvolumemanager import LinstorVolumeManager
+    from linstorvolumemanager import LinstorVolumeManagerError
+
     LINSTOR_AVAILABLE = True
 except ImportError:
     LINSTOR_AVAILABLE = False
@@ -2864,7 +2866,6 @@ class LinstorSR(SR):
             )
 
         SR.__init__(self, uuid, xapi, createLock, force)
-        self._master_uri = 'linstor://localhost'
         self.path = LinstorVolumeManager.DEV_ROOT_PATH
         self._reloadLinstor()
 
@@ -2909,12 +2910,13 @@ class LinstorSR(SR):
         dconf = session.xenapi.PBD.get_device_config(pbd)
         group_name = dconf['group-name']
 
+        controller_uri = get_controller_uri()
         self.journaler = LinstorJournaler(
-            self._master_uri, group_name, logger=util.SMlog
+            controller_uri, group_name, logger=util.SMlog
         )
 
         self._linstor = LinstorVolumeManager(
-            self._master_uri,
+            controller_uri,
             group_name,
             repair=True,
             logger=util.SMlog
