@@ -145,6 +145,7 @@ install: precheck
 	mkdir -p $(SM_STAGING)$(UDEV_SCRIPTS_DIR)
 	mkdir -p $(SM_STAGING)$(INIT_DIR)
 	mkdir -p $(SM_STAGING)$(SYSTEMD_CONF_DIR)
+	mkdir -p $(SM_STAGING)$(SYSTEMD_CONF_DIR)/linstor-satellite.service.d
 	mkdir -p $(SM_STAGING)$(SYSTEMD_SERVICE_DIR)
 	mkdir -p $(SM_STAGING)$(MPATH_CONF_DIR)
 	mkdir -p $(SM_STAGING)$(MODPROBE_DIR)
