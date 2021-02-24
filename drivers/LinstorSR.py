@@ -1463,7 +1463,7 @@ class LinstorVDI(VDI.VDI):
 
             self._linstor.create_volume(
                 self.uuid, volume_size, persistent=False,
-                volume_name=volume_name
+                volume_name=volume_name, no_diskless=(volume_name is not None)
             )
             volume_info = self._linstor.get_volume_info(self.uuid)
 
