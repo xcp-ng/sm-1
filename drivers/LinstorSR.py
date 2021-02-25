@@ -256,6 +256,11 @@ class LinstorSR(SR.SR):
 
     MANAGER_PLUGIN = 'linstor-manager'
 
+    INIT_STATUS_NOT_SET = 0
+    INIT_STATUS_IN_PROGRESS = 1
+    INIT_STATUS_OK = 2
+    INIT_STATUS_FAIL = 3
+
     # --------------------------------------------------------------------------
     # SR methods.
     # --------------------------------------------------------------------------
@@ -325,19 +330,18 @@ class LinstorSR(SR.SR):
 
         self._vdi_shared_time = 0
 
-        self._initialized = False
+        self._init_status = self.INIT_STATUS_NOT_SET
 
         self._vdis_loaded = False
         self._all_volume_info_cache = None
         self._all_volume_metadata_cache = None
 
     def _locked_load(method):
-        @functools.wraps(method)
-        def wrap(self, *args, **kwargs):
-            if self._initialized:
-                return method(self, *args, **kwargs)
-            self._initialized = True
+        def wrapped_method(self, *args, **kwargs):
+            self._init_status = self.INIT_STATUS_OK
+            return method(self, *args, **kwargs)
 
+        def load(self, *args, **kwargs):
             if not self._has_session:
                 if self.srcmd.cmd == 'vdi_attach_from_config':
                     # We must have a valid LINSTOR instance here without using
@@ -352,7 +356,7 @@ class LinstorSR(SR.SR):
                         self._group_name,
                         logger=util.SMlog
                     )
-                return method(self, *args, **kwargs)
+                return wrapped_method(self, *args, **kwargs)
 
             if not self._is_master:
                 if self.cmd in [
@@ -456,11 +460,29 @@ class LinstorSR(SR.SR):
                     )
                     util.SMlog(traceback.format_exc())
 
-            return method(self, *args, **kwargs)
+            return wrapped_method(self, *args, **kwargs)
+
+        @functools.wraps(wrapped_method)
+        def wrap(self, *args, **kwargs):
+            if self._init_status in \
+                    (self.INIT_STATUS_OK, self.INIT_STATUS_IN_PROGRESS):
+                return wrapped_method(self, *args, **kwargs)
+            if self._init_status == self.INIT_STATUS_FAIL:
+                util.SMlog(
+                    'Can\'t call method {} because initialization failed'
+                    .format(method)
+                )
+            else:
+                try:
+                    self._init_status = self.INIT_STATUS_IN_PROGRESS
+                    return load(self, *args, **kwargs)
+                except Exception:
+                    if self._init_status != self.INIT_STATUS_OK:
+                        self._init_status = self.INIT_STATUS_FAIL
+                    raise
 
         return wrap
 
-    @_locked_load
     def cleanup(self):
         if self._vdi_shared_time:
             self._shared_lock_vdi(self.srcmd.params['vdi_uuid'], locked=False)
@@ -657,6 +679,9 @@ class LinstorSR(SR.SR):
 
     @_locked_load
     def scan(self, uuid):
+        if self._init_status == self.INIT_STATUS_FAIL:
+            return
+
         util.SMlog('LinstorSR.scan for {}'.format(self.uuid))
         if not self._linstor:
             raise xs_errors.XenError(
@@ -855,7 +880,6 @@ class LinstorSR(SR.SR):
     def _load_vdis(self):
         if self._vdis_loaded:
             return
-        self._vdis_loaded = True
 
         assert self._is_master
 
@@ -865,6 +889,9 @@ class LinstorSR(SR.SR):
         self._create_linstor_cache()
         self._load_vdis_ex()
         self._destroy_linstor_cache()
+
+        # We must mark VDIs as loaded only if the load is a success.
+        self._vdis_loaded = True
 
         self._undo_all_journal_transactions()
 
