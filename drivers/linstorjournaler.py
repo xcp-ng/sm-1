@@ -16,7 +16,8 @@
 #
 
 
-from linstorvolumemanager import get_controller_uri, LinstorVolumeManager
+from linstorvolumemanager import \
+  get_controller_uri, LinstorVolumeManager, LinstorVolumeManagerError
 import linstor
 import re
 import util
@@ -145,6 +146,10 @@ class LinstorJournaler:
         def connect(uri):
             if not uri:
                 uri = get_controller_uri()
+                if not uri:
+                    raise LinstorVolumeManagerError(
+                        'Unable to find controller uri...'
+                    )
             return linstor.KV(
                 LinstorVolumeManager._build_group_name(group_name),
                 uri=uri,
@@ -153,13 +158,15 @@ class LinstorJournaler:
 
         try:
             return connect(uri)
-        except linstor.errors.LinstorNetworkError:
+        except (linstor.errors.LinstorNetworkError, LinstorVolumeManagerError):
             pass
 
         return util.retry(
             lambda: connect(None),
             maxretry=10,
-            exceptions=[linstor.errors.LinstorNetworkError]
+            exceptions=[
+                linstor.errors.LinstorNetworkError, LinstorVolumeManagerError
+            ]
         )
 
     @staticmethod
