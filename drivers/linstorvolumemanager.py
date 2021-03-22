@@ -1261,15 +1261,17 @@ class LinstorVolumeManager(object):
     @classmethod
     def create_sr(
         cls, group_name, node_names, ips, redundancy,
-        thin_provisioning=False,
+        thin_provisioning, auto_quorum,
         logger=default_logger.__func__
     ):
         """
         Create a new SR on the given nodes.
         :param str group_name: The SR group_name to use.
         :param list[str] node_names: String list of nodes.
+        :param set(str) ips: Node ips.
         :param int redundancy: How many copy of volumes should we store?
-        :param set(str) ips: Node ips
+        :param bool thin_provisioning: Use thin or thick provisioning.
+        :param bool auto_quorum: DB quorum is monitored by LINSTOR.
         :param function logger: Function to log messages.
         :return: A new LinstorSr instance.
         :rtype: LinstorSr
@@ -1283,6 +1285,7 @@ class LinstorVolumeManager(object):
                 ips,
                 redundancy,
                 thin_provisioning,
+                auto_quorum,
                 logger
             )
         finally:
@@ -1300,7 +1303,7 @@ class LinstorVolumeManager(object):
     @classmethod
     def _create_sr(
         cls, group_name, node_names, ips, redundancy,
-        thin_provisioning=False,
+        thin_provisioning, auto_quorum,
         logger=default_logger.__func__
     ):
         # 1. Check if SR already exists.
@@ -1406,7 +1409,9 @@ class LinstorVolumeManager(object):
             # 3. Create the LINSTOR database volume and mount it.
             try:
                 logger('Creating database volume...')
-                volume_path = cls._create_database_volume(lin, group_name)
+                volume_path = cls._create_database_volume(
+                    lin, group_name, auto_quorum
+                )
             except LinstorVolumeManagerError as e:
                 if e.code != LinstorVolumeManagerError.ERR_VOLUME_EXISTS:
                     logger('Destroying database volume after creation fail...')
@@ -2113,7 +2118,7 @@ class LinstorVolumeManager(object):
         return resources[0].volumes[0].device_path
 
     @classmethod
-    def _create_database_volume(cls, lin, group_name):
+    def _create_database_volume(cls, lin, group_name, auto_quorum):
         try:
             dfns = lin.resource_dfn_list_raise().resource_definitions
         except Exception as e:
@@ -2139,16 +2144,17 @@ class LinstorVolumeManager(object):
 
         # We must modify the quorum. Otherwise we can't use correctly the
         # minidrbdcluster daemon.
-        result = lin.resource_dfn_modify(DATABASE_VOLUME_NAME, {
-            'DrbdOptions/auto-quorum': 'disabled',
-            'DrbdOptions/Resource/quorum': 'majority'
-        })
-        error_str = cls._get_error_str(result)
-        if error_str:
-            raise LinstorVolumeManagerError(
-                'Could not activate quorum on database volume: {}'
-                .format(error_str)
-            )
+        if auto_quorum:
+            result = lin.resource_dfn_modify(DATABASE_VOLUME_NAME, {
+                'DrbdOptions/auto-quorum': 'disabled',
+                'DrbdOptions/Resource/quorum': 'majority'
+            })
+            error_str = cls._get_error_str(result)
+            if error_str:
+                raise LinstorVolumeManagerError(
+                    'Could not activate quorum on database volume: {}'
+                    .format(error_str)
+                )
 
         current_device_path = cls._request_database_path(lin, activate=True)
 

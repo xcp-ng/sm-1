@@ -31,6 +31,7 @@ except ImportError:
 from lock import Lock
 import blktap2
 import cleanup
+import distutils
 import errno
 import functools
 import scsiutil
@@ -77,7 +78,8 @@ CONFIGURATION = [
     ['group-name', 'LVM group name'],
     ['hosts', 'host names to use'],
     ['redundancy', 'replication count'],
-    ['provisioning', '"thin" or "thick" are accepted']
+    ['provisioning', '"thin" or "thick" are accepted (optional, defaults to thin)'],
+    ['monitor-db-quorum', 'disable controller when only one host is online (optional, defaults to true)']
 ]
 
 DRIVER_INFO = {
@@ -299,6 +301,10 @@ class LinstorSR(SR.SR):
                 )
         else:
             self._provisioning = self.PROVISIONING_DEFAULT
+
+        monitor_db_quorum = self.dconf.get('monitor-db-quorum')
+        self._monitor_db_quorum = (monitor_db_quorum is None) or \
+            distutils.util.strtobool(monitor_db_quorum)
 
         # Note: We don't have access to the session field if the
         # 'vdi_attach_from_config' command is executed.
@@ -553,6 +559,7 @@ class LinstorSR(SR.SR):
                 ips,
                 self._redundancy,
                 thin_provisioning=self._provisioning == 'thin',
+                auto_quorum=self._monitor_db_quorum,
                 logger=util.SMlog
             )
             self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
