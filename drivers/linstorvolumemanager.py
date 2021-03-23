@@ -2134,6 +2134,17 @@ class LinstorVolumeManager(object):
                 ) + 'LINSTOR volume list must be empty.'
             )
 
+        # Workaround to use thin lvm. Without this line an error is returned:
+        # "Not enough available nodes"
+        # I don't understand why but this command protect against this bug.
+        try:
+            lin.storage_pool_list_raise(filter_by_stor_pools=[group_name])
+        except Exception as e:
+            raise LinstorVolumeManagerError(
+                'Failed to get storage pool list before database creation: {}'
+                .format(e)
+            )
+
         size = cls.round_up_volume_size(DATABASE_SIZE)
         cls._check_volume_creation_errors(lin.resource_group_spawn(
             rsc_grp_name=group_name,
