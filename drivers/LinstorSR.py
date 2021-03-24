@@ -77,6 +77,7 @@ CAPABILITIES = [
 CONFIGURATION = [
     ['group-name', 'LVM group name'],
     ['hosts', 'host names to use'],
+    ['ips', 'ips to use (optional, defaults to management networks)'],
     ['redundancy', 'replication count'],
     ['provisioning', '"thin" or "thick" are accepted (optional, defaults to thin)'],
     ['monitor-db-quorum', 'disable controller when only one host is online (optional, defaults to true)']
@@ -325,6 +326,10 @@ class LinstorSR(SR.SR):
         self.sr_vditype = SR.DEFAULT_TAP
 
         self._hosts = list(set(self.dconf['hosts'].split(',')))
+        if 'ips' not in self.dconf or not self.dconf['ips']:
+            self._ips = None
+        else:
+            self._ips = self.dconf['ips'].split(',')
         self._redundancy = int(self.dconf['redundancy'] or 1)
         self._linstor = None  # Ensure that LINSTOR attribute exists.
         self._journaler = None
@@ -533,11 +538,26 @@ class LinstorSR(SR.SR):
             )
 
         ips = {}
-        for host in online_hosts:
-            record = self.session.xenapi.host.get_record(host)
-            hostname = record['hostname']
-            if hostname in self._hosts:
-                ips[hostname] = record['address']
+        if not self._ips:
+            for host in online_hosts:
+                record = self.session.xenapi.host.get_record(host)
+                hostname = record['hostname']
+                if hostname in self._hosts:
+                    ips[hostname] = record['address']
+        elif len(self._ips) != len(self._hosts):
+            raise xs_errors.XenError(
+                'LinstorSRCreate',
+                opterr='ips must be equal to host count'
+            )
+        else:
+            for host in online_hosts:
+                record = self.session.xenapi.host.get_record(host)
+                hostname = record['hostname']
+                try:
+                    index = self._hosts.index(hostname)
+                    ips[hostname] = self._ips[index]
+                except ValueError as e:
+                    pass
 
         if len(ips) != len(self._hosts):
             raise xs_errors.XenError(
