@@ -1313,21 +1313,35 @@ class LinstorVolumeManager(object):
 
         for node_name in node_names:
             ip = ips[node_name]
-            result = lin.node_create(
-                node_name,
-                linstor.consts.VAL_NODE_TYPE_CMBD,
-                ip
-            )
-            errors = cls._filter_errors(result)
-            if cls._check_errors(errors, [linstor.consts.FAIL_EXISTS_NODE]):
-                continue
 
-            if errors:
-                raise LinstorVolumeManagerError(
-                    'Failed to create node `{}` with ip `{}`: {}'.format(
-                        node_name, ip, cls._get_error_str(errors)
-                    )
+            while True:
+                # Try to create node.
+                result = lin.node_create(
+                    node_name,
+                    linstor.consts.VAL_NODE_TYPE_CMBD,
+                    ip
                 )
+
+                errors = cls._filter_errors(result)
+                if cls._check_errors(
+                    errors, [linstor.consts.FAIL_EXISTS_NODE]
+                ):
+                    # If it already exists, remove, then recreate.
+                    result = lin.node_delete(node_name)
+                    error_str = cls._get_error_str(result)
+                    if error_str:
+                        raise LinstorVolumeManagerError(
+                            'Failed to remove old node `{}`: {}'
+                            .format(node_name, error_str)
+                        )
+                elif not errors:
+                    break  # Created!
+                else:
+                    raise LinstorVolumeManagerError(
+                        'Failed to create node `{}` with ip `{}`: {}'.format(
+                            node_name, ip, cls._get_error_str(errors)
+                        )
+                    )
 
         driver_pool_name = group_name
         group_name = cls._build_group_name(group_name)
