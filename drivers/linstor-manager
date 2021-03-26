@@ -327,6 +327,22 @@ def lock_vdi(session, args):
     return str(False)
 
 
+def lsof_resource(session, args):
+    try:
+        drbd_path = args['drbdPath']
+        (ret, stdout, stderr) = util.doexec(['lsof', drbd_path])
+        if ret == 0:
+            return 'DRBD resource `{}` is open: {}'.format(
+                drbd_path, stdout
+            )
+        return '`lsof` on DRBD resource `{}` returned {}: {}'.format(
+            drbd_path, ret, stderr
+        )
+    except Exception as e:
+        util.SMlog('linstor-manager:lsof_drbd error: {}'.format(e))
+        raise
+
+
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
         'prepareSr': prepare_sr,
@@ -344,5 +360,6 @@ if __name__ == '__main__':
         'getDepth': get_depth,
         'getKeyHash': get_key_hash,
         'getBlockBitmap': get_block_bitmap,
-        'lockVdi': lock_vdi
+        'lockVdi': lock_vdi,
+        'lsofResource': lsof_resource
     })
