@@ -36,6 +36,7 @@ import json
 import xs_errors
 import XenAPI
 import scsiutil
+from linstorvolumemanager import log_lsof_drbd
 from syslog import openlog, syslog
 from stat import * # S_ISBLK(), ...
 import nfs
@@ -817,7 +818,22 @@ class Tapdisk(object):
                 TapCtl.attach(pid, minor)
 
                 try:
-                    TapCtl.open(pid, minor, _type, path, options)
+                    retry_open = 0
+                    while True:
+                        try:
+                            TapCtl.open(pid, minor, _type, path, options)
+                        except TapCtl.CommandFailure as e:
+                            err = (
+                                'status' in e.info and e.info['status']
+                            ) or None
+                            if err in (errno.EIO, errno.EROFS, errno.EAGAIN):
+                                if retry_open < 5:
+                                    retry_open += 1
+                                    time.sleep(1)
+                                    continue
+                                if err == errno.EROFS:
+                                    log_lsof_drbd(path)
+                            break
                     try:
                         tapdisk = cls.__from_blktap(blktap)
                         node = '/sys/dev/block/%d:%d' % (tapdisk.major(), tapdisk.minor)

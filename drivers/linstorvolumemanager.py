@@ -16,6 +16,7 @@
 #
 
 
+import errno
 import glob
 import json
 import linstor
@@ -23,6 +24,7 @@ import os.path
 import re
 import shutil
 import socket
+import stat
 import time
 import util
 import uuid
@@ -36,6 +38,85 @@ DATABASE_MKFS = 'mkfs.ext4'
 
 REG_DRBDADM_PRIMARY = re.compile("([^\\s]+)\\s+role:Primary")
 REG_DRBDSETUP_IP = re.compile('[^\\s]+\\s+(.*):.*$')
+
+DRBD_BY_RES_PATH = '/dev/drbd/by-res/'
+
+
+# Check if a path is a DRBD resource and log the process name/pid
+# that opened it.
+def log_lsof_drbd(path):
+    PLUGIN = 'linstor-manager'
+    PLUGIN_CMD = 'lsofResource'
+
+    # Ignore if it's not a symlink to DRBD resource.
+    if not path.startswith(DRBD_BY_RES_PATH):
+        return
+
+    # Compute resource name.
+    res_name_end = path.find('/', len(DRBD_BY_RES_PATH))
+    if res_name_end == -1:
+        return
+    res_name = path[len(DRBD_BY_RES_PATH):res_name_end]
+
+    try:
+        # Ensure path is a DRBD.
+        drbd_path = os.path.realpath(path)
+        stats = os.stat(drbd_path)
+        if not stat.S_ISBLK(stats.st_mode) or os.major(stats.st_rdev) != 147:
+            return
+
+        # Find where the device is open.
+        (ret, stdout, stderr) = util.doexec(['drbdadm', 'status', res_name])
+        if ret != 0:
+            util.SMlog('Failed to execute `drbdadm status` on `{}`: {}'.format(
+                res_name, stderr
+            ))
+            return
+
+        # Is it a local device?
+        if stdout.startswith('{} role:Primary'.format(res_name)):
+            (ret, stdout, stderr) = util.doexec(['lsof', drbd_path])
+            if ret == 0:
+                util.SMlog(
+                    'DRBD resource `{}` is open on local host: {}'
+                    .format(path, stdout)
+                )
+            else:
+                util.SMlog(
+                    '`lsof` on local DRBD resource `{}` returned {}: {}'
+                    .format(path, ret, stderr)
+                )
+            return
+
+        # Is it a remote device?
+        res = REG_DRBDADM_PRIMARY.search(stdout)
+        if not res:
+            util.SMlog(
+                'Cannot find where is open DRBD resource `{}`'
+                .format(path)
+            )
+            return
+        node_name = res.groups()[0]
+
+        session = util.get_localAPI_session()
+        hosts = session.xenapi.host.get_all_records()
+        for host_ref, host_record in hosts.items():
+            if node_name != host_record['hostname']:
+                continue
+
+            ret = session.xenapi.host.call_plugin(
+                host_ref, PLUGIN, PLUGIN_CMD, {'drbdPath': drbd_path},
+            )
+            util.SMlog('DRBD resource `{}` status on host `{}`: {}'.format(
+                path, host_ref, ret
+            ))
+            return
+        util.SMlog('Cannot find primary host of DRBD resource {}'.format(path))
+    except Exception as e:
+        util.SMlog(
+            'Got exception while trying to determine where DRBD resource ' +
+            '`{}` is open: {}'.format(path, e)
+        )
 
 
 # ==============================================================================
@@ -162,7 +243,7 @@ class LinstorVolumeManager(object):
         '_kv_cache_dirty', '_resource_cache_dirty', '_volume_info_cache_dirty'
     )
 
-    DEV_ROOT_PATH = '/dev/drbd/by-res/'
+    DEV_ROOT_PATH = DRBD_BY_RES_PATH
 
     # Default LVM extent size.
     BLOCK_SIZE = 4 * 1024 * 1024
