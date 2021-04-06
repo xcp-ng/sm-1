@@ -65,6 +65,20 @@ ENABLE_MULTIPLE_ATTACH = "/etc/xensource/allow_multiple_vdi_attach"
 NO_MULTIPLE_ATTACH = not (os.path.exists(ENABLE_MULTIPLE_ATTACH))
 
 
+def get_path_scheme(path):
+    end_scheme = path.rfind(':')
+    if end_scheme == -1:
+        return ''
+    return path[0:end_scheme + 1]
+
+
+def get_path_without_scheme(path):
+    end_scheme = path.rfind(':')
+    if end_scheme == -1:
+        return path
+    return path[end_scheme + 1:]
+
+
 class UnixStreamHTTPConnection(HTTPConnection):
     def connect(self):
         self.sock = socket(AF_UNIX, SOCK_STREAM)
@@ -789,7 +803,9 @@ class Tapdisk(object):
         return self.Arg(self.type, self.path)
 
     def get_devpath(self):
-        return "%s/tapdev%d" % (Blktap.DEV_BASEDIR, self.minor)
+        return 'nbd:unix:/run/blktap-control/nbd%d.%d' % (
+            int(self.pid), int(self.minor)
+        )
 
     @classmethod
     def launch_from_arg(cls, arg):
@@ -1181,6 +1197,7 @@ class VDI(object):
             raise NotImplementedError("_equals is not defined")
 
         def __init__(self, path):
+            assert get_path_scheme(path) == ''
             self._path = path
 
         @classmethod
@@ -1200,6 +1217,7 @@ class VDI(object):
             return os.stat(self.path())
 
         def mklink(self, target):
+            target = get_path_without_scheme(target)
 
             path = self.path()
             util.SMlog("%s -> %s" % (self, target))
@@ -1247,24 +1265,28 @@ class VDI(object):
         @classmethod
         def _real_stat(cls, target):
             """stat() not on @target, but its realpath()"""
-            _target = os.path.realpath(target)
+            _target = os.path.realpath(get_path_without_scheme(target))
             return os.stat(_target)
 
         @classmethod
         def is_block(cls, target):
             """Whether @target refers to a block device."""
-            return S_ISBLK(cls._real_stat(target).st_mode)
+            return S_ISBLK(cls._real_stat(
+                get_path_without_scheme(target)
+            ).st_mode)
 
         def _mklink(self, target):
 
-            st = self._real_stat(target)
+            st = self._real_stat(get_path_without_scheme(target))
             if not S_ISBLK(st.st_mode):
                 raise self.NotABlockDevice(target, st)
 
             os.mknod(self.path(), st.st_mode, st.st_rdev)
 
         def _equals(self, target):
-            target_rdev = self._real_stat(target).st_rdev
+            target_rdev = self._real_stat(
+                get_path_without_scheme(target)
+            ).st_rdev
             return self.stat().st_rdev == target_rdev
 
         def rdev(self):
@@ -1556,7 +1578,8 @@ class VDI(object):
             self.linkNBD(sr_uuid, vdi_uuid)
 
         # Return backend/ link
-        back_path = self.BackendLink.from_uuid(sr_uuid, vdi_uuid).path()
+        back_path = 'nbd:unix:' + \
+            self.BackendLink.from_uuid(sr_uuid, vdi_uuid).path()
         if self.tap_wanted():
             # Only have NBD if we also have a tap
             nbd_path = \
