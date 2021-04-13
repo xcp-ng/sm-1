@@ -74,9 +74,6 @@ class MooseFSException(Exception):
         self.errstr = errstr
 
 
-# mountpoint = /var/run/sr-mount/MooseFS/uuid
-# linkpath = mountpoint/uuid - path to SR directory on share
-# path = /var/run/sr-mount/uuid - symlink to SR directory on share
 class MooseFSSR(FileSR.FileSR):
     """MooseFS file-based storage"""
 
@@ -112,22 +109,22 @@ class MooseFSSR(FileSR.FileSR):
             self.sm_config = self.session.xenapi.SR.get_sm_config(self.sr_ref)
         else:
             self.sm_config = self.srcmd.params.get('sr_sm_config') or {}
-        self.mountpoint = os.path.join(SR.MOUNT_BASE, 'MooseFS', sr_uuid)
-        self.linkpath = os.path.join(self.mountpoint, sr_uuid or "")
+        self.attached = False
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
+        self.mountpoint = self.path
+        self.linkpath = self.path
         self._check_o_direct()
 
     def checkmount(self):
         return util.ioretry(lambda: ((util.pathexists(self.mountpoint) and
-                                      util.ismount(self.mountpoint)) and
-                                     util.pathexists(self.path)))
+                                      util.ismount(self.mountpoint))))
 
     def mount(self, mountpoint=None):
-        """Mount MooseFS share at specific 'mountpoint'"""
+        """Mount MooseFS share at 'mountpoint'"""
         if mountpoint is None:
             mountpoint = self.mountpoint
         elif not util.is_string(mountpoint) or mountpoint == "":
-            raise MooseFSException("Mountpoint not a string object")
+            raise MooseFSException("Mountpoint is not a string object")
 
         try:
             if not util.ioretry(lambda: util.isdir(mountpoint)):
@@ -145,7 +142,7 @@ class MooseFSSR(FileSR.FileSR):
             util.ioretry(lambda: util.pread(command), errlist=[errno.EPIPE, errno.EIO], maxretry=2, nofail=True)
         except util.CommandException, inst:
             syslog(_syslog.LOG_ERR, 'MooseFS mount failed ' + inst.__str__())
-            raise MooseFSException("mount failed with return code %d" % inst.code)
+            raise MooseFSException("Mount failed with return code %d" % inst.code)
 
         # Sanity check to ensure that the user has at least RO access to the
         # mounted share. Windows sharing and security settings can be tricky.
@@ -162,18 +159,17 @@ class MooseFSSR(FileSR.FileSR):
         try:
             util.pread(["umount", mountpoint])
         except util.CommandException, inst:
-            raise MooseFSException("umount failed with return code %d" % inst.code)
+            raise MooseFSException("Command umount failed with return code %d" % inst.code)
         if rmmountpoint:
             try:
                 os.rmdir(mountpoint)
             except OSError, inst:
-                raise MooseFSException("rmdir failed with error '%s'" % inst.strerror)
+                raise MooseFSException("Command rmdir failed with error '%s'" % inst.strerror)
 
     def attach(self, sr_uuid):
         if not self.checkmount():
             try:
                 self.mount()
-                os.symlink(self.linkpath, self.path)
             except MooseFSException, exc:
                 raise SR.SROSError(12, exc.errstr)
         self.attached = True
@@ -193,11 +189,10 @@ class MooseFSSR(FileSR.FileSR):
         if not self.checkmount():
             return
         util.SMlog("Aborting GC/coalesce")
-        cleanup.abort(self.uuid)
+        cleanup.abort(sr_uuid)
         # Change directory to avoid unmount conflicts
         os.chdir(SR.MOUNT_BASE)
         self.unmount(self.mountpoint, True)
-        os.unlink(self.path)
         self.attached = False
 
     def create(self, sr_uuid, size):
@@ -215,24 +210,6 @@ class MooseFSSR(FileSR.FileSR):
                 pass
             raise SR.SROSError(111, "MooseFS mount error [opterr=%s]" % exc.errstr)
 
-        if util.ioretry(lambda: util.pathexists(self.linkpath)):
-            if len(util.ioretry(lambda: util.listdir(self.linkpath))) != 0:
-                self.detach(sr_uuid)
-                raise xs_errors.XenError('SRExists')
-        else:
-            try:
-                util.ioretry(lambda: util.makedirs(self.linkpath))
-                os.symlink(self.linkpath, self.path)
-            except util.CommandException, inst:
-                if inst.code != errno.EEXIST:
-                    try:
-                        self.unmount(self.mountpoint, True)
-                    except MooseFSException:
-                        util.logException('MooseFSSR.unmount()')
-                    raise SR.SROSError(116,
-                                       "Failed to create MooseFS SR. remote directory creation error: {}".format(
-                                           os.strerror(inst.code)))
-        self.detach(sr_uuid)
 
     def delete(self, sr_uuid):
         # try to remove/delete non VDI contents first
@@ -240,10 +217,8 @@ class MooseFSSR(FileSR.FileSR):
         try:
             if self.checkmount():
                 self.detach(sr_uuid)
-            self.mount()
-            if util.ioretry(lambda: util.pathexists(self.linkpath)):
-                util.ioretry(lambda: os.rmdir(self.linkpath))
-            util.SMlog(str(self.unmount(self.mountpoint, True)))
+            if util.ioretry(lambda: util.pathexists(self.mountpoint)):
+                util.ioretry(lambda: os.rmdir(self.mountpoint))
         except util.CommandException, inst:
             self.detach(sr_uuid)
             if inst.code != errno.ENOENT:
@@ -267,7 +242,7 @@ class MooseFSFileVDI(FileSR.FileVDI):
         return super(MooseFSFileVDI, self).attach(sr_uuid, vdi_uuid)
 
     def generate_config(self, sr_uuid, vdi_uuid):
-        util.SMlog("SMBFileVDI.generate_config")
+        util.SMlog("MooseFSFileVDI.generate_config")
         if not util.pathexists(self.path):
             raise xs_errors.XenError('VDIUnavailable')
         resp = {'device_config': self.sr.dconf,
@@ -285,7 +260,7 @@ class MooseFSFileVDI(FileSR.FileVDI):
             if not util.pathexists(self.sr.path):
                 self.sr.attach(sr_uuid)
         except:
-            util.logException("SMBFileVDI.attach_from_config")
+            util.logException("MooseFSFileVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable',
                                      opterr='Unable to attach from config')
 
