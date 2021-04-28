@@ -16,6 +16,7 @@
 
 import base64
 import distutils.util
+import time
 import subprocess
 import sys
 import XenAPIPlugin
@@ -52,20 +53,36 @@ def update_all_ports(open):
 
 
 def enable_and_start_service(name, start):
-    fn = 'enable' if start else 'disable'
-    args = ('systemctl', fn, '--now', name)
-    (ret, out, err) = util.doexec(args)
-    if ret == 0:
-        return
-    raise Exception('Failed to {} {}: {} {}'.format(fn, name, out, err))
+    attempt = 0
+    while True:
+        attempt += 1
+        fn = 'enable' if start else 'disable'
+        args = ('systemctl', fn, '--now', name)
+        (ret, out, err) = util.doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            raise Exception(
+                'Failed to {} {}: {} {}'.format(fn, name, out, err)
+            )
+        time.sleep(1)
 
 
 def restart_service(name):
-    args = ('systemctl', 'restart', name)
-    (ret, out, err) = util.doexec(args)
-    if ret == 0:
-        return
-    raise Exception('Failed to restart {}: {} {}'.format(name, out, err))
+    attempt = 0
+    while True:
+        attempt += 1
+        util.SMlog('linstor-manager:restart service {} {}...'.format(name, attempt))
+        args = ('systemctl', 'restart', name)
+        (ret, out, err) = util.doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            util.SMlog('linstor-manager:restart service FAILED {} {}'.format(name, attempt))
+            raise Exception(
+                'Failed to restart {}: {} {}'.format(name, out, err)
+            )
+        time.sleep(1)
 
 
 def stop_service(name):
