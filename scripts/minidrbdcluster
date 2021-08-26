@@ -1,0 +1,171 @@
+#! /usr/bin/env python2
+
+import configparser
+import os
+import re
+import signal
+import subprocess
+
+DRBDADM_OPEN_FAILED_RE = re.compile(
+    'open\\((.*)\\) failed: No such file or directory'
+)
+MAY_PROMOT_RE = re.compile(
+    '(?:exists|change) resource name:((?:\\w|-)+) '
+    '(?:\\w+\\:\\w+ )*may_promote:(yes|no) promotion_score:(\\d+)'
+)
+PEER_ROLE_RE = re.compile(
+    '(?:exists|change) connection name:((?:\\w|-)+) peer-node-id:(?:\\d+) '
+    'conn-name:(\\w+) (?:\\w+\\:\\w+ )*role:(Primary|Secondary|Unknown)'
+)
+HAVE_QUORUM_RE = re.compile(
+    '(?:exists|change) device name:((?:\\w|-)+) '
+    '(?:\\w+\\:\\w+ )*quorum:(yes|no)'
+)
+
+
+class SigHupException(Exception):
+    pass
+
+
+def sig_handler(sig, frame):
+    raise SigHupException(
+        'Received signal ' + str(sig) +
+        ' on line ' + str(frame.f_lineno) +
+        ' in ' + frame.f_code.co_filename
+    )
+
+
+def call_systemd(operation, service):
+    verbose = operation in ('start', 'stop')
+    if verbose:
+        print('Trying to %s %s' % (operation, service))
+    r = os.system('systemctl %s %s' % (operation, service))
+    if verbose:
+        print('%s for %s %s' % (
+            'success' if r == 0 else 'failure', operation, service
+        ))
+    return r == 0
+
+
+def ensure_systemd_started(service):
+    args = ['systemctl', 'is-active', '--quiet', service]
+
+    proc = subprocess.Popen(args)
+    proc.wait()
+    if not proc.returncode:
+        return True  # Already active.
+
+    return call_systemd('start', service)
+
+
+def show_status(services, status):
+    print('status:')
+    for systemd_unit in services:
+        call_systemd('status', systemd_unit)
+    for res_name in status:
+        print('%s is %s' % (res_name, status[res_name]))
+
+
+def clean_up(services):
+    print('exiting:')
+    for systemd_unit in reversed(services):
+        call_systemd('stop', systemd_unit)
+
+
+def get_systemd_units(systemd_units_str):
+    systemd_units = []
+    for systemd_unit in systemd_units_str.split(','):
+        systemd_unit = systemd_unit.strip()
+        if systemd_unit:
+            systemd_units.append(systemd_unit)
+    return systemd_units
+
+
+def process(events2, resources, services, status):
+    line = events2.stdout.readline()
+    m = MAY_PROMOT_RE.match(line)
+    if m:
+        res_name, may_promote, promotion_score = m.groups()
+        if res_name in resources and may_promote == 'yes':
+            systemd_units_str = resources[res_name]['systemd-units']
+            for systemd_unit in get_systemd_units(systemd_units_str):
+                if not ensure_systemd_started(systemd_unit):
+                    break
+                if systemd_unit not in services:
+                    services.append(systemd_unit)
+    m = PEER_ROLE_RE.match(line)
+    if m:
+        res_name, conn_name, role = m.groups()
+        if res_name in status:
+            status[res_name][conn_name] = role
+    m = HAVE_QUORUM_RE.match(line)
+    if m:
+        res_name, have_quorum = m.groups()
+        if res_name in resources and have_quorum == 'no':
+            systemd_units_str = resources[res_name]['systemd-units']
+            systemd_units = get_systemd_units(systemd_units_str)
+            to_stop = [x for x in systemd_units if x in services]
+            if to_stop:
+                print('Lost quorum on %s' % (res_name))
+            for systemd_unit in reversed(to_stop):
+                r = call_systemd('stop', systemd_unit)
+                if r:
+                    services.remove(systemd_unit)
+
+
+def active_drbd_volume(res_name):
+    retry = True
+    args = ['drbdadm', 'adjust', res_name]
+    while True:
+        proc = subprocess.Popen(args, stderr=subprocess.PIPE)
+        (stdout, stderr) = proc.communicate()
+        if not proc.returncode:
+            return  # Success. \o/
+
+        if not retry:
+            break
+
+        m = DRBDADM_OPEN_FAILED_RE.match(stderr)
+        if m and subprocess.call(['lvchange', '-ay', m.groups()[0]]) == 0:
+            retry = False
+        else:
+            break
+
+    print('Failed to execute `{}`: {}'.format(args, stderr))
+
+
+def main():
+    services = []
+    status = dict()
+    config = configparser.ConfigParser()
+    config.read('/etc/minidrbdcluster.ini')
+    resources = config._sections
+    if not resources:
+        raise Exception(
+            'No resources to watch, maybe /etc/minidrbdcluster.ini missing'
+        )
+    print('Managing DRBD resources: %s' % (' '.join(resources)))
+    for res_name in resources:
+        status[res_name] = dict()
+        active_drbd_volume(res_name)
+
+    signal.signal(signal.SIGHUP, sig_handler)
+
+    print('Starting process...')
+    events2 = subprocess.Popen(
+        ['drbdsetup', 'events2'], stdout=subprocess.PIPE
+    )
+    run = True
+    while run:
+        try:
+            process(events2, resources, services, status)
+        except KeyboardInterrupt:
+            run = False
+        except SigHupException:
+            show_status(services, status)
+
+    clean_up(services)
+
+
+if __name__ == '__main__':
+    main()

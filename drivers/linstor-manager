@@ -14,15 +14,20 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# We must modify default import path, we don't want to import modules
+# installed in plugins folder and instead we must import from LINSTOR driver
+# folder.
+import sys
+sys.path[0] = '/opt/xensource/sm/'
+
 import base64
 import distutils.util
+import time
 import subprocess
-import sys
 import XenAPIPlugin
 
-sys.path.append('/opt/xensource/sm/')
 from linstorjournaler import LinstorJournaler
-from linstorvolumemanager import LinstorVolumeManager
+from linstorvolumemanager import get_controller_uri, LinstorVolumeManager
 from lock import Lock
 import json
 import LinstorSR
@@ -32,10 +37,6 @@ import vhdutil
 
 FIREWALL_PORT_SCRIPT = '/etc/xapi.d/plugins/firewall-port'
 LINSTOR_PORTS = [3366, 3370, 3376, 3377, '7000:8000']
-
-
-def get_linstor_uri(session):
-    return 'linstor://{}'.format(util.get_master_rec(session)['address'])
 
 
 def update_port(port, open):
@@ -55,23 +56,88 @@ def update_all_ports(open):
         update_port(port, open)
 
 
-def update_service(start):
-    fn = 'enable' if start else 'disable'
-    args = ('systemctl', fn, '--now', 'linstor-satellite')
+def enable_and_start_service(name, start):
+    attempt = 0
+    while True:
+        attempt += 1
+        fn = 'enable' if start else 'disable'
+        args = ('systemctl', fn, '--now', name)
+        (ret, out, err) = util.doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            raise Exception(
+                'Failed to {} {}: {} {}'.format(fn, name, out, err)
+            )
+        time.sleep(1)
+
+
+def restart_service(name):
+    attempt = 0
+    while True:
+        attempt += 1
+        util.SMlog('linstor-manager:restart service {} {}...'.format(name, attempt))
+        args = ('systemctl', 'restart', name)
+        (ret, out, err) = util.doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            util.SMlog('linstor-manager:restart service FAILED {} {}'.format(name, attempt))
+            raise Exception(
+                'Failed to restart {}: {} {}'.format(name, out, err)
+            )
+        time.sleep(1)
+
+
+def stop_service(name):
+    args = ('systemctl', 'stop', name)
     (ret, out, err) = util.doexec(args)
     if ret == 0:
         return
-    raise Exception('Failed to {} satellite: {} {}'.format(fn, out, err))
+    raise Exception('Failed to stop {}: {} {}'.format(name, out, err))
 
 
-def enable(session, args):
+def update_linstor_satellite_service(start):
+    enable_and_start_service('linstor-satellite', start)
+
+
+def update_minidrbdcluster_service(start):
+    enable_and_start_service('minidrbdcluster', start)
+
+
+def prepare_sr(session, args):
     try:
-        enabled = distutils.util.strtobool(args['enabled'])
-        update_all_ports(open=enabled)
-        update_service(start=enabled)
+        update_all_ports(open=True)
+        # We don't want to enable and start minidrbdcluster daemon during
+        # SR creation.
+        update_minidrbdcluster_service(start=False)
+        update_linstor_satellite_service(start=True)
         return str(True)
     except Exception as e:
-        util.SMlog('linstor-manager:disable error: {}'.format(e))
+        util.SMlog('linstor-manager:prepare_sr error: {}'.format(e))
+    return str(False)
+
+
+def release_sr(session, args):
+    try:
+        update_linstor_satellite_service(start=False)
+        update_minidrbdcluster_service(start=False)
+        update_all_ports(open=False)
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:release_sr error: {}'.format(e))
+    return str(False)
+
+
+def update_minidrbdcluster(session, args):
+    try:
+        enabled = distutils.util.strtobool(args['enabled'])
+        update_minidrbdcluster_service(start=enabled)
+        return str(True)
+    except Exception as e:
+        util.SMlog(
+            'linstor-manager:update_minidrbdcluster error: {}'.format(e)
+        )
     return str(False)
 
 
@@ -81,12 +147,12 @@ def attach(session, args):
         vdi_uuid = args['vdiUuid']
         group_name = args['groupName']
 
-        linstor_uri = get_linstor_uri(session)
+        controller_uri = get_controller_uri()
         journaler = LinstorJournaler(
-            linstor_uri, group_name, logger=util.SMlog
+            controller_uri, group_name, logger=util.SMlog
         )
         linstor = LinstorVolumeManager(
-            linstor_uri,
+            controller_uri,
             group_name,
             logger=util.SMlog
         )
@@ -104,7 +170,7 @@ def detach(session, args):
         group_name = args['groupName']
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -115,10 +181,35 @@ def detach(session, args):
     return str(False)
 
 
+def destroy(session, args):
+    try:
+        group_name = args['groupName']
+
+        # When destroy is called, there are no running minidrbdcluster daemons.
+        # So the controllers are stopped too, we must start an instance.
+        restart_service('var-lib-linstor.mount')
+        restart_service('linstor-controller')
+
+        linstor = LinstorVolumeManager(
+            'linstor://localhost',
+            group_name,
+            logger=util.SMlog
+        )
+        linstor.destroy()
+        return str(True)
+    except Exception as e:
+        stop_service('linstor-controller')
+        stop_service('var-lib-linstor.mount')
+        util.SMlog('linstor-manager:destroy error: {}'.format(e))
+    return str(False)
+
+
 def check(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.check(device_path))
+        ignore_missing_footer = args['ignoreMissingFooter']
+        fast = args['fast']
+        return str(vhdutil.check(device_path, ignore_missing_footer, fast))
     except Exception as e:
         util.SMlog('linstor-manager:check error: {}'.format(e))
         raise
@@ -131,7 +222,7 @@ def get_vhd_info(session, args):
         include_parent = distutils.util.strtobool(args['includeParent'])
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -166,7 +257,7 @@ def get_parent(session, args):
         group_name = args['groupName']
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -236,10 +327,13 @@ def lock_vdi(session, args):
         group_name = args['groupName']
         locked = distutils.util.strtobool(args['locked'])
 
+        # We must lock to mark the VDI.
         lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
+        if locked:
+            lock.acquire()
 
         linstor = LinstorVolumeManager(
-            get_linstor_uri(session),
+            get_controller_uri(),
             group_name,
             logger=util.SMlog
         )
@@ -249,16 +343,35 @@ def lock_vdi(session, args):
     except Exception as e:
         util.SMlog('linstor-manager:lock_vdi error: {}'.format(e))
     finally:
-        if lock:
+        if locked and lock:
             lock.release()
     return str(False)
 
 
+def lsof_resource(session, args):
+    try:
+        drbd_path = args['drbdPath']
+        (ret, stdout, stderr) = util.doexec(['lsof', drbd_path])
+        if ret == 0:
+            return 'DRBD resource `{}` is open: {}'.format(
+                drbd_path, stdout
+            )
+        return '`lsof` on DRBD resource `{}` returned {}: {}'.format(
+            drbd_path, ret, stderr
+        )
+    except Exception as e:
+        util.SMlog('linstor-manager:lsof_drbd error: {}'.format(e))
+        raise
+
+
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
-        'enable': enable,
+        'prepareSr': prepare_sr,
+        'releaseSr': release_sr,
+        'updateMinidrbdcluster': update_minidrbdcluster,
         'attach': attach,
         'detach': detach,
+        'destroy': destroy,
         'check': check,
         'getVHDInfo': get_vhd_info,
         'hasParent': has_parent,
@@ -268,5 +381,6 @@ if __name__ == '__main__':
         'getDepth': get_depth,
         'getKeyHash': get_key_hash,
         'getBlockBitmap': get_block_bitmap,
-        'lockVdi': lock_vdi
+        'lockVdi': lock_vdi,
+        'lsofResource': lsof_resource
     })
