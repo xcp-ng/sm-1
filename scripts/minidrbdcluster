@@ -1,6 +1,7 @@
-#! /usr/bin/env python2
+#!/usr/bin/env python2
 
 import configparser
+import json
 import os
 import re
 import signal
@@ -11,21 +12,42 @@ DRBDADM_OPEN_FAILED_RE = re.compile(
 )
 MAY_PROMOT_RE = re.compile(
     '(?:exists|change) resource name:((?:\\w|-)+) '
-    '(?:\\w+\\:\\w+ )*may_promote:(yes|no) promotion_score:(\\d+)'
+    '(?:\\w+\\:\\w+ )*may_promote:(yes|no) promotion_score:(?:\\d+)'
 )
 PEER_ROLE_RE = re.compile(
     '(?:exists|change) connection name:((?:\\w|-)+) peer-node-id:(?:\\d+) '
-    'conn-name:(\\w+) (?:\\w+\\:\\w+ )*role:(Primary|Secondary|Unknown)'
+    'conn-name:((?:\\w|-)+) (?:\\w+\\:(?:\\w|-)+ )*(?:connection:(\\w+) )?'
+    '(?:\\w+\\:(?:\\w|-)+ )*role:(Primary|Secondary|Unknown)'
 )
 HAVE_QUORUM_RE = re.compile(
     '(?:exists|change) device name:((?:\\w|-)+) '
-    '(?:\\w+\\:\\w+ )*quorum:(yes|no)'
+    '(?:\\w+\\:(?:\\w|-|/)+ )*quorum:(yes|no)'
 )
 
 
 class SigHupException(Exception):
     pass
 
+
+class Connection:
+    __slots__ = ('name', 'role', 'status')
+
+    def __init__(self, name):
+        self.name = name
+        self.role = 'Unknown'
+        self.status = 'Unknown'
+
+    # TODO: str
+
+class Status:
+    __slots__ = ('connections', 'may_promote', 'has_quorum')
+
+    def __init__(self):
+        self.connections = dict()
+        self.may_promote = False
+        self.has_quorum = False
+
+    # TODO: str
 
 def sig_handler(sig, frame):
     raise SigHupException(
@@ -81,44 +103,41 @@ def get_systemd_units(systemd_units_str):
     return systemd_units
 
 
-def process(events2, resources, services, status):
+def process_drbd_events(events2, resources, status):
     line = events2.stdout.readline()
     m = MAY_PROMOT_RE.match(line)
     if m:
-        res_name, may_promote, promotion_score = m.groups()
-        if res_name in resources and may_promote == 'yes':
-            systemd_units_str = resources[res_name]['systemd-units']
-            for systemd_unit in get_systemd_units(systemd_units_str):
-                if not ensure_systemd_started(systemd_unit):
-                    break
-                if systemd_unit not in services:
-                    services.append(systemd_unit)
+        res_name, may_promote = m.groups()
+        if res_name in resources:
+            cur_status = status[res_name]
+            cur_status.may_promote = (may_promote == 'yes')
+            if cur_status.may_promote:
+                for connection in cur_status.connections.values():
+                    connection.status = 'Unknown'
+
     m = PEER_ROLE_RE.match(line)
     if m:
-        res_name, conn_name, role = m.groups()
-        if res_name in status:
-            status[res_name][conn_name] = role
+        res_name, conn_name, conn_status, role = m.groups()
+        if res_name in resources:
+            cur_status = status[res_name]
+            if conn_name not in cur_status.connections:
+                cur_status.connections[conn_name] = Connection(conn_name)
+            connection = cur_status.connections[conn_name]
+            connection.role = role
+            connection.status = conn_status or 'Connected'
+
     m = HAVE_QUORUM_RE.match(line)
     if m:
-        res_name, have_quorum = m.groups()
-        if res_name in resources and have_quorum == 'no':
-            systemd_units_str = resources[res_name]['systemd-units']
-            systemd_units = get_systemd_units(systemd_units_str)
-            to_stop = [x for x in systemd_units if x in services]
-            if to_stop:
-                print('Lost quorum on %s' % (res_name))
-            for systemd_unit in reversed(to_stop):
-                r = call_systemd('stop', systemd_unit)
-                if r:
-                    services.remove(systemd_unit)
-
+        res_name, has_quorum = m.groups()
+        if res_name in resources:
+            status[res_name].has_quorum = has_quorum == 'yes'
 
 def active_drbd_volume(res_name):
     retry = True
     args = ['drbdadm', 'adjust', res_name]
     while True:
         proc = subprocess.Popen(args, stderr=subprocess.PIPE)
-        (stdout, stderr) = proc.communicate()
+        _, stderr = proc.communicate()
         if not proc.returncode:
             return  # Success. \o/
 
@@ -134,6 +153,83 @@ def active_drbd_volume(res_name):
     print('Failed to execute `{}`: {}'.format(args, stderr))
 
 
+def get_resource_conf(res_name):
+    args = ['drbdsetup', 'show', res_name, '--json']
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (stdout, stderr) = proc.communicate()
+    if proc.returncode:
+        print('Failed to execute `{}`: {}'.format(args, stderr))
+        return
+
+    try:
+        conf = json.loads(stdout)
+        if not conf:
+            print('JSON conf of `{}` is empty.'.format(res_name))
+            return
+        return conf
+    except Exception as e:
+        print('Failed to parse JSON conf of `{}`: {}'.format(res_name, e))
+
+
+def stop_resource(resource, services, message):
+    systemd_units_str = resource['systemd-units']
+    systemd_units = get_systemd_units(systemd_units_str)
+    to_stop = [x for x in systemd_units if x in services]
+    if to_stop and message:
+        print(message)
+    for systemd_unit in reversed(to_stop):
+        r = call_systemd('stop', systemd_unit)
+        if r:
+            services.remove(systemd_unit)
+
+
+def process_resource(name, resource, status, services):
+    # A. We don't have the quorum => stop services.
+    if not status.has_quorum:
+        print('Can\'t process {}, waiting for quorum...'.format(name))
+        stop_resource(resource, services, 'Lost quorum on {}!'.format(name))
+        return
+
+    # B. Can't promote, nothing to do.
+    if not status.may_promote:
+        print('Can\'t promote {}.'.format(name))
+        return
+
+    # C. We have the quorum but we can't get connection count (bad config?).
+    conf = get_resource_conf(name)
+    if not conf:
+        stop_resource(resource, services, None)
+        return
+
+    try:
+        connection_count = len(conf[0]['connections'])
+    except Exception as e:
+        stop_resource(resource, services, 'Failed to get connection count of {}.'.format(name))
+        return
+    # TODO: Detect new connections.
+
+    # D. Specific case, only two nodes and quorum disabled.
+    if connection_count == 1:
+        if len(status.connections) != connection_count:
+            print('Current connection count is bad: {}. Expected: {}.'.format(
+                len(status.connections), connection_count)
+            )
+            return
+        for connection in status.connections.values():
+            if connection.status != 'Connected':
+                # Can be a simple reconnection or a split brain.
+                print('Bad status of {}: {}.'.format(connection.name, connection.status))
+                return
+
+    # E. We can start!
+    systemd_units_str = resource['systemd-units']
+    for systemd_unit in get_systemd_units(systemd_units_str):
+        if not ensure_systemd_started(systemd_unit):
+            break
+        if systemd_unit not in services:
+            services.append(systemd_unit)
+
+
 def main():
     services = []
     status = dict()
@@ -146,7 +242,7 @@ def main():
         )
     print('Managing DRBD resources: %s' % (' '.join(resources)))
     for res_name in resources:
-        status[res_name] = dict()
+        status[res_name] = Status()
         active_drbd_volume(res_name)
 
     signal.signal(signal.SIGHUP, sig_handler)
@@ -158,7 +254,9 @@ def main():
     run = True
     while run:
         try:
-            process(events2, resources, services, status)
+            process_drbd_events(events2, resources, status)
+            for res_name in resources:
+                process_resource(res_name, resources[res_name], status[res_name], services)
         except KeyboardInterrupt:
             run = False
         except SigHupException:
