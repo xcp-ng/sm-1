@@ -1263,9 +1263,11 @@ class LinstorVolumeManager(object):
                 'It exists remaining volumes'
             )
 
+        controller_is_running = self._controller_is_running()
         uri = 'linstor://localhost'
         try:
-            self._start_controller(start=False)
+            if controller_is_running:
+                self._start_controller(start=False)
 
             # 1. Umount LINSTOR database.
             self._mount_database_volume(
@@ -1290,7 +1292,7 @@ class LinstorVolumeManager(object):
                     self._linstor, pool.name, pool.node_name
                 )
         except Exception as e:
-            self._start_controller(start=True)
+            self._start_controller(start=controller_is_running)
             raise e
 
         try:
@@ -2504,6 +2506,10 @@ class LinstorVolumeManager(object):
         return False
 
     @classmethod
+    def _controller_is_running(cls):
+        return cls._service_is_running('linstor-controller')
+
+    @classmethod
     def _start_controller(cls, start=True):
         return cls._start_service('linstor-controller', start)
 
@@ -2518,6 +2524,13 @@ class LinstorVolumeManager(object):
                 'Failed to {} {}: {} {}'
                 .format(action, name, out, err)
             )
+
+    @staticmethod
+    def _service_is_running(name):
+        (ret, out, err) = util.doexec([
+            'systemctl', 'is-active', '--quiet', name
+        ])
+        return not ret
 
     @staticmethod
     def _is_mounted(mountpoint):
