@@ -14,14 +14,18 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+# We must modify default import path, we don't want to import modules
+# installed in plugins folder and instead we must import from LINSTOR driver
+# folder.
+import sys
+sys.path[0] = '/opt/xensource/sm/'
+
 import base64
 import distutils.util
 import time
 import subprocess
-import sys
 import XenAPIPlugin
 
-sys.path.append('/opt/xensource/sm/')
 from linstorjournaler import LinstorJournaler
 from linstorvolumemanager import get_controller_uri, LinstorVolumeManager
 from lock import Lock
