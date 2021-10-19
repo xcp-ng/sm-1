@@ -1507,7 +1507,7 @@ class LinstorVolumeManager(object):
             try:
                 logger('Creating database volume...')
                 volume_path = cls._create_database_volume(
-                    lin, group_name, auto_quorum
+                    lin, group_name, node_names, redundancy, auto_quorum
                 )
             except LinstorVolumeManagerError as e:
                 if e.code != LinstorVolumeManagerError.ERR_VOLUME_EXISTS:
@@ -1786,18 +1786,32 @@ class LinstorVolumeManager(object):
         size = self.round_up_volume_size(size)
         self._mark_resource_cache_as_dirty()
 
-        # A. Basic case when we use the default redundancy of the group.
-        if not no_diskless:
+        def create_definition():
             self._check_volume_creation_errors(
                 self._linstor.resource_group_spawn(
                     rsc_grp_name=self._group_name,
                     rsc_dfn_name=volume_name,
                     vlm_sizes=['{}B'.format(size)],
-                    definitions_only=not place_resources
+                    definitions_only=True
                 ),
                 volume_uuid,
                 self._group_name
             )
+            self._increase_volume_peer_slots(self._linstor, volume_name)
+
+        # A. Basic case when we use the default redundancy of the group.
+        if not no_diskless:
+            create_definition()
+            if place_resources:
+                self._check_volume_creation_errors(
+                    self._linstor.resource_auto_place(
+                        rsc_name=volume_name,
+                        place_count=self._redundancy,
+                        diskless_on_remaining=not no_diskless
+                    ),
+                    volume_uuid,
+                    self._group_name
+                )
             return
 
         # B. Complex case.
@@ -1829,17 +1843,7 @@ class LinstorVolumeManager(object):
 
         def create():
             try:
-                self._check_volume_creation_errors(
-                    self._linstor.resource_group_spawn(
-                        rsc_grp_name=self._group_name,
-                        rsc_dfn_name=volume_name,
-                        vlm_sizes=['{}B'.format(size)],
-                        definitions_only=True
-                    ),
-                    volume_uuid,
-                    self._group_name
-                )
-
+                create_definition()
                 result = self._linstor.resource_create(resources)
                 error_str = self._get_error_str(result)
                 if error_str:
@@ -2165,6 +2169,16 @@ class LinstorVolumeManager(object):
         )
 
     @classmethod
+    def _increase_volume_peer_slots(cls, lin, volume_name):
+        result = lin.resource_dfn_modify(volume_name, {}, peer_slots=31)
+        error_str = cls._get_error_str(result)
+        if error_str:
+            raise LinstorVolumeManagerError(
+                'Could not increase volume peer slots of {}: {}'
+                .format(volume_name, error_str)
+            )
+
+    @classmethod
     def _activate_device_path(cls, lin, node_name, volume_name):
         result = lin.resource_create([
             linstor.ResourceData(node_name, volume_name, diskless=True)
@@ -2215,7 +2229,9 @@ class LinstorVolumeManager(object):
         return resources[0].volumes[0].device_path
 
     @classmethod
-    def _create_database_volume(cls, lin, group_name, auto_quorum):
+    def _create_database_volume(
+        cls, lin, group_name, node_names, redundancy, auto_quorum
+    ):
         try:
             dfns = lin.resource_dfn_list_raise().resource_definitions
         except Exception as e:
@@ -2242,13 +2258,40 @@ class LinstorVolumeManager(object):
                 .format(e)
             )
 
+        # Create the database definition.
         size = cls.round_up_volume_size(DATABASE_SIZE)
         cls._check_volume_creation_errors(lin.resource_group_spawn(
             rsc_grp_name=group_name,
             rsc_dfn_name=DATABASE_VOLUME_NAME,
             vlm_sizes=['{}B'.format(size)],
-            definitions_only=False
+            definitions_only=True
         ), DATABASE_VOLUME_NAME, group_name)
+        cls._increase_volume_peer_slots(lin, DATABASE_VOLUME_NAME)
+
+        # Create real resources on the first nodes.
+        resources = []
+        for node_name in node_names[:redundancy]:
+            resources.append(linstor.ResourceData(
+                node_name=node_name,
+                rsc_name=DATABASE_VOLUME_NAME,
+                storage_pool=group_name
+            ))
+        # Create diskless resources on the remaining set.
+        for node_name in node_names[redundancy:]:
+            resources.append(linstor.ResourceData(
+                node_name=node_name,
+                rsc_name=DATABASE_VOLUME_NAME,
+                diskless=True
+            ))
+
+        result = lin.resource_create(resources)
+        error_str = cls._get_error_str(result)
+        if error_str:
+            raise LinstorVolumeManagerError(
+                'Could not create database volume from SR `{}`: {}'.format(
+                    group_name, error_str
+                )
+            )
 
         # We must modify the quorum. Otherwise we can't use correctly the
         # minidrbdcluster daemon.
@@ -2264,7 +2307,14 @@ class LinstorVolumeManager(object):
                     .format(error_str)
                 )
 
+        # Create database and ensure path exists locally and
+        # on replicated devices.
         current_device_path = cls._request_database_path(lin, activate=True)
+
+        # Ensure diskless paths exist on other hosts. Otherwise PBDs can't be
+        # plugged.
+        for node_name in node_names:
+            cls._activate_device_path(lin, node_name, DATABASE_VOLUME_NAME)
 
         # We use realpath here to get the /dev/drbd<id> path instead of
         # /dev/drbd/by-res/<resource_name>.
