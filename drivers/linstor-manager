@@ -364,6 +364,13 @@ def lsof_resource(session, args):
         raise
 
 
+def has_controller_running(session, args):
+    (ret, stdout, stderr) = util.doexec([
+        'systemctl', 'is-active', '--quiet', 'linstor-controller'
+    ])
+    return str(ret == 0)
+
+
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
         'prepareSr': prepare_sr,
@@ -382,5 +389,6 @@ if __name__ == '__main__':
         'getKeyHash': get_key_hash,
         'getBlockBitmap': get_block_bitmap,
         'lockVdi': lock_vdi,
-        'lsofResource': lsof_resource
+        'lsofResource': lsof_resource,
+        'hasControllerRunning': has_controller_running
     })
