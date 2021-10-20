@@ -16,6 +16,7 @@
 #
 
 
+import distutils.util
 import errno
 import glob
 import json
@@ -41,11 +42,12 @@ REG_DRBDSETUP_IP = re.compile('[^\\s]+\\s+(.*):.*$')
 
 DRBD_BY_RES_PATH = '/dev/drbd/by-res/'
 
+PLUGIN = 'linstor-manager'
+
 
 # Check if a path is a DRBD resource and log the process name/pid
 # that opened it.
 def log_lsof_drbd(path):
-    PLUGIN = 'linstor-manager'
     PLUGIN_CMD = 'lsofResource'
 
     # Ignore if it's not a symlink to DRBD resource.
@@ -159,21 +161,39 @@ def get_remote_host_ip(node_name):
 
 
 def _get_controller_uri():
+    PLUGIN_CMD = 'hasControllerRunning'
+
+    # Try to find controller using drbdadm.
     (ret, stdout, stderr) = util.doexec([
         'drbdadm', 'status', DATABASE_VOLUME_NAME
     ])
-    if ret != 0:
-        return
+    if ret == 0:
+        # If we are here, the database device exists locally.
 
-    if stdout.startswith('{} role:Primary'.format(DATABASE_VOLUME_NAME)):
-        return 'linstor://localhost'
+        if stdout.startswith('{} role:Primary'.format(DATABASE_VOLUME_NAME)):
+            # Nice case, we have the controller running on this local host.
+            return 'linstor://localhost'
 
-    res = REG_DRBDADM_PRIMARY.search(stdout)
-    if res:
-        node_name = res.groups()[0]
-        ip = get_remote_host_ip(node_name)
-        if ip:
-            return 'linstor://' + ip
+        # Try to find the host using DRBD connections.
+        res = REG_DRBDADM_PRIMARY.search(stdout)
+        if res:
+            node_name = res.groups()[0]
+            ip = get_remote_host_ip(node_name)
+            if ip:
+                return 'linstor://' + ip
+
+    # Worst case: we use many hosts in the pool (>= 4), so we can't find the
+    # primary using drbdadm because we don't have all connections to the
+    # replicated volume. `drbdadm status xcp-persistent-database` returns
+    # 3 connections by default.
+    session = util.get_localAPI_session()
+    for host_ref, host_record in session.xenapi.host.get_all_records().items():
+        if distutils.util.strtobool(
+            session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
+        ):
+            return 'linstor://' + host_record['hostname']
+
+    # Not found, maybe we are trying to create the SR...
 
 
 def get_controller_uri():
