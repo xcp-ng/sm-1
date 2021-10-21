@@ -210,19 +210,26 @@ def get_controller_uri():
 
 
 def get_controller_node_name():
+    PLUGIN_CMD = 'hasControllerRunning'
+
     (ret, stdout, stderr) = util.doexec([
         'drbdadm', 'status', DATABASE_VOLUME_NAME
     ])
-    if ret != 0:
-        return
 
-    if stdout.startswith('{} role:Primary'.format(DATABASE_VOLUME_NAME)):
-        return 'localhost'
+    if ret == 0:
+        if stdout.startswith('{} role:Primary'.format(DATABASE_VOLUME_NAME)):
+            return 'localhost'
 
-    res = REG_DRBDADM_PRIMARY.search(stdout)
-    if res:
-        return res.groups()[0]
+        res = REG_DRBDADM_PRIMARY.search(stdout)
+        if res:
+            return res.groups()[0]
 
+    session = util.get_localAPI_session()
+    for host_ref, host_record in session.xenapi.host.get_all_records().items():
+        if distutils.util.strtobool(
+            session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
+        ):
+            return host_record['hostname']
 
 # ==============================================================================
 
