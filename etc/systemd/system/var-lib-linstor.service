@@ -1,0 +1,21 @@
+# Regarding the current version of systemd (v.219) used in XCP-ng, we can't use
+# the ReadWriteOnly option (to apply the -w flag, it's not the same than -o rw).
+# This file is a workaround to avoid RO. It must be replaced with the code below
+# in a mount unit. Compatible with version >= 246.
+#
+# [Unit]
+# Description=Filesystem for the LINSTOR controller
+#
+# [Mount]
+# What=/dev/drbd/by-res/xcp-persistent-database/0
+# Where=/var/lib/linstor
+# ReadWriteOnly=true
+
+[Unit]
+Description=Mount filesystem for the LINSTOR controller
+
+[Service]
+Type=oneshot
+ExecStart=/bin/mount -w /dev/drbd/by-res/xcp-persistent-database/0 /var/lib/linstor
+ExecStop=/bin/umount /var/lib/linstor
+RemainAfterExit=true
