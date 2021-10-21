@@ -175,7 +175,7 @@ install: precheck
 	  $(SM_STAGING)/$(LOGROTATE_DIR)
 	install -m 644 etc/systemd/system/linstor-satellite.service.d/override.conf \
 	  $(SM_STAGING)/$(SYSTEMD_CONF_DIR)/linstor-satellite.service.d/
-	install -m 644 etc/systemd/system/var-lib-linstor.mount \
+	install -m 644 etc/systemd/system/var-lib-linstor.service \
 	  $(SM_STAGING)/$(SYSTEMD_CONF_DIR)
 	install -m 644 etc/minidrbdcluster.ini \
 	  $(SM_STAGING)/$(MINI_DRBD_CLUSTER_CONF_DIR)
