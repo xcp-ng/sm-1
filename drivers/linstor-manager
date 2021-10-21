@@ -187,7 +187,7 @@ def destroy(session, args):
 
         # When destroy is called, there are no running minidrbdcluster daemons.
         # So the controllers are stopped too, we must start an instance.
-        restart_service('var-lib-linstor.mount')
+        restart_service('var-lib-linstor.service')
         restart_service('linstor-controller')
 
         linstor = LinstorVolumeManager(
@@ -199,7 +199,7 @@ def destroy(session, args):
         return str(True)
     except Exception as e:
         stop_service('linstor-controller')
-        stop_service('var-lib-linstor.mount')
+        stop_service('var-lib-linstor.service')
         util.SMlog('linstor-manager:destroy error: {}'.format(e))
     return str(False)
 
