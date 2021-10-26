@@ -775,13 +775,25 @@ class LinstorSR(SR.SR):
     # Network.
     # --------------------------------------------------------------------------
 
-    def _exec_manager_command(self, host, command, args, error):
-        ret = self.session.xenapi.host.call_plugin(
-            host, self.MANAGER_PLUGIN, command, args
-        )
+    def _exec_manager_command(self, host_ref, command, args, error):
+        host_rec = self.session.xenapi.host.get_record(host_ref)
+        host_uuid = host_rec['uuid']
+
+        try:
+            ret = self.session.xenapi.host.call_plugin(
+                host_ref, self.MANAGER_PLUGIN, command, args
+            )
+        except Exception as e:
+            util.SMlog(
+                'call-plugin on {} ({}:{} with {}) raised'.format(
+                    host_uuid, self.MANAGER_PLUGIN, command, args
+                )
+            )
+            raise e
+
         util.SMlog(
-            'call-plugin ({}:{} with {}) returned: {}'.format(
-                self.MANAGER_PLUGIN, command, args, ret
+            'call-plugin on {} ({}:{} with {}) returned: {}'.format(
+                host_uuid, self.MANAGER_PLUGIN, command, args, ret
             )
         )
         if ret == 'False':
