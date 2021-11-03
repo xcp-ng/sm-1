@@ -1899,7 +1899,16 @@ class LinstorVDI(VDI.VDI):
             self.size = volume_info.virtual_size
             self.parent = ''
         else:
-            vhd_info = self.sr._vhdutil.get_vhd_info(self.uuid)
+            try:
+                vhd_info = self.sr._vhdutil.get_vhd_info(self.uuid)
+            except util.CommandException as e:
+                if e.code != errno.ENOENT:
+                    raise
+                # Path doesn't exist. Probably a diskless without local path.
+                # Force creation and retry.
+                self._linstor.get_device_path(self.uuid)
+                vhd_info = self.sr._vhdutil.get_vhd_info(self.uuid)
+
             self.hidden = vhd_info.hidden
             self.size = vhd_info.sizeVirt
             self.parent = vhd_info.parentUuid
