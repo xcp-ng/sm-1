@@ -850,9 +850,8 @@ def timeout_call(timeoutseconds, function, *arguments):
     signal.alarm(timeoutseconds)
     try:
         function(*arguments)
-    except:
+    finally:
         signal.alarm(0)
-        raise
 
 
 def _incr_iscsiSR_refcount(targetIQN, uuid):
