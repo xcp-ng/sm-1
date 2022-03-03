@@ -186,15 +186,16 @@ def _get_controller_uri():
     # primary using drbdadm because we don't have all connections to the
     # replicated volume. `drbdadm status xcp-persistent-database` returns
     # 3 connections by default.
-    session = util.get_localAPI_session()
-    for host_ref, host_record in session.xenapi.host.get_all_records().items():
-        if distutils.util.strtobool(
-            session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
-        ):
-            return 'linstor://' + host_record['hostname']
-
-    # Not found, maybe we are trying to create the SR...
-
+    try:
+        session = util.get_localAPI_session()
+        for host_ref, host_record in session.xenapi.host.get_all_records().items():
+            if distutils.util.strtobool(
+                session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
+            ):
+                return 'linstor://' + host_record['hostname']
+    except:
+        # Not found, maybe we are trying to create the SR...
+        pass
 
 def get_controller_uri():
     retries = 0
@@ -349,7 +350,8 @@ class LinstorVolumeManager(object):
     # --------------------------------------------------------------------------
 
     def __init__(
-        self, uri, group_name, repair=False, logger=default_logger.__func__
+        self, uri, group_name, repair=False, logger=default_logger.__func__,
+        attempt_count=30
     ):
         """
         Create a new LinstorVolumeManager object.
@@ -358,9 +360,12 @@ class LinstorVolumeManager(object):
         :param bool repair: If true we try to remove bad volumes due to a crash
         or unexpected behavior.
         :param function logger: Function to log messages.
+        :param int attempt_count: Number of attempts to join the controller.
         """
 
-        self._linstor = self._create_linstor_instance(uri)
+        self._linstor = self._create_linstor_instance(
+            uri, attempt_count=attempt_count
+        )
         self._base_group_name = group_name
 
         # Ensure group exists.
@@ -2169,7 +2174,9 @@ class LinstorVolumeManager(object):
         ])
 
     @classmethod
-    def _create_linstor_instance(cls, uri, keep_uri_unmodified=False):
+    def _create_linstor_instance(
+        cls, uri, keep_uri_unmodified=False, attempt_count=30
+    ):
         retry = False
 
         def connect(uri):
@@ -2193,7 +2200,8 @@ class LinstorVolumeManager(object):
 
         return util.retry(
             lambda: connect(uri),
-            maxretry=10,
+            maxretry=attempt_count,
+            period=1,
             exceptions=[
                 linstor.errors.LinstorNetworkError,
                 LinstorVolumeManagerError
