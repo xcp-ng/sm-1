@@ -46,6 +46,7 @@ import traceback
 import util
 import VDI
 import vhdutil
+import xml.etree.ElementTree as xml_parser
 import xmlrpclib
 import xs_errors
 
@@ -55,6 +56,8 @@ from srmetadata import \
     METADATA_OF_POOL_TAG
 
 HIDDEN_TAG = 'hidden'
+
+XHA_CONFIG_PATH = '/etc/xensource/xhad.conf'
 
 FORK_LOG_DAEMON = '/opt/xensource/libexec/fork-log-daemon'
 
@@ -248,6 +251,26 @@ def deflate(linstor, vdi_uuid, vdi_path, new_size, old_size):
     # TODO: Change the LINSTOR volume size using linstor.resize_volume.
 
 
+def get_ips_from_xha_config_file():
+    ips = []
+    try:
+        # Ensure there is no dirty read problem.
+        # For example if the HA is reloaded.
+        tree = util.retry(
+            lambda: xml_parser.parse(XHA_CONFIG_PATH),
+            maxretry=10,
+            period=1
+        )
+
+        for node in tree.getroot()[0]:
+            if node.tag == 'host':
+                for host_node in node:
+                    if host_node.tag == 'IPaddress':
+                        ips.append(host_node.text)
+    except:
+        pass
+    return ips
+
 # ==============================================================================
 
 # Usage example:
@@ -363,18 +386,41 @@ class LinstorSR(SR.SR):
                 if self.srcmd.cmd in (
                     'vdi_attach_from_config', 'vdi_detach_from_config'
                 ):
-                    # We must have a valid LINSTOR instance here without using
-                    # the XAPI.
+                    def create_linstor(uri, attempt_count=30):
+                        self._linstor = LinstorVolumeManager(
+                            uri,
+                            self._group_name,
+                            logger=util.SMlog,
+                            attempt_count=attempt_count
+                        )
+
                     controller_uri = get_controller_uri()
+                    if controller_uri:
+                        create_linstor(controller_uri)
+                    else:
+                        def connect():
+                            # We must have a valid LINSTOR instance here without using
+                            # the XAPI. Fallback with the HA config file.
+                            for ip in get_ips_from_xha_config_file():
+                                controller_uri = 'linstor://' + ip
+                                try:
+                                    util.SMlog('Connecting from config to LINSTOR controller using: {}'.format(ip))
+                                    create_linstor(controller_uri, attempt_count=0)
+                                    return controller_uri
+                                except:
+                                    pass
+
+                        controller_uri = util.retry(connect, maxretry=30, period=1)
+                        if not controller_uri:
+                            raise xs_errors.XenError(
+                                'SRUnavailable',
+                                opterr='No valid controller URI to attach/detach from config'
+                            )
+
                     self._journaler = LinstorJournaler(
                         controller_uri, self._group_name, logger=util.SMlog
                     )
 
-                    self._linstor = LinstorVolumeManager(
-                        controller_uri,
-                        self._group_name,
-                        logger=util.SMlog
-                    )
                 return wrapped_method(self, *args, **kwargs)
 
             if not self._is_master:
