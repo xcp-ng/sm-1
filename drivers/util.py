@@ -700,6 +700,18 @@ def get_hosts_attached_on(session, vdi_uuids):
             host_refs[key[len('host_'):]] = True
     return host_refs.keys()
 
+def get_this_host_address(session):
+    host_uuid = get_this_host()
+    host_ref = session.xenapi.host.get_by_uuid(host_uuid)
+    return session.xenapi.host.get_record(host_ref)['address']
+
+def get_host_addresses(session):
+    addresses = []
+    hosts = session.xenapi.host.get_all_records()
+    for record in hosts.itervalues():
+        addresses.append(record['address'])
+    return addresses
+
 def get_this_host_ref(session):
     host_uuid = get_this_host()
     host_ref = session.xenapi.host.get_by_uuid(host_uuid)
