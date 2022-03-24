@@ -251,8 +251,15 @@ def deflate(linstor, vdi_uuid, vdi_path, new_size, old_size):
     # TODO: Change the LINSTOR volume size using linstor.resize_volume.
 
 
+IPS_XHA_CACHE = None
+
+
 def get_ips_from_xha_config_file():
-    ips = []
+    if IPS_XHA_CACHE:
+        return IPS_XHA_CACHE
+
+    ips = dict()
+    host_ip = None
     try:
         # Ensure there is no dirty read problem.
         # For example if the HA is reloaded.
@@ -261,15 +268,50 @@ def get_ips_from_xha_config_file():
             maxretry=10,
             period=1
         )
-
-        for node in tree.getroot()[0]:
-            if node.tag == 'host':
-                for host_node in node:
-                    if host_node.tag == 'IPaddress':
-                        ips.append(host_node.text)
     except:
-        pass
-    return ips
+        return (host_ip, ips)
+
+    def parse_host_nodes(ips, node):
+        current_id = None
+        current_ip = None
+
+        for sub_node in node:
+            if sub_node.tag == 'IPaddress':
+                current_ip = sub_node.text
+            elif sub_node.tag == 'HostID':
+                current_id = sub_node.text
+            else:
+                continue
+
+            if current_id and current_ip:
+                ips[current_id] = current_ip
+                return
+        util.SMlog('Ill-formed XHA file, missing IPaddress or/and HostID')
+
+    def parse_common_config(ips, node):
+        for sub_node in node:
+            if sub_node.tag == 'host':
+                parse_host_nodes(ips, sub_node)
+
+    def parse_local_config(ips, node):
+        for sub_node in node:
+            if sub_node.tag == 'localhost':
+                for host_node in sub_node:
+                    if host_node.tag == 'HostID':
+                        return host_node.text
+
+    for node in tree.getroot():
+        if node.tag == 'common-config':
+            parse_common_config(ips, node)
+        elif node.tag == 'local-config':
+            host_ip = parse_local_config(ips, node)
+        else:
+            continue
+
+        if ips and host_ip:
+            break
+
+    return (host_ip, ips)
 
 # ==============================================================================
 
@@ -401,7 +443,7 @@ class LinstorSR(SR.SR):
                         def connect():
                             # We must have a valid LINSTOR instance here without using
                             # the XAPI. Fallback with the HA config file.
-                            for ip in get_ips_from_xha_config_file():
+                            for ip in get_ips_from_xha_config_file()[1].values():
                                 controller_uri = 'linstor://' + ip
                                 try:
                                     util.SMlog('Connecting from config to LINSTOR controller using: {}'.format(ip))
@@ -2402,10 +2444,23 @@ class LinstorVDI(VDI.VDI):
             else:
                 port = '8077'
 
+            try:
+                session = util.get_localAPI_session()
+                host_ip = util.get_this_host_address(session)
+            except:
+                # Fallback using the XHA file if session not available.
+                host_ip, _ = get_ips_from_xha_config_file()
+                if not host_ip:
+                    raise Exception(
+                        'Cannot start persistent HTTP server: no XAPI session, nor XHA config file'
+                    )
+
             arguments = [
                 'http-disk-server',
                 '--disk',
                 '/dev/drbd/by-res/{}/0'.format(volume_name),
+                '--ip',
+                host_ip,
                 '--port',
                 port
             ]
@@ -2432,7 +2487,10 @@ class LinstorVDI(VDI.VDI):
 
             if http_server:
                 # Kill process and children in this case...
-                os.killpg(os.getpgid(http_server.pid), signal.SIGTERM)
+                try:
+                    os.killpg(os.getpgid(http_server.pid), signal.SIGTERM)
+                except:
+                    pass
 
             raise xs_errors.XenError(
                 'VDIUnavailable',
@@ -2456,6 +2514,17 @@ class LinstorVDI(VDI.VDI):
             else:
                 port = '8077'
 
+            try:
+                session = util.get_localAPI_session()
+                ips = util.get_host_addresses(session)
+            except Exception as e:
+                _, ips = get_ips_from_xha_config_file()
+                if not ips:
+                    raise Exception(
+                        'Cannot start persistent NBD server: no XAPI session, nor XHA config file ({})'.format(e)
+                    )
+                ips = ips.values()
+
             arguments = [
                 'nbd-http-server',
                 '--socket-path',
@@ -2463,10 +2532,7 @@ class LinstorVDI(VDI.VDI):
                 '--nbd-name',
                 volume_name,
                 '--urls',
-                ','.join(map(
-                    lambda host: "http://" + host + ':' + port,
-                    self.sr._hosts
-                ))
+                ','.join(map(lambda ip: 'http://' + ip + ':' + port, ips))
             ]
 
             util.SMlog('Starting {} using port {}...'.format(arguments[0], port))
@@ -2515,7 +2581,10 @@ class LinstorVDI(VDI.VDI):
 
             if nbd_server:
                 # Kill process and children in this case...
-                os.killpg(os.getpgid(nbd_server.pid), signal.SIGTERM)
+                try:
+                    os.killpg(os.getpgid(nbd_server.pid), signal.SIGTERM)
+                except:
+                    pass
 
             raise xs_errors.XenError(
                 'VDIUnavailable',
