@@ -192,7 +192,7 @@ def _get_controller_uri():
             if distutils.util.strtobool(
                 session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
             ):
-                return 'linstor://' + host_record['hostname']
+                return 'linstor://' + host_record['address']
     except:
         # Not found, maybe we are trying to create the SR...
         pass
