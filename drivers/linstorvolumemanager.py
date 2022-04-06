@@ -403,6 +403,15 @@ class LinstorVolumeManager(object):
         return self._base_group_name
 
     @property
+    def redundancy(self):
+        """
+        Give the used redundancy.
+        :return: The redundancy.
+        :rtype: int
+        """
+        return self._redundancy
+
+    @property
     def volumes(self):
         """
         Give the volumes uuid set.
@@ -1375,6 +1384,51 @@ class LinstorVolumeManager(object):
         cache.
         """
         self._mark_resource_cache_as_dirty()
+
+    def has_node(self, node_name):
+        """
+        Check if a node exists in the LINSTOR database.
+        :rtype: bool
+        """
+        result = self._linstor.node_list()
+        error_str = self._get_error_str(result)
+        if error_str:
+            raise LinstorVolumeManagerError(
+                'Failed to list nodes using `{}`: {}'
+                .format(node_name, error_str)
+            )
+        return bool(result[0].node(node_name))
+
+    def create_node(self, node_name, ip):
+        """
+        Create a new node in the LINSTOR database.
+        :param str node_name: Node name to use.
+        :param str ip: Host IP to communicate.
+        """
+        result = self._linstor.node_create(
+            node_name,
+            linstor.consts.VAL_NODE_TYPE_CMBD,
+            ip
+        )
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
+            raise LinstorVolumeManagerError(
+                'Failed to create node `{}`: {}'.format(node_name, error_str)
+            )
+
+    def destroy_node(self, node_name):
+        """
+        Destroy a node in the LINSTOR database.
+        :param str node_name: Node name to remove.
+        """
+        result = self._linstor.node_delete(node_name)
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
+            raise LinstorVolumeManagerError(
+                'Failed to destroy node `{}`: {}'.format(node_name, error_str)
+            )
 
     @classmethod
     def create_sr(
