@@ -401,7 +401,9 @@ class LinstorSR(SR.SR):
             self._ips = None
         else:
             self._ips = self.dconf['ips'].split(',')
-        self._redundancy = int(self.dconf['redundancy'] or 1)
+
+        if self.cmd == 'sr_create':
+            self._redundancy = int(self.dconf['redundancy']) or 1
         self._linstor = None  # Ensure that LINSTOR attribute exists.
         self._journaler = None
 
@@ -1004,7 +1006,7 @@ class LinstorSR(SR.SR):
         # ensures the displayed physical size is reachable by the user.
         self.physical_size = \
             self._linstor.min_physical_size * len(self._hosts) / \
-            self._redundancy
+            self._linstor.redundancy
 
         self.physical_utilisation = self._linstor.allocated_volume_size
 
