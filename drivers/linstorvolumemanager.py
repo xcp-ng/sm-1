@@ -1543,9 +1543,14 @@ class LinstorVolumeManager(object):
                 )
 
         # 2. Create storage pool on each node + resource group.
+        reg_volume_group_not_found = re.compile(
+            ".*Volume group '.*' not found$"
+        )
+
         i = 0
         try:
             # 2.a. Create storage pools.
+            storage_pool_count = 0
             while i < len(node_names):
                 node_name = node_names[i]
 
@@ -1556,16 +1561,34 @@ class LinstorVolumeManager(object):
                     driver_pool_name=driver_pool_name
                 )
 
-                error_str = cls._get_error_str(result)
-                if error_str:
-                    raise LinstorVolumeManagerError(
-                        'Could not create SP `{}` on node `{}`: {}'.format(
-                            group_name,
-                            node_name,
-                            error_str
+                errors = linstor.Linstor.filter_api_call_response_errors(
+                    result
+                )
+                if errors:
+                    if len(errors) == 1 and errors[0].is_error(
+                        linstor.consts.FAIL_STOR_POOL_CONFIGURATION_ERROR
+                    ) and reg_volume_group_not_found.match(errors[0].message):
+                        logger(
+                            'Volume group `{}` not found on `{}`. Ignoring...'
+                            .format(group_name, node_name)
                         )
-                    )
+                        cls._destroy_storage_pool(lin, group_name, node_name)
+                    else:
+                        error_str = cls._get_error_str(result)
+                        raise LinstorVolumeManagerError(
+                            'Could not create SP `{}` on node `{}`: {}'
+                            .format(group_name, node_name, error_str)
+                        )
+                else:
+                    storage_pool_count += 1
                 i += 1
+
+            if not storage_pool_count:
+                raise LinstorVolumeManagerError(
+                    'Unable to create SR `{}`: No VG group found'.format(
+                        group_name,
+                    )
+                )
 
             # 2.b. Create resource group.
             result = lin.resource_group_create(
@@ -2345,12 +2368,21 @@ class LinstorVolumeManager(object):
         # "Not enough available nodes"
         # I don't understand why but this command protect against this bug.
         try:
-            lin.storage_pool_list_raise(filter_by_stor_pools=[group_name])
+            pools = lin.storage_pool_list_raise(
+                filter_by_stor_pools=[group_name]
+            )
         except Exception as e:
             raise LinstorVolumeManagerError(
                 'Failed to get storage pool list before database creation: {}'
                 .format(e)
             )
+
+        # Ensure we have a correct list of storage pools.
+        nodes_with_pool = map(lambda pool: pool.node_name, pools.storage_pools)
+        assert nodes_with_pool  # We must have at least one storage pool!
+        for node_name in nodes_with_pool:
+            assert node_name in node_names
+        util.SMlog('Nodes with storage pool: {}'.format(nodes_with_pool))
 
         # Create the database definition.
         size = cls.round_up_volume_size(DATABASE_SIZE)
@@ -2364,14 +2396,26 @@ class LinstorVolumeManager(object):
 
         # Create real resources on the first nodes.
         resources = []
-        for node_name in node_names[:redundancy]:
+
+        diskful_nodes = []
+        diskless_nodes = []
+        for node_name in node_names:
+            if node_name in nodes_with_pool:
+                diskful_nodes.append(node_name)
+            else:
+                diskless_nodes.append(node_name)
+
+        assert diskful_nodes
+        for node_name in diskful_nodes[:redundancy]:
+            util.SMlog('Create database diskful on {}'.format(node_name))
             resources.append(linstor.ResourceData(
                 node_name=node_name,
                 rsc_name=DATABASE_VOLUME_NAME,
                 storage_pool=group_name
             ))
         # Create diskless resources on the remaining set.
-        for node_name in node_names[redundancy:]:
+        for node_name in diskful_nodes[redundancy:] + diskless_nodes:
+            util.SMlog('Create database diskless on {}'.format(node_name))
             resources.append(linstor.ResourceData(
                 node_name=node_name,
                 rsc_name=DATABASE_VOLUME_NAME,
