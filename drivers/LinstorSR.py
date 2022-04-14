@@ -34,6 +34,7 @@ import cleanup
 import distutils
 import errno
 import functools
+import lvutil
 import os
 import re
 import scsiutil
@@ -319,6 +320,15 @@ def get_ips_from_xha_config_file():
             break
 
     return (host_ip, ips)
+
+
+def activate_lvm_group(group_name):
+    path = group_name.split('/')
+    assert path and len(path) <= 2
+    try:
+        lvutil.setActiveVG(path[0], True)
+    except Exception as e:
+        util.SMlog('Cannot active VG `{}`: {}'.format(path[0], e))
 
 # ==============================================================================
 
@@ -673,7 +683,7 @@ class LinstorSR(SR.SR):
         # Ensure ports are opened and LINSTOR satellites
         # are activated. In the same time the minidrbdcluster instances
         # must be stopped.
-        self._prepare_sr_on_all_hosts(enabled=True)
+        self._prepare_sr_on_all_hosts(self._group_name, enabled=True)
 
         # Create SR.
         # Throw if the SR already exists.
@@ -798,6 +808,7 @@ class LinstorSR(SR.SR):
                 'SRUnavailable',
                 opterr='no such group: {}'.format(self._group_name)
             )
+        activate_lvm_group(self._group_name)
 
     @_locked_load
     def detach(self, uuid):
@@ -907,20 +918,20 @@ class LinstorSR(SR.SR):
                 opterr='Plugin {} failed'.format(self.MANAGER_PLUGIN)
             )
 
-    def _prepare_sr(self, host, enabled):
+    def _prepare_sr(self, host, group_name, enabled):
         self._exec_manager_command(
             host,
             'prepareSr' if enabled else 'releaseSr',
-            {},
+            {'groupName': group_name},
             'SRUnavailable'
         )
 
-    def _prepare_sr_on_all_hosts(self, enabled):
+    def _prepare_sr_on_all_hosts(self, group_name, enabled):
         master = util.get_master_ref(self.session)
-        self._prepare_sr(master, enabled)
+        self._prepare_sr(master, group_name, enabled)
 
         for slave in util.get_all_slaves(self.session):
-            self._prepare_sr(slave, enabled)
+            self._prepare_sr(slave, group_name, enabled)
 
     def _update_minidrbdcluster(self, host, enabled):
         self._exec_manager_command(
