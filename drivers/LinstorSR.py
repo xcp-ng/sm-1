@@ -61,6 +61,13 @@ XHA_CONFIG_PATH = '/etc/xensource/xhad.conf'
 
 FORK_LOG_DAEMON = '/opt/xensource/libexec/fork-log-daemon'
 
+# This flag can be disabled to debug the DRBD layer.
+# When this config var is False, the HA can only be used under
+# specific conditions:
+# - Only one heartbeat diskless VDI is present in the pool.
+# - The other hearbeat volumes must be diskful and limited to a maximum of 3.
+USE_HTTP_NBD_SERVERS = True
+
 # ==============================================================================
 
 # TODO: Supports 'VDI_INTRODUCE', 'VDI_RESET_ON_BOOT/2', 'SR_TRIM',
@@ -1769,7 +1776,11 @@ class LinstorVDI(VDI.VDI):
             self.xenstore_data = {}
         self.xenstore_data['storage-type'] = LinstorSR.DRIVER_TYPE
 
-        if attach_from_config and self.path.startswith('/dev/http-nbd/'):
+        if (
+            USE_HTTP_NBD_SERVERS and
+            attach_from_config and
+            self.path.startswith('/dev/http-nbd/')
+        ):
             return self._attach_using_http_nbd()
 
         if not util.pathexists(self.path):
@@ -1934,7 +1945,7 @@ class LinstorVDI(VDI.VDI):
         # We can't increase this limitation, so we use a NBD/HTTP device
         # instead.
         volume_name = self._linstor.get_volume_name(self.uuid)
-        if volume_name not in [
+        if not USE_HTTP_NBD_SERVERS or volume_name not in [
             'xcp-persistent-ha-statefile', 'xcp-persistent-redo-log'
         ]:
             if not self.path or not util.pathexists(self.path):
