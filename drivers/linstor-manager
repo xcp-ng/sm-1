@@ -76,6 +76,8 @@ def update_minidrbdcluster_service(start):
 
 def prepare_sr(session, args):
     try:
+        LinstorSR.activate_lvm_group(args['groupName'])
+
         update_all_ports(open=True)
         # We don't want to enable and start minidrbdcluster daemon during
         # SR creation.
