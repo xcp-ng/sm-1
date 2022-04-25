@@ -23,6 +23,7 @@ sys.path[0] = '/opt/xensource/sm/'
 import base64
 import distutils.util
 import socket
+import XenAPI
 import XenAPIPlugin
 
 from linstorjournaler import LinstorJournaler
@@ -30,9 +31,13 @@ from linstorvolumemanager import get_controller_uri, LinstorVolumeManager
 from lock import Lock
 import json
 import LinstorSR
+import re
 import util
 import vhdutil
 
+BACKING_DISK_RE = re.compile('^/dev/([^/]+)/(?:[^/]+)$')
+LVM_PLUGIN = 'lvm'
+THIN_POOL = 'thin_pool'
 
 FIREWALL_PORT_SCRIPT = '/etc/xapi.d/plugins/firewall-port'
 LINSTOR_PORTS = [3366, 3370, 3376, 3377, '7000:8000', 8076, 8077]
@@ -55,14 +60,6 @@ def update_all_ports(open):
         update_port(port, open)
 
 
-def stop_service(name):
-    args = ('systemctl', 'stop', name)
-    (ret, out, err) = util.doexec(args)
-    if ret == 0:
-        return
-    raise Exception('Failed to stop {}: {} {}'.format(name, out, err))
-
-
 def update_linstor_satellite_service(start):
     util.enable_and_start_service('linstor-satellite', start)
 
@@ -70,6 +67,111 @@ def update_linstor_satellite_service(start):
 def update_minidrbdcluster_service(start):
     util.enable_and_start_service('minidrbdcluster', start)
 
+
+def exec_create_sr(session, name, description, disks, volume_group, redundancy, thin, force):
+    disks = json.loads(disks)
+    disk_hostnames = disks.keys()
+
+    # Create volumes.
+    hosts = session.xenapi.host.get_all_records()
+    hostnames = []
+    for host_ref, host_record in hosts.items():
+        hostname = host_record['hostname']
+        if hostname not in disk_hostnames:
+            continue
+
+        if force:
+            try:
+                session.xenapi.host.call_plugin(
+                    host_ref, LVM_PLUGIN, 'destroy_volume_group', {
+                        'vg_name': volume_group,
+                        'force': 'True'
+                    }
+                )
+            except Exception as e:
+                try:
+                    response = session.xenapi.host.call_plugin(
+                        host_ref, LVM_PLUGIN, 'list_volume_groups', {
+                            'vg_name': volume_group
+                        }
+                    )
+                    if response != '{}':
+                        raise e
+                except Exception:
+                    raise e
+
+        host_devices = ','.join(disks[hostname])
+        session.xenapi.host.call_plugin(
+            host_ref, LVM_PLUGIN, 'create_physical_volume', {
+                'devices': host_devices,
+                'force': str(force)
+            }
+        )
+
+        session.xenapi.host.call_plugin(
+            host_ref, LVM_PLUGIN, 'create_volume_group', {
+                'vg_name': volume_group,
+                'devices': host_devices
+            }
+        )
+
+        if thin:
+            session.xenapi.host.call_plugin(
+                host_ref, LVM_PLUGIN, 'create_thin_pool', {
+                    'vg_name': volume_group,
+                    'lv_name': THIN_POOL
+                }
+            )
+
+        # Create SR.
+        master_ref = session.xenapi.pool.get_all_records().values()[0]['master']
+
+        device_config = {
+            'redundancy': redundancy,
+            'provisioning': 'thin' if thin else 'thick',
+            'group-name': '{}/{}'.format(volume_group, THIN_POOL) if thin else volume_group,
+            'hosts': ','.join(hostnames),
+            'monitor-db-quorum': str(len(hostnames) > 2)
+        }
+        sr_ref = session.xenapi.SR.create(
+            master_ref, device_config, '0', name, description, 'linstor', '', True, {}
+        )
+        return session.xenapi.SR.get_uuid(sr_ref)
+
+
+def get_drbd_volumes(volume_group=None):
+    drbd_volumes = {}
+    (ret, stdout, stderr) = util.doexec(['drbdsetup', 'show', '--json'])
+    if ret:
+        raise Exception('Failed to get JSON object: {}'.format(stderr))
+
+    config = json.loads(stdout)
+    for resource in config:
+        for volume in resource['_this_host']['volumes']:
+            backing_disk = volume['backing-disk']
+            match = BACKING_DISK_RE.match(backing_disk)
+            if not match:
+                continue
+
+            cur_volume_group = match.groups()[0]
+            if volume_group and cur_volume_group != volume_group:
+                continue
+
+            minor = int(volume['device_minor'])
+            if cur_volume_group in drbd_volumes:
+                drbd_volumes[cur_volume_group].append(minor)
+            else:
+                drbd_volumes[cur_volume_group] = [minor]
+    return drbd_volumes
+
+
+def force_destroy_drbd_volume(minor):
+    (ret, stdout, stderr) = util.doexec(['drbdsetup', 'detach', minor, '--force'])
+    if ret:
+        raise Exception('Failed to detach volume: {}'.format(stderr))
+    (ret, stdout, stderr) = util.doexec(['drbdsetup', 'del-minor', minor])
+    if ret:
+        raise Exception('Failed to destroy volume: {}'.format(stderr))
 
 # ------------------------------------------------------------------------------
 
@@ -169,8 +271,8 @@ def destroy(session, args):
         linstor.destroy()
         return str(True)
     except Exception as e:
-        stop_service('linstor-controller')
-        stop_service('var-lib-linstor.service')
+        util.stop_service('linstor-controller')
+        util.stop_service('var-lib-linstor.service')
         util.SMlog('linstor-manager:destroy error: {}'.format(e))
     return str(False)
 
@@ -615,6 +717,57 @@ def remove_host(session, args):
     return str('True')
 
 
+def create_sr(session, args):
+    try:
+        name = args['name']
+        description = args.get('description') or ''
+        disks = json.loads(args['disks'])
+        volume_group = args['volume_group']
+        redundancy = int(args['redundancy'])
+        thin = distutils.util.strtobool(args.get('thin') or '0')
+        force = distutils.util.strtobool(args.get('force') or '0')
+        return json.dumps(exec_create_sr(
+            session, name, description, disks, volume_group, redundancy, thin, force
+        ))
+    except Exception as e:
+        util.SMlog('linstor-manager:create_sr error: {}'.format(e))
+        raise
+
+
+def list_drbd_volumes(session, args):
+    try:
+        volume_group = args.get('volume_group')
+        return json.dumps(get_drbd_volumes(volume_group))
+    except Exception as e:
+        util.SMlog('linstor-manager:list_drbd_volumes error: {}'.format(e))
+        raise
+
+
+def destroy_drbd_volume(session, args):
+    try:
+        minor = args.get('minor')
+        if not minor:
+            raise Exception('Cannot destroy DRBD volume without minor.')
+        force_destroy_drbd_volume(minor)
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:destroy_drbd_volume error: {}'.format(e))
+    return str(False)
+
+
+def destroy_drbd_volumes(session, args):
+    try:
+        volume_group = args.get('volume_group')
+        if not volume_group:
+            raise Exception('Cannot destroy DRBD volumes without volume group.')
+        for minor in get_drbd_volumes(volume_group).get(volume_group, []):
+            force_destroy_drbd_volume(str(minor))
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:destroy_drbd_volumes error: {}'.format(e))
+    return str(False)
+
+
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
         'prepareSr': prepare_sr,
@@ -636,5 +789,9 @@ if __name__ == '__main__':
         'lsofResource': lsof_resource,
         'hasControllerRunning': has_controller_running,
         'addHost': add_host,
-        'removeHost': remove_host
+        'removeHost': remove_host,
+        'createSr': create_sr,
+        'listDrbdVolumes': list_drbd_volumes,
+        'destroyDrbdVolume': destroy_drbd_volume,
+        'destroyDrbdVolumes': destroy_drbd_volumes
     })
