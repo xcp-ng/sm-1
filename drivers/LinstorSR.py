@@ -1970,7 +1970,7 @@ class LinstorVDI(VDI.VDI):
                 if not available:
                     raise xs_errors.XenError('VDIUnavailable')
 
-                resp['vdi_path'] = self.path
+            resp['vdi_path'] = self.path
         else:
             # Axiom: DRBD device is present on at least one host.
             resp['vdi_path'] = '/dev/http-nbd/' + volume_name
