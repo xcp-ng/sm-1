@@ -1,0 +1,34 @@
+#!/usr/bin/env python
+
+import select
+import subprocess
+import sys
+import syslog
+
+def main():
+    process = subprocess.Popen(sys.argv[1:], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    write_to_stdout = True
+
+    while process.poll() is None:
+        while True:
+            output = process.stdout.readline()
+            if not output:
+                break
+
+            if write_to_stdout:
+                try:
+                    print(output)
+                    sys.stdout.flush()
+                except Exception:
+                    # Probably a broken pipe. So the process reading stdout is dead.
+                    write_to_stdout = False
+            syslog.syslog(output)
+
+if __name__ == "__main__":
+    syslog.openlog(ident=sys.argv[1], facility=syslog.LOG_DAEMON)
+    try:
+        main()
+    except Exception as e:
+        syslog.syslog(sys.argv[1] + ' terminated with exception: {}'.format(e))
+    finally:
+        syslog.syslog(sys.argv[1] + ' is now terminated!')

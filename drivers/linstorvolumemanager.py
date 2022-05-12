@@ -329,18 +329,21 @@ class LinstorVolumeManager(object):
         __slots__ = (
             'name',
             'allocated_size',  # Allocated size, place count is not used.
-            'virtual_size'    # Total virtual available size of this volume
-                              # (i.e. the user size at creation).
+            'virtual_size',    # Total virtual available size of this volume
+                               # (i.e. the user size at creation).
+            'is_diskful'
         )
 
         def __init__(self, name):
             self.name = name
             self.allocated_size = 0
             self.virtual_size = 0
+            self.is_diskful = False
 
         def __repr__(self):
-            return 'VolumeInfo("{}", {}, {})'.format(
-                self.name, self.allocated_size, self.virtual_size
+            return 'VolumeInfo("{}", {}, {}, {})'.format(
+                self.name, self.allocated_size, self.virtual_size,
+                'diskful' if self.is_diskful else 'diskless'
             )
 
     # --------------------------------------------------------------------------
@@ -1332,9 +1335,9 @@ class LinstorVolumeManager(object):
                 .format(e)
             )
 
-    def find_up_to_date_diskfull_nodes(self, volume_uuid):
+    def find_up_to_date_diskful_nodes(self, volume_uuid):
         """
-        Find all nodes that contain a specific volume using diskfull disks.
+        Find all nodes that contain a specific volume using diskful disks.
         The disk must be up to data to be used.
         :param str volume_uuid: The volume to use.
         :return: The available nodes.
@@ -1715,6 +1718,8 @@ class LinstorVolumeManager(object):
                 )
             else:
                 current = all_volume_info[resource.name]
+
+            current.is_diskful = linstor.consts.FLAG_DISKLESS not in resource.flags
 
             for volume in resource.volumes:
                 # We ignore diskless pools of the form "DfltDisklessStorPool".
