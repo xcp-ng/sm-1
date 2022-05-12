@@ -42,7 +42,7 @@ def linstorhostcall(local_method, remote_method):
             # Try to read locally if the device is not in use or if the device
             # is up to date and not diskless.
             (node_names, in_use) = \
-                self._linstor.find_up_to_date_diskfull_nodes(vdi_uuid)
+                self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
 
             try:
                 if not in_use or socket.gethostname() in node_names:
@@ -217,7 +217,7 @@ class LinstorVhdUtil:
     def _get_readonly_host(self, vdi_uuid, device_path, node_names):
         """
         When vhd-util is called to fetch VDI info we must find a
-        diskfull DRBD disk to read the data. It's the goal of this function.
+        diskful DRBD disk to read the data. It's the goal of this function.
         Why? Because when a VHD is open in RO mode, the LVM layer is used
         directly to bypass DRBD verifications (we can have only one process
         that reads/writes to disk with DRBD devices).
@@ -226,7 +226,7 @@ class LinstorVhdUtil:
         if not node_names:
             raise xs_errors.XenError(
                 'VDIUnavailable',
-                opterr='Unable to find diskfull node: {} (path={})'
+                opterr='Unable to find diskful node: {} (path={})'
                 .format(vdi_uuid, device_path)
             )
 
