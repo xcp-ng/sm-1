@@ -34,9 +34,13 @@ import cleanup
 import distutils
 import errno
 import functools
+import os
+import re
 import scsiutil
+import signal
 import SR
 import SRCommand
+import subprocess
 import time
 import traceback
 import util
@@ -51,6 +55,8 @@ from srmetadata import \
     METADATA_OF_POOL_TAG
 
 HIDDEN_TAG = 'hidden'
+
+FORK_LOG_DAEMON = '/opt/xensource/libexec/fork-log-daemon'
 
 # ==============================================================================
 
@@ -354,7 +360,9 @@ class LinstorSR(SR.SR):
 
         def load(self, *args, **kwargs):
             if not self._has_session:
-                if self.srcmd.cmd == 'vdi_attach_from_config':
+                if self.srcmd.cmd in (
+                    'vdi_attach_from_config', 'vdi_detach_from_config'
+                ):
                     # We must have a valid LINSTOR instance here without using
                     # the XAPI.
                     controller_uri = get_controller_uri()
@@ -1444,7 +1452,7 @@ class LinstorVDI(VDI.VDI):
             if (
                 self.sr.srcmd.cmd == 'vdi_attach_from_config' or
                 self.sr.srcmd.cmd == 'vdi_detach_from_config'
-            ) and self.sr.srcmd.params['vdi_uuid'] == self.uuid:
+            ):
                 self.vdi_type = vhdutil.VDI_TYPE_RAW
                 self.path = self.sr.srcmd.params['vdi_path']
             else:
@@ -1529,7 +1537,7 @@ class LinstorVDI(VDI.VDI):
 
             self._linstor.create_volume(
                 self.uuid, volume_size, persistent=False,
-                volume_name=volume_name, no_diskless=(volume_name is not None)
+                volume_name=volume_name
             )
             volume_info = self._linstor.get_volume_info(self.uuid)
 
@@ -1631,8 +1639,9 @@ class LinstorVDI(VDI.VDI):
 
     def attach(self, sr_uuid, vdi_uuid):
         util.SMlog('LinstorVDI.attach for {}'.format(self.uuid))
+        attach_from_config = self.sr.srcmd.cmd == 'vdi_attach_from_config'
         if (
-            self.sr.srcmd.cmd != 'vdi_attach_from_config' or
+            not attach_from_config or
             self.sr.srcmd.params['vdi_uuid'] != self.uuid
         ) and self.sr._journaler.has_entries(self.uuid):
             raise xs_errors.XenError(
@@ -1641,49 +1650,53 @@ class LinstorVDI(VDI.VDI):
                 'scan SR first to trigger auto-repair'
             )
 
-        writable = 'args' not in self.sr.srcmd.params or \
-            self.sr.srcmd.params['args'][0] == 'true'
+        if not attach_from_config or self.sr._is_master:
+            writable = 'args' not in self.sr.srcmd.params or \
+                self.sr.srcmd.params['args'][0] == 'true'
 
-        # We need to inflate the volume if we don't have enough place
-        # to mount the VHD image. I.e. the volume capacity must be greater
-        # than the VHD size + bitmap size.
-        need_inflate = True
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW or not writable or \
-                self.capacity >= compute_volume_size(self.size, self.vdi_type):
-            need_inflate = False
+            # We need to inflate the volume if we don't have enough place
+            # to mount the VHD image. I.e. the volume capacity must be greater
+            # than the VHD size + bitmap size.
+            need_inflate = True
+            if (
+                self.vdi_type == vhdutil.VDI_TYPE_RAW or
+                not writable or
+                self.capacity >= compute_volume_size(self.size, self.vdi_type)
+            ):
+                need_inflate = False
 
-        if need_inflate:
-            try:
-                self._prepare_thin(True)
-            except Exception as e:
-                raise xs_errors.XenError(
-                    'VDIUnavailable',
-                    opterr='Failed to attach VDI during "prepare thin": {}'
-                    .format(e)
-                )
+            if need_inflate:
+                try:
+                    self._prepare_thin(True)
+                except Exception as e:
+                    raise xs_errors.XenError(
+                        'VDIUnavailable',
+                        opterr='Failed to attach VDI during "prepare thin": {}'
+                        .format(e)
+                    )
+
+        if not hasattr(self, 'xenstore_data'):
+            self.xenstore_data = {}
+        self.xenstore_data['storage-type'] = LinstorSR.DRIVER_TYPE
+
+        if attach_from_config and self.path.startswith('/dev/http-nbd/'):
+            return self._attach_using_http_nbd()
 
         if not util.pathexists(self.path):
             raise xs_errors.XenError(
                 'VDIUnavailable', opterr='Could not find: {}'.format(self.path)
             )
 
-        if not hasattr(self, 'xenstore_data'):
-            self.xenstore_data = {}
-
-        # TODO: Is it useful?
-        self.xenstore_data.update(scsiutil.update_XS_SCSIdata(
-            self.uuid, scsiutil.gen_synthetic_page_data(self.uuid)
-        ))
-
-        self.xenstore_data['storage-type'] = LinstorSR.DRIVER_TYPE
-
         self.attached = True
-
         return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
 
     def detach(self, sr_uuid, vdi_uuid):
         util.SMlog('LinstorVDI.detach for {}'.format(self.uuid))
+        detach_from_config = self.sr.srcmd.cmd == 'vdi_detach_from_config'
         self.attached = False
+
+        if detach_from_config and self.path.startswith('/dev/http-nbd/'):
+            return self._detach_using_http_nbd()
 
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
             return
@@ -1816,24 +1829,39 @@ class LinstorVDI(VDI.VDI):
 
         util.SMlog('LinstorVDI.generate_config for {}'.format(self.uuid))
 
-        if not self.path or not util.pathexists(self.path):
-            available = False
-            # Try to refresh symlink path...
-            try:
-                self.path = self._linstor.get_device_path(vdi_uuid)
-                available = util.pathexists(self.path)
-            except Exception:
-                pass
-            if not available:
-                raise xs_errors.XenError('VDIUnavailable')
-
         resp = {}
         resp['device_config'] = self.sr.dconf
         resp['sr_uuid'] = sr_uuid
         resp['vdi_uuid'] = self.uuid
         resp['sr_sm_config'] = self.sr.sm_config
-        resp['vdi_path'] = self.path
         resp['command'] = 'vdi_attach_from_config'
+
+        # By default, we generate a normal config.
+        # But if the disk is persistent, we must use a HTTP/NBD
+        # server to ensure we can always write or read data.
+        # Why? DRBD is unsafe when used with more than 4 hosts:
+        # We are limited to use 1 diskless and 3 full.
+        # We can't increase this limitation, so we use a NBD/HTTP device
+        # instead.
+        volume_name = self._linstor.get_volume_name(self.uuid)
+        if volume_name not in [
+            'xcp-persistent-ha-statefile', 'xcp-persistent-redo-log'
+        ]:
+            if not self.path or not util.pathexists(self.path):
+                available = False
+                # Try to refresh symlink path...
+                try:
+                    self.path = self._linstor.get_device_path(vdi_uuid)
+                    available = util.pathexists(self.path)
+                except Exception:
+                    pass
+                if not available:
+                    raise xs_errors.XenError('VDIUnavailable')
+
+                resp['vdi_path'] = self.path
+        else:
+            # Axiom: DRBD device is present on at least one host.
+            resp['vdi_path'] = '/dev/http-nbd/' + volume_name
 
         config = xmlrpclib.dumps(tuple([resp]), 'vdi_attach_from_config')
         return xmlrpclib.dumps((config,), "", True)
@@ -2313,6 +2341,268 @@ class LinstorVDI(VDI.VDI):
         self.sr._journaler.remove(LinstorJournaler.CLONE, active_uuid)
 
         return ret_vdi.get_params()
+
+    @staticmethod
+    def _start_persistent_http_server(volume_name):
+        null = None
+        pid_path = None
+        http_server = None
+
+        try:
+            null = open(os.devnull, 'w')
+
+            if volume_name == 'xcp-persistent-ha-statefile':
+                port = '8076'
+            else:
+                port = '8077'
+
+            arguments = [
+                'http-disk-server',
+                '--disk',
+                '/dev/drbd/by-res/{}/0'.format(volume_name),
+                '--port',
+                port
+            ]
+
+            util.SMlog('Starting {} on port {}...'.format(arguments[0], port))
+            http_server = subprocess.Popen(
+                [FORK_LOG_DAEMON] + arguments,
+                stdout=null,
+                stderr=null,
+                # Ensure we use another group id to kill this process without
+                # touch the current one.
+                preexec_fn=os.setsid
+            )
+
+            pid_path = '/run/http-server-{}.pid'.format(volume_name)
+            with open(pid_path, 'w') as pid_file:
+                pid_file.write(str(http_server.pid))
+        except Exception as e:
+            if pid_path:
+                try:
+                    os.remove(pid_path)
+                except Exception:
+                    pass
+
+            if http_server:
+                # Kill process and children in this case...
+                os.killpg(os.getpgid(http_server.pid), signal.SIGTERM)
+
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='Failed to start http-server: {}'.format(e)
+            )
+        finally:
+            if null:
+                null.close()
+
+    def _start_persistent_nbd_server(self, volume_name):
+        null = None
+        pid_path = None
+        nbd_path = None
+        nbd_server = None
+
+        try:
+            null = open(os.devnull, 'w')
+
+            if volume_name == 'xcp-persistent-ha-statefile':
+                port = '8076'
+            else:
+                port = '8077'
+
+            arguments = [
+                'nbd-http-server',
+                '--socket-path',
+                '/run/{}.socket'.format(volume_name),
+                '--nbd-name',
+                volume_name,
+                '--urls',
+                ','.join(map(
+                    lambda host: "http://" + host + ':' + port,
+                    self.sr._hosts
+                ))
+            ]
+
+            util.SMlog('Starting {} using port {}...'.format(arguments[0], port))
+            nbd_server = subprocess.Popen(
+                [FORK_LOG_DAEMON] + arguments,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                # Ensure we use another group id to kill this process without
+                # touch the current one.
+                preexec_fn=os.setsid
+            )
+
+            reg_nbd_path = re.compile("^NBD `(/dev/nbd[0-9]+)` is now attached.$")
+            def get_nbd_path():
+                while nbd_server.poll() is None:
+                    line = nbd_server.stdout.readline()
+                    match = reg_nbd_path.match(line)
+                    if match:
+                        return match.group(1)
+            # Use a timeout to never block the smapi if there is a problem.
+            try:
+                nbd_path = util.timeout_call(10, get_nbd_path)
+                if nbd_path is None:
+                    raise Exception('Empty NBD path (NBD server is probably dead)')
+            except util.TimeoutException:
+                raise Exception('Unable to read NBD path')
+
+            pid_path = '/run/nbd-server-{}.pid'.format(volume_name)
+            with open(pid_path, 'w') as pid_file:
+                pid_file.write(str(nbd_server.pid))
+
+            util.SMlog('Create symlink: {} -> {}'.format(self.path, nbd_path))
+            os.symlink(nbd_path, self.path)
+        except Exception as e:
+            if pid_path:
+                try:
+                    os.remove(pid_path)
+                except Exception:
+                    pass
+
+            if nbd_path:
+                try:
+                    os.remove(nbd_path)
+                except Exception:
+                    pass
+
+            if nbd_server:
+                # Kill process and children in this case...
+                os.killpg(os.getpgid(nbd_server.pid), signal.SIGTERM)
+
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='Failed to start nbd-server: {}'.format(e)
+            )
+        finally:
+            if null:
+                null.close()
+
+    @classmethod
+    def _kill_persistent_server(self, type, volume_name, sig):
+        try:
+            path = '/run/{}-server-{}.pid'.format(type, volume_name)
+            if not os.path.exists(path):
+                return
+
+            pid = None
+            with open(path, 'r') as pid_file:
+                try:
+                    pid = int(pid_file.read())
+                except Exception:
+                    pass
+
+            if pid is not None and util.check_pid_exists(pid):
+                util.SMlog('Kill {} server {} (pid={})'.format(type, path, pid))
+                try:
+                    os.killpg(os.getpgid(pid), sig)
+                except Exception as e:
+                    util.SMlog('Failed to kill {} server: {}'.format(type, e))
+
+            os.remove(path)
+        except:
+            pass
+
+    @classmethod
+    def _kill_persistent_http_server(self, volume_name, sig=signal.SIGTERM):
+        return self._kill_persistent_server('nbd', volume_name, sig)
+
+    @classmethod
+    def _kill_persistent_nbd_server(self, volume_name, sig=signal.SIGTERM):
+        return self._kill_persistent_server('http', volume_name, sig)
+
+    def _check_http_nbd_volume_name(self):
+        volume_name = self.path[14:]
+        if volume_name not in [
+            'xcp-persistent-ha-statefile', 'xcp-persistent-redo-log'
+        ]:
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='Unsupported path: {}'.format(self.path)
+            )
+        return volume_name
+
+    def _attach_using_http_nbd(self):
+        volume_name = self._check_http_nbd_volume_name()
+
+        # Ensure there is no NBD and HTTP server running.
+        self._kill_persistent_nbd_server(volume_name)
+        self._kill_persistent_http_server(volume_name)
+
+        # 0. Fetch drbd path.
+        must_get_device_path = True
+        if not self.sr._is_master:
+            # We are on a slave, we must try to find a diskful locally.
+            try:
+                volume_info = self._linstor.get_volume_info(self.uuid)
+            except Exception as e:
+                raise xs_errors.XenError(
+                    'VDIUnavailable',
+                    opterr='Cannot get volume info of {}: {}'
+                    .format(self.uuid, e)
+                )
+
+            must_get_device_path = volume_info.is_diskful
+
+        drbd_path = None
+        if must_get_device_path or self.sr._is_master:
+            # If we are master, we must ensure we have a diskless
+            # or diskful available to init HA.
+            # It also avoid this error in xensource.log
+            # (/usr/libexec/xapi/cluster-stack/xhad/ha_set_pool_state):
+            # init exited with code 8 [stdout = ''; stderr = 'SF: failed to write in State-File \x10 (fd 4208696). (sys 28)\x0A']
+            # init returned MTC_EXIT_CAN_NOT_ACCESS_STATEFILE (State-File is inaccessible)
+            available = False
+            try:
+                drbd_path = self._linstor.get_device_path(self.uuid)
+                available = util.pathexists(drbd_path)
+            except Exception:
+                pass
+
+            if not available:
+                raise xs_errors.XenError(
+                    'VDIUnavailable',
+                    opterr='Cannot get device path of {}'.format(self.uuid)
+                )
+
+        # 1. Prepare http-nbd folder.
+        try:
+            if not os.path.exists('/dev/http-nbd/'):
+                os.makedirs('/dev/http-nbd/')
+            elif os.path.islink(self.path):
+                os.remove(self.path)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise xs_errors.XenError(
+                    'VDIUnavailable',
+                    opterr='Cannot prepare http-nbd: {}'.format(e)
+                )
+
+        # 2. Start HTTP service if we have a diskful or if we are master.
+        http_service = None
+        if drbd_path:
+            assert(drbd_path in (
+                '/dev/drbd/by-res/xcp-persistent-ha-statefile/0',
+                '/dev/drbd/by-res/xcp-persistent-redo-log/0'
+            ))
+            self._start_persistent_http_server(volume_name)
+
+        # 3. Start NBD server in all cases.
+        try:
+            self._start_persistent_nbd_server(volume_name)
+        except Exception as e:
+            if drbd_path:
+                self._kill_persistent_http_server(volume_name)
+            raise
+
+        self.attached = True
+        return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
+
+    def _detach_using_http_nbd(self):
+        volume_name = self._check_http_nbd_volume_name()
+        self._kill_persistent_nbd_server(volume_name)
+        self._kill_persistent_http_server(volume_name)
 
 # ------------------------------------------------------------------------------
 
