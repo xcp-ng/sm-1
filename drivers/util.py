@@ -1795,3 +1795,52 @@ def sessions_less_than_targets(other_config, device_config):
     else:
         return False
 
+
+def enable_and_start_service(name, start):
+    attempt = 0
+    while True:
+        attempt += 1
+        fn = 'enable' if start else 'disable'
+        args = ('systemctl', fn, '--now', name)
+        (ret, out, err) = doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            raise Exception(
+                'Failed to {} {}: {} {}'.format(fn, name, out, err)
+            )
+        time.sleep(1)
+
+
+def stop_service(name):
+    args = ('systemctl', 'stop', name)
+    (ret, out, err) = doexec(args)
+    if ret == 0:
+        return
+    raise Exception('Failed to stop {}: {} {}'.format(name, out, err))
+
+
+def restart_service(name):
+    attempt = 0
+    while True:
+        attempt += 1
+        SMlog('Restarting service {} {}...'.format(name, attempt))
+        args = ('systemctl', 'restart', name)
+        (ret, out, err) = doexec(args)
+        if ret == 0:
+            return
+        elif attempt >= 3:
+            SMlog('Restart service FAILED {} {}'.format(name, attempt))
+            raise Exception(
+                'Failed to restart {}: {} {}'.format(name, out, err)
+            )
+        time.sleep(1)
+
+
+def check_pid_exists(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    else:
+        return True
