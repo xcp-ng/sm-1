@@ -11,15 +11,15 @@ DRBDADM_OPEN_FAILED_RE = re.compile(
 )
 MAY_PROMOT_RE = re.compile(
     '(?:exists|change) resource name:((?:\\w|-)+) '
-    '(?:\\w+\\:\\w+ )*may_promote:(yes|no) promotion_score:(\\d+)'
+    '(?:(?:\\w|-)+\\:(?:\\w|-)+ )*may_promote:(yes|no) promotion_score:(\\d+)'
 )
 PEER_ROLE_RE = re.compile(
     '(?:exists|change) connection name:((?:\\w|-)+) peer-node-id:(?:\\d+) '
-    'conn-name:(\\w+) (?:\\w+\\:\\w+ )*role:(Primary|Secondary|Unknown)'
+    'conn-name:((?:\\w|-)+) (?:(?:\\w|-)+\\:(?:\\w|-)+ )*role:(Primary|Secondary|Unknown)'
 )
 HAVE_QUORUM_RE = re.compile(
     '(?:exists|change) device name:((?:\\w|-)+) '
-    '(?:\\w+\\:\\w+ )*quorum:(yes|no)'
+    '(?:(?:\\w|-)+\\:(?:\\w|-)+ )*quorum:(yes|no)'
 )
 
 
