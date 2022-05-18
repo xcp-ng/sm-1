@@ -18,6 +18,7 @@
 #
 # MooseFSSR: Based on CEPHFSSR and FileSR, mounts MooseFS share
 
+import distutils.util
 import errno
 import os
 import syslog as _syslog
@@ -99,7 +100,8 @@ class MooseFSSR(FileSR.FileSR):
         if 'masterhost' not in self.dconf:
             raise xs_errors.XenError('ConfigServerMissing')
         self.remoteserver = self.dconf['masterhost']
-        self.remotepath = self.dconf['rootpath']
+        self.rootpath = self.dconf['rootpath']
+        self.remotepath = self.rootpath
         # if masterport is not specified, use default: 9421
         if 'masterport' not in self.dconf:
             self.remoteport = "9421"
@@ -109,6 +111,14 @@ class MooseFSSR(FileSR.FileSR):
             self.sm_config = self.session.xenapi.SR.get_sm_config(self.sr_ref)
         else:
             self.sm_config = self.srcmd.params.get('sr_sm_config') or {}
+
+        if self.srcmd.cmd != 'sr_create':
+            self.subdir = distutils.util.strtobool(
+                self.sm_config.get('subdir') or '0'
+            )
+            if self.subdir:
+                self.remotepath = os.path.join(self.remotepath, sr_uuid)
+
         self.attached = False
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
         self.mountpoint = self.path
@@ -138,7 +148,10 @@ class MooseFSSR(FileSR.FileSR):
                 options.append(self.dconf['options'])
             if options:
                 options = ['-o', ','.join(options)]
-            command = ["mount", '-t', 'moosefs', self.remoteserver+":"+self.remoteport+":"+self.remotepath, mountpoint] + options
+            remote = '{}:{}:{}'.format(
+                self.remoteserver, self.remoteport, self.remotepath
+            )
+            command = ["mount", '-t', 'moosefs', remote, mountpoint] + options
             util.ioretry(lambda: util.pread(command), errlist=[errno.EPIPE, errno.EIO], maxretry=2, nofail=True)
         except util.CommandException, inst:
             syslog(_syslog.LOG_ERR, 'MooseFS mount failed ' + inst.__str__())
@@ -199,6 +212,7 @@ class MooseFSSR(FileSR.FileSR):
         if self.checkmount():
             raise xs_errors.SROSError(113, 'MooseFS mount point already attached')
 
+        assert self.remotepath == self.rootpath
         try:
             self.mount()
         except MooseFSException, exc:
@@ -210,6 +224,33 @@ class MooseFSSR(FileSR.FileSR):
                 pass
             raise xs_errors.SROSError(111, "MooseFS mount error [opterr=%s]" % exc.errstr)
 
+        try:
+            self.subdir = self.sm_config.get('subdir')
+            if self.subdir is None:
+                self.subdir = True
+            else:
+                self.subdir = distutils.util.strtobool(self.subdir)
+
+            self.sm_config['subdir'] = str(self.subdir)
+            self.session.xenapi.SR.set_sm_config(self.sr_ref, self.sm_config)
+
+            if not self.subdir:
+                return
+
+            subdir = os.path.join(self.mountpoint, sr_uuid)
+            if util.ioretry(lambda: util.pathexists(subdir)):
+                if util.ioretry(lambda: util.isdir(subdir)):
+                    raise xs_errors.XenError('SRExists')
+            else:
+                try:
+                    util.ioretry(lambda: util.makedirs(subdir))
+                except util.CommandException as e:
+                    if e.code != errno.EEXIST:
+                        raise MooseFSException(
+                            'Failed to create SR subdir: {}'.format(e)
+                        )
+        finally:
+            self.detach(sr_uuid)
 
     def delete(self, sr_uuid):
         # try to remove/delete non VDI contents first
@@ -217,8 +258,15 @@ class MooseFSSR(FileSR.FileSR):
         try:
             if self.checkmount():
                 self.detach(sr_uuid)
-            if util.ioretry(lambda: util.pathexists(self.mountpoint)):
-                util.ioretry(lambda: os.rmdir(self.mountpoint))
+
+            if self.subdir:
+                # Mount using rootpath (<root>) instead of <root>/<sr_uuid>.
+                self.remotepath = self.rootpath
+                self.attach(sr_uuid)
+                subdir = os.path.join(self.mountpoint, sr_uuid)
+                if util.ioretry(lambda: util.pathexists(subdir)):
+                    util.ioretry(lambda: os.rmdir(subdir))
+                self.detach(sr_uuid)
         except util.CommandException, inst:
             self.detach(sr_uuid)
             if inst.code != errno.ENOENT:
