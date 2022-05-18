@@ -751,7 +751,9 @@ class LinstorSR(SR.SR):
             )
 
         try:
-            self._update_minidrbdcluster_on_all_hosts(enabled=False)
+            self._update_minidrbdcluster_on_all_hosts(
+                controller_node_name=node_name, enabled=False
+            )
 
             args = {
                 'groupName': self._group_name,
@@ -761,7 +763,9 @@ class LinstorSR(SR.SR):
             )
         except Exception as e:
             try:
-                self._update_minidrbdcluster_on_all_hosts(enabled=True)
+                self._update_minidrbdcluster_on_all_hosts(
+                    controller_node_name=node_name, enabled=True
+                )
             except Exception as e2:
                 util.SMlog(
                     'Failed to restart minidrbdcluster after destroy fail: {}'
@@ -941,12 +945,32 @@ class LinstorSR(SR.SR):
             'SRUnavailable'
         )
 
-    def _update_minidrbdcluster_on_all_hosts(self, enabled):
-        master = util.get_master_ref(self.session)
-        self._update_minidrbdcluster(master, enabled)
+    def _update_minidrbdcluster_on_all_hosts(
+        self, enabled, controller_node_name=None
+    ):
+        controller_host = None
+        secondary_hosts = []
 
-        for slave in util.get_all_slaves(self.session):
-            self._update_minidrbdcluster(slave, enabled)
+        hosts = self.session.xenapi.host.get_all_records()
+        for host_ref, host_rec in hosts.iteritems():
+            if controller_node_name == host_rec['hostname']:
+                controller_host = host_ref
+            else:
+                secondary_hosts.append(host_ref)
+
+        if enabled and controller_host:
+            # If enabled is true, we try to start the controller on the desired
+            # node name first.
+            self._update_minidrbdcluster(controller_host, enabled)
+
+        for host in secondary_hosts:
+            self._update_minidrbdcluster(host, enabled)
+
+        if not enabled and controller_host:
+            # If enabled is false, we disable the minidrbdcluster service of
+            # the controller host last. Why? Otherwise the linstor-controller
+            # of other nodes can be started, and we don't want that.
+            self._update_minidrbdcluster(controller_host, enabled)
 
     # --------------------------------------------------------------------------
     # Metadata.
