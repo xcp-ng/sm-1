@@ -61,7 +61,16 @@ def update_all_ports(open):
 
 
 def update_linstor_satellite_service(start):
-    util.enable_and_start_service('linstor-satellite', start)
+    service = 'linstor-satellite'
+
+    # Stop services in all cases first.
+    # Ensure we don't have an invalid cache used by a satellite.
+    # (We found an issue with a new added disk which used a volume group name
+    # formerly involved by another disk. To avoid this kind of problem, we
+    # always restart the satellite.)
+    util.enable_and_start_service(service, False)
+    if start:
+        util.enable_and_start_service(service, True)
 
 
 def update_minidrbdcluster_service(start):
