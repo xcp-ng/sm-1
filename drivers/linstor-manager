@@ -289,8 +289,10 @@ def destroy(session, args):
 def check(session, args):
     try:
         device_path = args['devicePath']
-        ignore_missing_footer = args['ignoreMissingFooter']
-        fast = args['fast']
+        ignore_missing_footer = distutils.util.strtobool(
+            args['ignoreMissingFooter']
+        )
+        fast = distutils.util.strtobool(args['fast'])
         return str(vhdutil.check(device_path, ignore_missing_footer, fast))
     except Exception as e:
         util.SMlog('linstor-manager:check error: {}'.format(e))

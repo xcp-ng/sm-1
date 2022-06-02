@@ -111,7 +111,10 @@ class LinstorVhdUtil:
     # --------------------------------------------------------------------------
 
     def check(self, vdi_uuid, ignore_missing_footer=False, fast=False):
-        kwargs = {'ignoreMissingFooter': ignore_missing_footer, 'fast': fast}
+        kwargs = {
+            'ignoreMissingFooter': str(ignore_missing_footer),
+            'fast': str(fast)
+        }
         return self._check(vdi_uuid, **kwargs)
 
     @linstorhostcall(vhdutil.check, 'check')
