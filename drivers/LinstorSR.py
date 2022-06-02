@@ -445,7 +445,11 @@ class LinstorSR(SR.SR):
         def load(self, *args, **kwargs):
             if not self._has_session:
                 if self.srcmd.cmd in (
-                    'vdi_attach_from_config', 'vdi_detach_from_config'
+                    'vdi_attach_from_config',
+                    'vdi_detach_from_config',
+                    # When on-slave (is_open) is executed we have an
+                    # empty command.
+                    None
                 ):
                     def create_linstor(uri, attempt_count=30):
                         self._linstor = LinstorVolumeManager(
@@ -481,6 +485,10 @@ class LinstorSR(SR.SR):
                     self._journaler = LinstorJournaler(
                         controller_uri, self._group_name, logger=util.SMlog
                     )
+
+                if self.srcmd.cmd is None:
+                    # Only useful on on-slave plugin (is_open).
+                    self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
 
                 return wrapped_method(self, *args, **kwargs)
 
