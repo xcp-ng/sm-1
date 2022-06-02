@@ -72,7 +72,15 @@ def multi(session, args):
 
 def _is_open(session, args):
     """Check if VDI <args["vdiUuid"]> is open by a tapdisk on this host"""
-    import SRCommand, SR, NFSSR, EXTSR, LVHDSR, blktap2
+    import SRCommand
+    import SR
+    import CephFSSR
+    import EXTSR
+    import GlusterFSSR
+    import MooseFSSR
+    import NFSSR
+    import ZFSSR
+    import blktap2
 
     util.SMlog("on-slave.is_open: %s" % args)
     vdiUuid = args["vdiUuid"]
@@ -86,7 +94,7 @@ def _is_open(session, args):
         srType = "lvhd"
     cmd = SRCommand.SRCommand(None)
     cmd.driver_info = {"capabilities": None}
-    cmd.dconf = {"server": None, "device": "/HACK"}
+    cmd.dconf = {"server": None, "device": "/HACK", "masterhost": None}
     cmd.params = {"command": None}
 
     driver = SR.driver(srType)
