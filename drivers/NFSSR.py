@@ -88,9 +88,12 @@ class NFSSR(FileSR.SharedFileSR):
             self.sm_config = self.srcmd.params.get('sr_sm_config') or {}
             self.other_config = self.srcmd.params.get('sr_other_config') or {}
         self.nosubdir = self.sm_config.get('nosubdir') == "true"
-        if 'serverpath' in self.dconf:
-            self.remotepath = os.path.join(self.dconf['serverpath'],
-                    not self.nosubdir and sr_uuid or "")
+        serverpath = self.dconf.get('serverpath')
+        if serverpath is not None:
+            self.remotepath = os.path.join(
+                serverpath,
+                not self.nosubdir and sr_uuid or ""
+            )
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
 
         # Handle optional dconf attributes
@@ -102,7 +105,8 @@ class NFSSR(FileSR.SharedFileSR):
             self.options = ''
 
     def validate_remotepath(self, scan):
-        if 'serverpath' not in self.dconf:
+        serverpath = self.dconf.get('serverpath')
+        if serverpath is None:
             if scan:
                 try:
                     self.scan_exports(self.dconf['server'])
