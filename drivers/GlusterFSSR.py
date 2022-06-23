@@ -96,7 +96,8 @@ class GlusterFSSR(FileSR.FileSR):
         self.driver_config = DRIVER_CONFIG
         if 'server' not in self.dconf:
             raise xs_errors.XenError('ConfigServerMissing')
-        self.remoteserver = self.dconf['server']
+        # Can be None => on-slave plugin hack (is_open function).
+        self.remoteserver = self.dconf['server'] or ''
         if self.sr_ref and self.session is not None:
             self.sm_config = self.session.xenapi.SR.get_sm_config(self.sr_ref)
         else:
