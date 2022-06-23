@@ -35,7 +35,7 @@ import vhdutil
 import xs_errors
 from lock import Lock
 
-CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_CACHING",
+CAPABILITIES = ["SR_PROBE", "SR_UPDATE",
                 "VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETACH",
                 "VDI_UPDATE", "VDI_CLONE", "VDI_SNAPSHOT", "VDI_RESIZE", "VDI_MIRROR",
                 "VDI_GENERATE_CONFIG",
