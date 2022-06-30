@@ -36,7 +36,7 @@ import util
 import vhdutil
 
 BACKING_DISK_RE = re.compile('^/dev/([^/]+)/(?:[^/]+)$')
-LVM_PLUGIN = 'lvm'
+LVM_PLUGIN = 'lvm.py'
 THIN_POOL = 'thin_pool'
 
 FIREWALL_PORT_SCRIPT = '/etc/xapi.d/plugins/firewall-port'
@@ -77,17 +77,16 @@ def update_minidrbdcluster_service(start):
     util.enable_and_start_service('minidrbdcluster', start)
 
 
-def exec_create_sr(session, name, description, disks, volume_group, redundancy, thin, force):
-    disks = json.loads(disks)
+def exec_create_sr(session, name, description, disks, volume_group, redundancy, provisioning, force):
     disk_hostnames = disks.keys()
+    thin = provisioning == 'thin'
 
     # Create volumes.
     hosts = session.xenapi.host.get_all_records()
     hostnames = []
     for host_ref, host_record in hosts.items():
         hostname = host_record['hostname']
-        if hostname not in disk_hostnames:
-            continue
+        hostnames.append(hostname)
 
         if force:
             try:
@@ -109,10 +108,24 @@ def exec_create_sr(session, name, description, disks, volume_group, redundancy, 
                 except Exception:
                     raise e
 
-        host_devices = ','.join(disks[hostname])
+        if hostname not in disk_hostnames or not disks[hostname]:
+            if force or session.xenapi.host.call_plugin(
+                host_ref, LVM_PLUGIN, 'list_volume_groups', {
+                    'vg_name': volume_group
+                }
+            ) == '{}':
+                continue
+            raise Exception('Volume group should not exist on `{}`, you must remove it manually'.format(hostname))
+
+        host_disks = disks[hostname]
+        if type(host_disks) is list:
+            host_disks = ','.join(disks[hostname])
+        else:
+            raise Exception('Disk value of `{}` must be a disk list'.format(hostname))
+
         session.xenapi.host.call_plugin(
             host_ref, LVM_PLUGIN, 'create_physical_volume', {
-                'devices': host_devices,
+                'devices': host_disks,
                 'force': str(force)
             }
         )
@@ -120,7 +133,7 @@ def exec_create_sr(session, name, description, disks, volume_group, redundancy, 
         session.xenapi.host.call_plugin(
             host_ref, LVM_PLUGIN, 'create_volume_group', {
                 'vg_name': volume_group,
-                'devices': host_devices
+                'devices': host_disks
             }
         )
 
@@ -132,20 +145,20 @@ def exec_create_sr(session, name, description, disks, volume_group, redundancy, 
                 }
             )
 
-        # Create SR.
-        master_ref = session.xenapi.pool.get_all_records().values()[0]['master']
+    # Create SR.
+    master_ref = session.xenapi.pool.get_all_records().values()[0]['master']
 
-        device_config = {
-            'redundancy': redundancy,
-            'provisioning': 'thin' if thin else 'thick',
-            'group-name': '{}/{}'.format(volume_group, THIN_POOL) if thin else volume_group,
-            'hosts': ','.join(hostnames),
-            'monitor-db-quorum': str(len(hostnames) > 2)
-        }
-        sr_ref = session.xenapi.SR.create(
-            master_ref, device_config, '0', name, description, 'linstor', '', True, {}
-        )
-        return session.xenapi.SR.get_uuid(sr_ref)
+    device_config = {
+        'redundancy': str(redundancy),
+        'provisioning': 'thin' if thin else 'thick',
+        'group-name': '{}/{}'.format(volume_group, THIN_POOL) if thin else volume_group,
+        'hosts': ','.join(hostnames),
+        'monitor-db-quorum': str(len(hostnames) > 2)
+    }
+    sr_ref = session.xenapi.SR.create(
+        master_ref, device_config, '0', name, description, 'linstor', '', True, {}
+    )
+    return session.xenapi.SR.get_uuid(sr_ref)
 
 
 def get_drbd_volumes(volume_group=None):
@@ -435,13 +448,13 @@ def lock_vdi(session, args):
 def lsof_resource(session, args):
     try:
         drbd_path = args['drbdPath']
-        (ret, stdout, stderr) = util.doexec(['lsof', drbd_path])
+        (ret, stdout, stderr) = util.doexec(['lsof', '-V', drbd_path])
         if ret == 0:
             return 'DRBD resource `{}` is open: {}'.format(
-                drbd_path, stdout
+                drbd_path, stdout.rstrip()
             )
         return '`lsof` on DRBD resource `{}` returned {}: {}'.format(
-            drbd_path, ret, stderr
+            drbd_path, ret, stdout.rstrip()
         )
     except Exception as e:
         util.SMlog('linstor-manager:lsof_drbd error: {}'.format(e))
@@ -645,7 +658,6 @@ def add_host(session, args):
 
 def remove_host(session, args):
     group_name = args['groupName']
-    force = args.get('force') or False
 
     # 1. Find SRs and PBDs.
     srs = dict()
@@ -730,16 +742,48 @@ def remove_host(session, args):
 
 def create_sr(session, args):
     try:
-        name = args['name']
+        # Use a complex parsing contrary to the other functions because
+        # this helper is a public method and is not easy to use.
+        name = args.get('name')
+        if not name:
+            raise Exception('`name` is empty')
+
         description = args.get('description') or ''
-        disks = json.loads(args['disks'])
-        volume_group = args['volume_group']
-        redundancy = int(args['redundancy'])
-        thin = distutils.util.strtobool(args.get('thin') or '0')
+
+        disks = args.get('disks')
+        if not disks:
+            raise Exception('`disks` is empty')
+        try:
+            disks = json.loads(disks)
+        except Exception as e:
+            raise Exception('failed to decode `disks`: {}'.format(e))
+        if type(disks) is not dict:
+            raise Exception('`disks` must be a JSON object')
+
+        volume_group = args.get('volume_group')
+        if not volume_group:
+            raise Exception('`volume_group` is empty')
+
+        redundancy = args.get('redundancy')
+        if not redundancy:
+            raise Exception('`redundancy` is empty')
+
+        try:
+            redundancy = int(redundancy)
+        except Exception:
+            raise Exception('`redundancy` is not a number')
+
+        provisioning = args.get('provisioning')
+        if not provisioning:
+            provisioning = 'thin'
+        elif provisioning != 'thin' and provisioning != 'thick':
+            raise Exception('unsupported provisioning')
+
         force = distutils.util.strtobool(args.get('force') or '0')
-        return json.dumps(exec_create_sr(
-            session, name, description, disks, volume_group, redundancy, thin, force
-        ))
+
+        return exec_create_sr(
+            session, name, description, disks, volume_group, redundancy, provisioning, force
+        )
     except Exception as e:
         util.SMlog('linstor-manager:create_sr error: {}'.format(e))
         raise
