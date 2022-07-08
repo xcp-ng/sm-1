@@ -2965,7 +2965,7 @@ class LinstorSR(SR):
             except Exception as e:
                 Util.log(
                     ' [VDI {}: failed to load VDI info]: {}'
-                    .format(self.uuid, e)
+                    .format(vdi_uuid, e)
                 )
                 info = vhdutil.VHDInfo(vdi_uuid)
                 info.error = 1
