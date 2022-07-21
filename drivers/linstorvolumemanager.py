@@ -1048,6 +1048,30 @@ class LinstorVolumeManager(object):
 
         return states
 
+    def get_volume_openers(self, volume_uuid):
+        """
+        Get openers of a volume.
+        :param str volume_uuid: The volume uuid to monitor.
+        :return: A dictionnary that contains openers.
+        :rtype: dict(str, obj)
+        """
+
+        PLUGIN_CMD = 'getDrbdOpeners'
+
+        openers = {}
+
+        session = util.get_localAPI_session()
+        hosts = session.xenapi.host.get_all_records()
+        for host_ref, host_record in hosts.items():
+            openers[host_record['hostname']] = json.loads(
+                session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {
+                    'resourceName': self.get_volume_name(volume_uuid),
+                    'volume': '0'
+                })
+            )
+
+        return openers
+
     def get_volumes_with_name(self):
         """
         Give a volume dictionnary that contains names actually owned.
