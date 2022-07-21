@@ -3074,26 +3074,16 @@ class LinstorSR(SR):
 
     def _checkSlaves(self, vdi):
         try:
-            states = self._linstor.get_usage_states(vdi.uuid)
-            for node_name, state in states.items():
-                self._checkSlave(node_name, vdi, state)
+            all_openers = self._linstor.get_volume_openers(vdi.uuid)
+            for openers in all_openers.itervalues():
+                for opener in openers.values():
+                    if opener['process-name'] != 'tapdisk':
+                        raise util.SMException(
+                            'VDI {} is in use: {}'.format(vdi.uuid, all_openers)
+                        )
         except LinstorVolumeManagerError as e:
             if e.code != LinstorVolumeManagerError.ERR_VOLUME_NOT_EXISTS:
                 raise
-
-    @staticmethod
-    def _checkSlave(node_name, vdi, state):
-        # If state is None, LINSTOR doesn't know the host state
-        # (bad connection?).
-        if state is None:
-            raise util.SMException(
-                'Unknown state for VDI {} on {}'.format(vdi.uuid, node_name)
-            )
-
-        if state:
-            raise util.SMException(
-                'VDI {} is in use on {}'.format(vdi.uuid, node_name)
-            )
 
 
 ################################################################################
