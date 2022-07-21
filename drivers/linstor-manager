@@ -823,6 +823,43 @@ def destroy_drbd_volumes(session, args):
     return str(False)
 
 
+def get_drbd_openers(session, args):
+    try:
+        resource_name = args.get('resourceName')
+        volume = args.get('volume')
+        if not resource_name or volume is None:
+            raise Exception('Cannot get DRBD openers without resource name and/or volume.')
+
+        path = '/sys/kernel/debug/drbd/resources/{}/volumes/{}/openers'.format(
+            resource_name, volume
+        )
+
+        with open(path, 'r') as openers:
+            # Not a big cost, so read all lines directly.
+            lines = openers.readlines()
+
+        result = {}
+
+        opener_re = re.compile('(.*)\\s+([0-9]+)\\s+([0-9]+)')
+        for line in lines:
+            match = opener_re.match(line)
+            assert match
+
+            groups = match.groups()
+            process_name = groups[0]
+            pid = groups[1]
+            open_duration_ms = groups[2]
+            result[pid] = {
+                'process-name': process_name,
+                'open-duration': open_duration_ms
+            }
+
+        return json.dumps(result)
+    except Exception as e:
+        util.SMlog('linstor-manager:get_drbd_openers error: {}'.format(e))
+        raise
+
+
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
         'prepareSr': prepare_sr,
@@ -848,5 +885,6 @@ if __name__ == '__main__':
         'createSr': create_sr,
         'listDrbdVolumes': list_drbd_volumes,
         'destroyDrbdVolume': destroy_drbd_volume,
-        'destroyDrbdVolumes': destroy_drbd_volumes
+        'destroyDrbdVolumes': destroy_drbd_volumes,
+        'getDrbdOpeners': get_drbd_openers
     })
