@@ -868,6 +868,13 @@ if __name__ == '__main__':
         'attach': attach,
         'detach': detach,
         'destroy': destroy,
+
+        # vhdutil wrappers called by linstorvhdutil.
+        # Note: When a VHD is open in RO mode (so for all vhdutil getters),
+        # the LVM layer is used directly to bypass DRBD verifications.
+        # In this case there can't be EROFS errors.
+        # Note 2: We assume linstorvhdutil executes remote calls on diskful
+        # DRBDs, otherwise we still have EROFS errors...
         'check': check,
         'getVHDInfo': get_vhd_info,
         'hasParent': has_parent,
@@ -877,6 +884,7 @@ if __name__ == '__main__':
         'getDepth': get_depth,
         'getKeyHash': get_key_hash,
         'getBlockBitmap': get_block_bitmap,
+
         'lockVdi': lock_vdi,
         'lsofResource': lsof_resource,
         'hasControllerRunning': has_controller_running,
