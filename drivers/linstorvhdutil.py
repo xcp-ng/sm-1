@@ -26,6 +26,36 @@ import xs_errors
 MANAGER_PLUGIN = 'linstor-manager'
 
 
+def call_vhd_util(linstor, func, device_path, *args, **kwargs):
+    try:
+        return func(device_path, *args, **kwargs)
+    except util.CommandException as e:
+        # Raise if we don't have a lock on the volume on another host.
+        if e.code != errno.EROFS:
+            raise
+
+    # Volume is locked on a host, find openers.
+    e_with_openers = None
+    try:
+        volume_uuid = linstor.get_volume_uuid_from_device_path(
+            device_path
+        )
+        e_with_openers = util.CommandException(
+            e.code,
+            e.cmd,
+            e.reason + ' (openers: {})'.format(
+                linstor.get_volume_openers(volume_uuid)
+            )
+        )
+    except Exception as illformed_e:
+        raise util.CommandException(
+            e.code,
+            e.cmd,
+            e.reason + ' (unable to get openers: {})'.format(illformed_e)
+        )
+    raise e_with_openers  # pylint: disable = E0702
+
+
 def linstorhostcall(local_method, remote_method):
     def decorated(func):
         def wrapper(*args, **kwargs):
@@ -46,7 +76,7 @@ def linstorhostcall(local_method, remote_method):
 
             try:
                 if not in_use or socket.gethostname() in node_names:
-                    return local_method(device_path, *args[2:], **kwargs)
+                    return call_vhd_util(self._linstor, local_method, device_path, *args[2:], **kwargs)
             except util.CommandException as e:
                 # EMEDIUMTYPE constant (124) is not available in python2.
                 if e.code != errno.EROFS and e.code != 124:
@@ -177,35 +207,35 @@ class LinstorVhdUtil:
 
     @linstormodifier()
     def create(self, path, size, static, msize=0):
-        return vhdutil.create(path, size, static, msize)
+        return call_vhd_util(self._linstor, vhdutil.create, path, size, static, msize)
 
     @linstormodifier()
     def set_size_virt_fast(self, path, size):
-        return vhdutil.setSizeVirtFast(path, size)
+        return call_vhd_util(self._linstor, vhdutil.setSizeVirtFast, path, size)
 
     @linstormodifier()
     def set_size_phys(self, path, size, debug=True):
-        return vhdutil.setSizePhys(path, size, debug)
+        return call_vhd_util(self._linstor, vhdutil.setSizePhys, path, size, debug)
 
     @linstormodifier()
     def set_parent(self, path, parentPath, parentRaw):
-        return vhdutil.setParent(path, parentPath, parentRaw)
+        return call_vhd_util(self._linstor, vhdutil.setParent, path, parentPath, parentRaw)
 
     @linstormodifier()
     def set_hidden(self, path, hidden=True):
-        return vhdutil.setHidden(path, hidden)
+        return call_vhd_util(self._linstor, vhdutil.setHidden, path, hidden)
 
     @linstormodifier()
     def set_key(self, path, key_hash):
-        return vhdutil.setKey(path, key_hash)
+        return call_vhd_util(self._linstor, vhdutil.setKey, path, key_hash)
 
     @linstormodifier()
     def kill_data(self, path):
-        return vhdutil.killData(path)
+        return call_vhd_util(self._linstor, vhdutil.killData, path)
 
     @linstormodifier()
     def snapshot(self, path, parent, parentRaw, msize=0, checkEmpty=True):
-        return vhdutil.snapshot(path, parent, parentRaw, msize, checkEmpty)
+        return call_vhd_util(self._linstor, vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
 
     # --------------------------------------------------------------------------
     # Helpers.
