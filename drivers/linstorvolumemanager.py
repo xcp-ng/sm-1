@@ -482,28 +482,6 @@ class LinstorVolumeManager(object):
         return (size or 0) * 1024
 
     @property
-    def total_volume_size(self):
-        """
-        Give the sum of all created volumes. The place count is used.
-        :return: The physical required size to use the volumes.
-        :rtype: int
-        """
-
-        size = 0
-        for resource in self._get_resource_cache().resources:
-            for volume in resource.volumes:
-                # We ignore diskless pools of the form "DfltDisklessStorPool".
-                if volume.storage_pool_name == self._group_name:
-                    current_size = volume.usable_size
-                    if current_size < 0:
-                        raise LinstorVolumeManagerError(
-                           'Failed to get usable size of `{}` on `{}`'
-                           .format(resource.name, volume.storage_pool_name)
-                        )
-                    size += current_size
-        return size * 1024
-
-    @property
     def allocated_volume_size(self):
         """
         Give the allocated size for all volumes. The place count is not
@@ -514,25 +492,34 @@ class LinstorVolumeManager(object):
         :rtype: int
         """
 
-        size = 0
+        # Paths: /res_name/vol_number/size
+        sizes = {}
+
         for resource in self._get_resource_cache().resources:
-            volume_size = None
+            if resource.name not in sizes:
+                current = sizes[resource.name] = {}
+            else:
+                current = sizes[resource.name]
+
             for volume in resource.volumes:
                 # We ignore diskless pools of the form "DfltDisklessStorPool".
-                if volume.storage_pool_name == self._group_name:
-                    current_size = volume.allocated_size
-                    if current_size < 0:
-                        raise LinstorVolumeManagerError(
-                           'Failed to get allocated size of `{}` on `{}`'
-                           .format(resource.name, volume.storage_pool_name)
-                        )
+                if volume.storage_pool_name != self._group_name:
+                    continue
 
-                    if volume_size is None or current_size > volume_size:
-                        volume_size = current_size
-            if volume_size is not None:
-                size += volume_size
+                current_size = volume.allocated_size
+                if current_size < 0:
+                    raise LinstorVolumeManagerError(
+                       'Failed to get allocated size of `{}` on `{}`'
+                       .format(resource.name, volume.storage_pool_name)
+                    )
+                current[volume.number] = max(current_size, current.get(volume.number) or 0)
 
-        return size * 1024
+        total_size = 0
+        for volumes in sizes.itervalues():
+            for size in volumes.itervalues():
+                total_size += size
+
+        return total_size * 1024
 
     @property
     def metadata(self):
