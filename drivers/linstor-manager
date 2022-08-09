@@ -27,7 +27,7 @@ import XenAPI
 import XenAPIPlugin
 
 from linstorjournaler import LinstorJournaler
-from linstorvolumemanager import get_controller_uri, LinstorVolumeManager
+from linstorvolumemanager import get_controller_uri, get_local_volume_openers, LinstorVolumeManager
 from lock import Lock
 import json
 import LinstorSR
@@ -445,22 +445,6 @@ def lock_vdi(session, args):
     return str(False)
 
 
-def lsof_resource(session, args):
-    try:
-        drbd_path = args['drbdPath']
-        (ret, stdout, stderr) = util.doexec(['lsof', '-V', drbd_path])
-        if ret == 0:
-            return 'DRBD resource `{}` is open: {}'.format(
-                drbd_path, stdout.rstrip()
-            )
-        return '`lsof` on DRBD resource `{}` returned {}: {}'.format(
-            drbd_path, ret, stdout.rstrip()
-        )
-    except Exception as e:
-        util.SMlog('linstor-manager:lsof_drbd error: {}'.format(e))
-        raise
-
-
 def has_controller_running(session, args):
     (ret, stdout, stderr) = util.doexec([
         'systemctl', 'is-active', '--quiet', 'linstor-controller'
@@ -827,34 +811,7 @@ def get_drbd_openers(session, args):
     try:
         resource_name = args.get('resourceName')
         volume = args.get('volume')
-        if not resource_name or volume is None:
-            raise Exception('Cannot get DRBD openers without resource name and/or volume.')
-
-        path = '/sys/kernel/debug/drbd/resources/{}/volumes/{}/openers'.format(
-            resource_name, volume
-        )
-
-        with open(path, 'r') as openers:
-            # Not a big cost, so read all lines directly.
-            lines = openers.readlines()
-
-        result = {}
-
-        opener_re = re.compile('(.*)\\s+([0-9]+)\\s+([0-9]+)')
-        for line in lines:
-            match = opener_re.match(line)
-            assert match
-
-            groups = match.groups()
-            process_name = groups[0]
-            pid = groups[1]
-            open_duration_ms = groups[2]
-            result[pid] = {
-                'process-name': process_name,
-                'open-duration': open_duration_ms
-            }
-
-        return json.dumps(result)
+        return get_local_volume_openers(resource_name, volume)
     except Exception as e:
         util.SMlog('linstor-manager:get_drbd_openers error: {}'.format(e))
         raise
@@ -886,7 +843,6 @@ if __name__ == '__main__':
         'getBlockBitmap': get_block_bitmap,
 
         'lockVdi': lock_vdi,
-        'lsofResource': lsof_resource,
         'hasControllerRunning': has_controller_running,
         'addHost': add_host,
         'removeHost': remove_host,
