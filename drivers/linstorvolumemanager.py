@@ -45,80 +45,55 @@ DRBD_BY_RES_PATH = '/dev/drbd/by-res/'
 PLUGIN = 'linstor-manager'
 
 
-# Check if a path is a DRBD resource and log the process name/pid
-# that opened it.
-def log_lsof_drbd(path):
-    PLUGIN_CMD = 'lsofResource'
+# ==============================================================================
 
-    # Ignore if it's not a symlink to DRBD resource.
-    if not path.startswith(DRBD_BY_RES_PATH):
-        return
+def get_local_volume_openers(resource_name, volume):
+    if not resource_name or volume is None:
+        raise Exception('Cannot get DRBD openers without resource name and/or volume.')
 
-    # Compute resource name.
-    res_name_end = path.find('/', len(DRBD_BY_RES_PATH))
-    if res_name_end == -1:
-        return
-    res_name = path[len(DRBD_BY_RES_PATH):res_name_end]
+    path = '/sys/kernel/debug/drbd/resources/{}/volumes/{}/openers'.format(
+        resource_name, volume
+    )
 
-    try:
-        # Ensure path is a DRBD.
-        drbd_path = os.path.realpath(path)
-        stats = os.stat(drbd_path)
-        if not stat.S_ISBLK(stats.st_mode) or os.major(stats.st_rdev) != 147:
-            return
+    with open(path, 'r') as openers:
+        # Not a big cost, so read all lines directly.
+        lines = openers.readlines()
 
-        # Find where the device is open.
-        (ret, stdout, stderr) = util.doexec(['drbdadm', 'status', res_name])
-        if ret != 0:
-            util.SMlog('Failed to execute `drbdadm status` on `{}`: {}'.format(
-                res_name, stderr
-            ))
-            return
+    result = {}
 
-        # Is it a local device?
-        if stdout.startswith('{} role:Primary'.format(res_name)):
-            (ret, stdout, stderr) = util.doexec(['lsof', drbd_path])
-            if ret == 0:
-                util.SMlog(
-                    'DRBD resource `{}` is open on local host: {}'
-                    .format(path, stdout)
-                )
-            else:
-                util.SMlog(
-                    '`lsof` on local DRBD resource `{}` returned {}: {}'
-                    .format(path, ret, stderr)
-                )
-            return
+    opener_re = re.compile('(.*)\\s+([0-9]+)\\s+([0-9]+)')
+    for line in lines:
+        match = opener_re.match(line)
+        assert match
 
-        # Is it a remote device?
-        res = REG_DRBDADM_PRIMARY.search(stdout)
-        if not res:
-            util.SMlog(
-                'Cannot find where is open DRBD resource `{}`'
-                .format(path)
-            )
-            return
-        node_name = res.groups()[0]
+        groups = match.groups()
+        process_name = groups[0]
+        pid = groups[1]
+        open_duration_ms = groups[2]
+        result[pid] = {
+            'process-name': process_name,
+            'open-duration': open_duration_ms
+        }
 
-        session = util.get_localAPI_session()
-        hosts = session.xenapi.host.get_all_records()
-        for host_ref, host_record in hosts.items():
-            if node_name != host_record['hostname']:
-                continue
+    return json.dumps(result)
 
-            ret = session.xenapi.host.call_plugin(
-                host_ref, PLUGIN, PLUGIN_CMD, {'drbdPath': drbd_path},
-            )
-            util.SMlog('DRBD resource `{}` status on host `{}`: {}'.format(
-                path, host_ref, ret
-            ))
-            return
-        util.SMlog('Cannot find primary host of DRBD resource {}'.format(path))
-    except Exception as e:
-        util.SMlog(
-            'Got exception while trying to determine where DRBD resource ' +
-            '`{}` is open: {}'.format(path, e)
+def get_all_volume_openers(resource_name, volume):
+    PLUGIN_CMD = 'getDrbdOpeners'
+
+    volume = str(volume)
+    openers = {}
+
+    session = util.get_localAPI_session()
+    hosts = session.xenapi.host.get_all_records()
+    for host_ref, host_record in hosts.items():
+        openers[host_record['hostname']] = json.loads(
+            session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {
+                'resourceName': resource_name,
+                'volume': volume
+            })
         )
+
+    return openers
 
 
 # ==============================================================================
@@ -1042,22 +1017,8 @@ class LinstorVolumeManager(object):
         :return: A dictionnary that contains openers.
         :rtype: dict(str, obj)
         """
+        return get_all_volume_openers(self.get_volume_name(volume_uuid), '0')
 
-        PLUGIN_CMD = 'getDrbdOpeners'
-
-        openers = {}
-
-        session = util.get_localAPI_session()
-        hosts = session.xenapi.host.get_all_records()
-        for host_ref, host_record in hosts.items():
-            openers[host_record['hostname']] = json.loads(
-                session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {
-                    'resourceName': self.get_volume_name(volume_uuid),
-                    'volume': '0'
-                })
-            )
-
-        return openers
 
     def get_volumes_with_name(self):
         """
@@ -2755,3 +2716,58 @@ class LinstorVolumeManager(object):
                     'Failed to umount volume {} on {}: {}'
                     .format(volume_path, mountpoint, e)
                 )
+
+
+# ==============================================================================
+
+# Check if a path is a DRBD resource and log the process name/pid
+# that opened it.
+def log_drbd_openers(path):
+    # Ignore if it's not a symlink to DRBD resource.
+    if not path.startswith(DRBD_BY_RES_PATH):
+        return
+
+    # Compute resource name.
+    res_name_end = path.find('/', len(DRBD_BY_RES_PATH))
+    if res_name_end == -1:
+        return
+    res_name = path[len(DRBD_BY_RES_PATH):res_name_end]
+
+    volume_end = path.rfind('/')
+    if volume_end == res_name_end:
+        return
+    volume = path[volume_end + 1:]
+
+    try:
+        # Ensure path is a DRBD.
+        drbd_path = os.path.realpath(path)
+        stats = os.stat(drbd_path)
+        if not stat.S_ISBLK(stats.st_mode) or os.major(stats.st_rdev) != 147:
+            return
+
+        # Find where the device is open.
+        (ret, stdout, stderr) = util.doexec(['drbdadm', 'status', res_name])
+        if ret != 0:
+            util.SMlog('Failed to execute `drbdadm status` on `{}`: {}'.format(
+                res_name, stderr
+            ))
+            return
+
+        # Is it a local device?
+        if stdout.startswith('{} role:Primary'.format(res_name)):
+            util.SMlog(
+                'DRBD resource `{}` is open on local host: {}'
+                .format(path, get_local_volume_openers(res_name, volume))
+            )
+            return
+
+        # Is it a remote device?
+        util.SMlog(
+            'DRBD resource `{}` is open on hosts: {}'
+            .format(path, get_all_volume_openers(res_name, volume))
+        )
+    except Exception as e:
+        util.SMlog(
+            'Got exception while trying to determine where DRBD resource ' +
+            '`{}` is open: {}'.format(path, e)
+        )
