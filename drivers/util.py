@@ -1026,6 +1026,10 @@ def diskFromPartition(partition):
     if True in [partition.startswith(x) for x in ['cciss', 'ida', 'rd']]:
         numlen += 1 # need to get rid of trailing 'p'
 
+    # is it a NVMe ? nvme0n1p33
+    if partition.startswith('nvme'):
+        numlen += 1 # need to get rid of trailing 'p'
+
     # is it a mapper path?
     if partition.startswith("mapper"):
         if re.search("p[0-9]*$",partition):
