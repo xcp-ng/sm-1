@@ -208,7 +208,7 @@ class SR(object):
     def block_setscheduler(self, dev):
         try:
             realdev = os.path.realpath(dev)
-            disk    = util.diskFromPartition(realdev)
+            disk    = util.diskFromPartition(realdev[5:])
 
             # the normal case: the sr default scheduler (typically noop),
             # potentially overridden by SR.other_config:scheduler
@@ -218,7 +218,8 @@ class SR(object):
                 sched = self.sched
 
             # special case: CFQ if the underlying disk holds dom0's file systems.
-            if disk in util.dom0_disks():
+            # NVMe doesn't support CFQ
+            if disk in util.dom0_disks() and not disk.startswith('nvme'):
                 sched = 'cfq'
 
             util.SMlog("Block scheduler: %s (%s) wants %s" % (dev, disk, sched))
