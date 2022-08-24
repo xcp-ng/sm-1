@@ -107,6 +107,7 @@ class LinstorJournaler:
             )
 
     def get(self, type, identifier):
+        self._reset_namespace()
         return self._journal.get(self._get_key(type, identifier))
 
     def get_all(self, type):
