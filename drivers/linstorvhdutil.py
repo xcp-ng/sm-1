@@ -25,39 +25,30 @@ import xs_errors
 
 MANAGER_PLUGIN = 'linstor-manager'
 
+# EMEDIUMTYPE constant (124) is not available in python2.
+EMEDIUMTYPE = 124
 
-def call_vhd_util(linstor, func, device_path, *args, **kwargs):
-    try:
-        return func(device_path, *args, **kwargs)
-    except util.CommandException as e:
-        # Raise if we don't have a lock on the volume on another host.
-        if e.code != errno.EROFS:
-            raise
 
-    # Volume is locked on a host, find openers.
-    e_with_openers = None
+def call_vhd_util_on_host(session, host_ref, method, device_path, args):
     try:
-        volume_uuid = linstor.get_volume_uuid_from_device_path(
-            device_path
+        response = session.xenapi.host.call_plugin(
+            host_ref, MANAGER_PLUGIN, method, args
         )
-        e_with_openers = util.CommandException(
-            e.code,
-            e.cmd,
-            e.reason + ' (openers: {})'.format(
-                linstor.get_volume_openers(volume_uuid)
-            )
-        )
-    except Exception as illformed_e:
-        raise util.CommandException(
-            e.code,
-            e.cmd,
-            e.reason + ' (unable to get openers: {})'.format(illformed_e)
-        )
-    raise e_with_openers  # pylint: disable = E0702
+    except Exception as e:
+        util.SMlog('call-plugin ({} with {}) exception: {}'.format(
+            method, args, e
+        ))
+        raise
+
+    util.SMlog('call-plugin ({} with {}) returned: {}'.format(
+        method, args, response
+    ))
+
+    return response
 
 
 def linstorhostcall(local_method, remote_method):
-    def decorated(func):
+    def decorated(response_parser):
         def wrapper(*args, **kwargs):
             self = args[0]
             vdi_uuid = args[1]
@@ -76,45 +67,27 @@ def linstorhostcall(local_method, remote_method):
 
             try:
                 if not in_use or socket.gethostname() in node_names:
-                    return call_vhd_util(self._linstor, local_method, device_path, *args[2:], **kwargs)
+                    return self._call_local_vhd_util(local_method, device_path, *args[2:], **kwargs)
             except util.CommandException as e:
-                # EMEDIUMTYPE constant (124) is not available in python2.
-                if e.code != errno.EROFS and e.code != 124:
+                if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
                     raise
 
             # B. Execute the plugin on master or slave.
-            def exec_remote_method():
+            remote_args = {
+                'devicePath': device_path,
+                'groupName': self._linstor.group_name
+            }
+            remote_args.update(**kwargs)
+            remote_args = {str(key): str(value) for key, value in remote_args.iteritems()}
+
+            def remote_call():
                 host_ref = self._get_readonly_host(
                     vdi_uuid, device_path, node_names
                 )
-                args = {
-                    'devicePath': device_path,
-                    'groupName': self._linstor.group_name
-                }
-                args.update(**kwargs)
+                return call_vhd_util_on_host(self._session, host_ref, remote_method, device_path, remote_args)
+            response = util.retry(remote_call, 5, 2)
 
-                try:
-                    response = self._session.xenapi.host.call_plugin(
-                        host_ref, MANAGER_PLUGIN, remote_method, args
-                    )
-                except Exception as e:
-                    util.SMlog('call-plugin ({} with {}) exception: {}'.format(
-                        remote_method, args, e
-                    ))
-                    raise
-
-                util.SMlog('call-plugin ({} with {}) returned: {}'.format(
-                    remote_method, args, response
-                ))
-                if response == 'False':
-                    raise xs_errors.XenError(
-                        'VDIUnavailable',
-                        opterr='Plugin {} failed'.format(MANAGER_PLUGIN)
-                    )
-                kwargs['response'] = response
-
-            util.retry(exec_remote_method, 5, 3)
-            return func(*args, **kwargs)
+            return response_parser(self, vdi_uuid, response)
         return wrapper
     return decorated
 
@@ -137,7 +110,7 @@ class LinstorVhdUtil:
         self._linstor = linstor
 
     # --------------------------------------------------------------------------
-    # Getters.
+    # Getters: read locally and try on another host in case of failure.
     # --------------------------------------------------------------------------
 
     def check(self, vdi_uuid, ignore_missing_footer=False, fast=False):
@@ -153,11 +126,13 @@ class LinstorVhdUtil:
 
     def get_vhd_info(self, vdi_uuid, include_parent=True):
         kwargs = {'includeParent': str(include_parent)}
-        return self._get_vhd_info(vdi_uuid, self._extract_uuid, **kwargs)
+        # TODO: Replace pylint comment with this feature when possible:
+        # https://github.com/PyCQA/pylint/pull/2926
+        return self._get_vhd_info(vdi_uuid, self._extract_uuid, **kwargs)  # pylint: disable = E1123
 
     @linstorhostcall(vhdutil.getVHDInfo, 'getVHDInfo')
-    def _get_vhd_info(self, vdi_uuid, *args, **kwargs):
-        obj = json.loads(kwargs['response'])
+    def _get_vhd_info(self, vdi_uuid, response):
+        obj = json.loads(response)
 
         vhd_info = vhdutil.VHDInfo(vdi_uuid)
         vhd_info.sizeVirt = obj['sizeVirt']
@@ -171,71 +146,91 @@ class LinstorVhdUtil:
         return vhd_info
 
     @linstorhostcall(vhdutil.hasParent, 'hasParent')
-    def has_parent(self, vdi_uuid, **kwargs):
-        return distutils.util.strtobool(kwargs['response'])
+    def has_parent(self, vdi_uuid, response):
+        return distutils.util.strtobool(response)
 
     def get_parent(self, vdi_uuid):
         return self._get_parent(vdi_uuid, self._extract_uuid)
 
     @linstorhostcall(vhdutil.getParent, 'getParent')
-    def _get_parent(self, vdi_uuid, *args, **kwargs):
-        return kwargs['response']
+    def _get_parent(self, vdi_uuid, response):
+        return response
 
     @linstorhostcall(vhdutil.getSizeVirt, 'getSizeVirt')
-    def get_size_virt(self, vdi_uuid, **kwargs):
-        return int(kwargs['response'])
+    def get_size_virt(self, vdi_uuid, response):
+        return int(response)
 
     @linstorhostcall(vhdutil.getSizePhys, 'getSizePhys')
-    def get_size_phys(self, vdi_uuid, **kwargs):
-        return int(kwargs['response'])
+    def get_size_phys(self, vdi_uuid, response):
+        return int(response)
 
     @linstorhostcall(vhdutil.getDepth, 'getDepth')
-    def get_depth(self, vdi_uuid, **kwargs):
-        return int(kwargs['response'])
+    def get_depth(self, vdi_uuid, response):
+        return int(response)
 
     @linstorhostcall(vhdutil.getKeyHash, 'getKeyHash')
-    def get_key_hash(self, vdi_uuid, **kwargs):
-        return kwargs['response'] or None
+    def get_key_hash(self, vdi_uuid, response):
+        return response or None
 
     @linstorhostcall(vhdutil.getBlockBitmap, 'getBlockBitmap')
-    def get_block_bitmap(self, vdi_uuid, **kwargs):
-        return base64.b64decode(kwargs['response'])
+    def get_block_bitmap(self, vdi_uuid, response):
+        return base64.b64decode(response)
 
     # --------------------------------------------------------------------------
-    # Setters.
+    # Setters: only used locally.
     # --------------------------------------------------------------------------
 
     @linstormodifier()
     def create(self, path, size, static, msize=0):
-        return call_vhd_util(self._linstor, vhdutil.create, path, size, static, msize)
+        return self._call_local_vhd_util(vhdutil.create, path, size, static, msize)
 
     @linstormodifier()
     def set_size_virt_fast(self, path, size):
-        return call_vhd_util(self._linstor, vhdutil.setSizeVirtFast, path, size)
+        return self._call_local_vhd_util(vhdutil.setSizeVirtFast, path, size)
 
     @linstormodifier()
     def set_size_phys(self, path, size, debug=True):
-        return call_vhd_util(self._linstor, vhdutil.setSizePhys, path, size, debug)
+        return self._call_local_vhd_util(vhdutil.setSizePhys, path, size, debug)
 
     @linstormodifier()
-    def set_parent(self, path, parentPath, parentRaw):
-        return call_vhd_util(self._linstor, vhdutil.setParent, path, parentPath, parentRaw)
+    def set_parent(self, path, parentPath, parentRaw=False):
+        return self._call_local_vhd_util(vhdutil.setParent, path, parentPath, parentRaw)
 
     @linstormodifier()
     def set_hidden(self, path, hidden=True):
-        return call_vhd_util(self._linstor, vhdutil.setHidden, path, hidden)
+        return self._call_local_vhd_util(vhdutil.setHidden, path, hidden)
 
     @linstormodifier()
     def set_key(self, path, key_hash):
-        return call_vhd_util(self._linstor, vhdutil.setKey, path, key_hash)
+        return self._call_local_vhd_util(vhdutil.setKey, path, key_hash)
 
     @linstormodifier()
     def kill_data(self, path):
-        return call_vhd_util(self._linstor, vhdutil.killData, path)
+        return self._call_local_vhd_util(vhdutil.killData, path)
 
     @linstormodifier()
     def snapshot(self, path, parent, parentRaw, msize=0, checkEmpty=True):
-        return call_vhd_util(self._linstor, vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
+        return self._call_local_vhd_util(vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
+
+    # --------------------------------------------------------------------------
+    # Remote setters: write locally and try on another host in case of failure.
+    # --------------------------------------------------------------------------
+
+    @linstormodifier()
+    def force_parent(self, path, parentPath, parentRaw=False):
+        kwargs = {
+            'parentPath': str(parentPath),
+            'parentRaw': parentRaw
+        }
+        return self._call_vhd_util(vhdutil.setParent, 'setParent', path, **kwargs)
+
+    @linstormodifier()
+    def force_coalesce(self, path):
+        return self._call_vhd_util(vhdutil.coalesce, 'coalesce', path)
+
+    @linstormodifier()
+    def force_repair(self, path):
+        return self._call_vhd_util(vhdutil.repair, 'repair', path)
 
     # --------------------------------------------------------------------------
     # Helpers.
@@ -273,3 +268,105 @@ class LinstorVhdUtil:
             opterr='Unable to find a valid host from VDI: {} (path={})'
             .format(vdi_uuid, device_path)
         )
+
+    # --------------------------------------------------------------------------
+
+    def _call_local_vhd_util(self, local_method, device_path, *args, **kwargs):
+        try:
+            def local_call():
+                return local_method(device_path, *args, **kwargs)
+            return util.retry(local_call, 5, 2)
+        except util.CommandException as e:
+            if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
+                raise
+
+        # Volume is locked on a host, find openers.
+        e_with_openers = None
+        try:
+            volume_uuid = self._linstor.get_volume_uuid_from_device_path(
+                device_path
+            )
+            e_with_openers = util.CommandException(
+                e.code,
+                e.cmd,
+                e.reason + ' (openers: {})'.format(
+                    self._linstor.get_volume_openers(volume_uuid)
+                )
+            )
+        except Exception as illformed_e:
+            raise util.CommandException(
+                e.code,
+                e.cmd,
+                e.reason + ' (unable to get openers: {})'.format(illformed_e)
+            )
+        raise e_with_openers  # pylint: disable = E0702
+
+    def _call_vhd_util(self, local_method, remote_method, device_path, *args, **kwargs):
+        # A. Try to write locally...
+        try:
+            def local_call():
+                return local_method(device_path, *args, **kwargs)
+            return util.retry(local_call, 5, 2)
+        except util.CommandException as e:
+            if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
+                raise
+
+        # B. Execute the command on another host.
+        # B.1. Get host list.
+        try:
+            hosts = self._session.xenapi.host.get_all_records()
+        except Exception as e:
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='Unable to get host list to run vhd-util command `{}` (path={}): {}'
+                .format(remote_method, device_path, e)
+            )
+
+        # B.2. Prepare remote args.
+        remote_args = {
+            'devicePath': device_path,
+            'groupName': self._linstor.group_name
+        }
+        remote_args.update(**kwargs)
+        remote_args = {str(key): str(value) for key, value in remote_args.iteritems()}
+
+        volume_uuid = self._linstor.get_volume_uuid_from_device_path(
+            device_path
+        )
+
+        # B.3. Call!
+        def remote_call():
+            try:
+                all_openers = self._linstor.get_volume_openers(volume_uuid)
+            except Exception as e:
+                raise xs_errors.XenError(
+                    'VDIUnavailable',
+                    opterr='Unable to get DRBD openers to run vhd-util command `{}` (path={}): {}'
+                    .format(remote_method, device_path, e)
+                )
+
+            no_host_found = True
+            for hostname, openers in all_openers.iteritems():
+                if not openers:
+                    continue
+
+                try:
+                    host_ref = next(ref for ref, rec in hosts.iteritems() if rec['hostname'] == hostname)
+                except StopIteration:
+                    continue
+
+                no_host_found = False
+                try:
+                    return call_vhd_util_on_host(self._session, host_ref, remote_method, device_path, remote_args)
+                except Exception:
+                    pass
+
+            if no_host_found:
+                return local_method(device_path, *args, **kwargs)
+
+            raise xs_errors.XenError(
+                'VDIUnavailable',
+                opterr='No valid host found to run vhd-util command `{}` (path={}): {}'
+                .format(remote_method, device_path, e)
+            )
+        return util.retry(remote_call, 5, 2)
