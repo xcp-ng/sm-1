@@ -69,6 +69,9 @@ FORK_LOG_DAEMON = '/opt/xensource/libexec/fork-log-daemon'
 # - The other hearbeat volumes must be diskful and limited to a maximum of 3.
 USE_HTTP_NBD_SERVERS = True
 
+# Useful flag to trace calls using cProfile.
+TRACE_PERFS = False
+
 # ==============================================================================
 
 # TODO: Supports 'VDI_INTRODUCE', 'VDI_RESET_ON_BOOT/2', 'SR_TRIM',
@@ -2779,6 +2782,12 @@ class LinstorVDI(VDI.VDI):
 
 
 if __name__ == '__main__':
-    SRCommand.run(LinstorSR, DRIVER_INFO)
+    def run():
+        SRCommand.run(LinstorSR, DRIVER_INFO)
+
+    if not TRACE_PERFS:
+        run()
+    else:
+        util.make_profile('LinstorSR', run)
 else:
     SR.registerSR(LinstorSR)
