@@ -97,9 +97,8 @@ def calcOverheadFull(virtual_size):
 def fullSizeVHD(virtual_size):
     return virtual_size + calcOverheadFull(virtual_size)
 
-def ioretry(cmd):
-    return util.ioretry(lambda: util.pread2(cmd),
-            errlist = [errno.EIO, errno.EROFS, errno.EAGAIN])
+def ioretry(cmd, errlist=[errno.EIO, errno.EAGAIN]):
+    return util.ioretry(lambda: util.pread2(cmd), errlist)
 
 def getVHDInfo(path, extractUuidFunction, includeParent = True):
     """Get the VHD info. The parent info may optionally be omitted: vhd-util
