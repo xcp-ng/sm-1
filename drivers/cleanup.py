@@ -840,12 +840,14 @@ class VDI(object):
             xapi.message.create(msg_name, "3", "SR", vdi.sr.uuid, msg_body)
     _reportCoalesceError = staticmethod(_reportCoalesceError)
 
+    def coalesce(self):
+        vhdutil.coalesce(self.path)
+
     def _doCoalesceVHD(vdi):
         try:
-
             startTime = time.time()
             vhdSize = vdi.getSizeVHD()
-            vhdutil.coalesce(vdi.path)
+            vdi.coalesce()
             endTime = time.time()
             vdi.sr.recordStorageSpeed(startTime, endTime, vhdSize)
         except util.CommandException, ce:
@@ -1437,6 +1439,9 @@ class LinstorVDI(VDI):
         )
         return super(LinstorVDI, self).pause(failfast)
 
+    def coalesce(self):
+        self.sr._vhdutil.force_coalesce(self.path)
+
     def _relinkSkip(self):
         abortFlag = IPCFlag(self.sr.uuid)
         for child in self.children:
@@ -1460,6 +1465,19 @@ class LinstorVDI(VDI):
             finally:
                 blktap2.VDI.tap_unpause(session, sr_uuid, vdi_uuid)
         self.children = []
+
+    def _setParent(self, parent):
+        self.sr._vhdutil.force_parent(self.path, parent.path)
+        self.parent = parent
+        self.parentUuid = parent.uuid
+        parent.children.append(self)
+        try:
+            self.setConfig(self.DB_VHD_PARENT, self.parentUuid)
+            Util.log("Updated the vhd-parent field for child %s with %s" % \
+                     (self.uuid, self.parentUuid))
+        except:
+            Util.log("Failed to update %s with vhd-parent field %s" % \
+                     (self.uuid, self.parentUuid))
 
     def _setHidden(self, hidden=True):
         HIDDEN_TAG = 'hidden'
