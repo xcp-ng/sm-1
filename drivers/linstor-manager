@@ -416,6 +416,37 @@ def get_block_bitmap(session, args):
         raise
 
 
+def set_parent(session, args):
+    try:
+        device_path = args['devicePath']
+        parent_path = args['parentPath']
+        vhdutil.setParent(device_path, parent_path, False)
+        return ''
+    except Exception as e:
+        util.SMlog('linstor-manager:set_parent error: {}'.format(e))
+        raise
+
+
+def coalesce(session, args):
+    try:
+        device_path = args['devicePath']
+        vhdutil.coalesce(device_path)
+        return ''
+    except Exception as e:
+        util.SMlog('linstor-manager:coalesce error: {}'.format(e))
+        raise
+
+
+def repair(session, args):
+    try:
+        device_path = args['devicePath']
+        vhdutil.repair(device_path)
+        return ''
+    except Exception as e:
+        util.SMlog('linstor-manager:repair error: {}'.format(e))
+        raise
+
+
 def lock_vdi(session, args):
     lock = None
     try:
@@ -841,6 +872,12 @@ if __name__ == '__main__':
         'getDepth': get_depth,
         'getKeyHash': get_key_hash,
         'getBlockBitmap': get_block_bitmap,
+
+        # Called by cleanup.py to coalesce when a primary
+        # is opened on a non-local host.
+        'setParent': set_parent,
+        'coalesce': coalesce,
+        'repair': repair,
 
         'lockVdi': lock_vdi,
         'hasControllerRunning': has_controller_running,
