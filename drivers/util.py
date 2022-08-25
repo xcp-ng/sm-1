@@ -1856,3 +1856,45 @@ def check_pid_exists(pid):
         return False
     else:
         return True
+
+
+def make_profile(name, function):
+    """
+    Helper to execute cProfile using unique log file.
+    """
+
+    import cProfile
+    import itertools
+    import os.path
+    import time
+
+    assert name
+    assert function
+
+    FOLDER = '/tmp/sm-perfs/'
+    makedirs(FOLDER)
+
+    filename = time.strftime('{}_%Y%m%d_%H%M%S.prof'.format(name))
+
+    def gen_path(path):
+        yield path
+        root, ext = os.path.splitext(path)
+        for i in itertools.count(start=1, step=1):
+            yield root + '.{}.'.format(i) + ext
+
+    for profile_path in gen_path(FOLDER + filename):
+        try:
+            file = open_atomic(profile_path, 'w')
+            file.close()
+            break
+        except OSError as e:
+            if e.errno == errno.EEXIST:
+                pass
+            else:
+                raise
+
+    try:
+        SMlog('* Start profiling of {} ({}) *'.format(name, filename))
+        cProfile.runctx('function()', None, locals(), profile_path)
+    finally:
+        SMlog('* End profiling of {} ({}) *'.format(name, filename))
