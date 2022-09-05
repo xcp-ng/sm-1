@@ -1789,15 +1789,18 @@ class LinstorVolumeManager(object):
                         max(current.allocated_size, allocated_size) or \
                         allocated_size
 
-                    if volume.usable_size < 0:
-                        raise LinstorVolumeManagerError(
-                           'Failed to get usable size of `{}` on `{}`'
-                           .format(resource.name, volume.storage_pool_name)
-                        )
-                    virtual_size = volume.usable_size
+                    usable_size = volume.usable_size
+                    if usable_size > 0 and (
+                        usable_size < current.virtual_size or
+                        not current.virtual_size
+                    ):
+                        current.virtual_size = usable_size
 
-                    current.virtual_size = current.virtual_size and \
-                        min(current.virtual_size, virtual_size) or virtual_size
+        if current.virtual_size <= 0:
+            raise LinstorVolumeManagerError(
+               'Failed to get usable size of `{}` on `{}`'
+               .format(resource.name, volume.storage_pool_name)
+            )
 
         for current in all_volume_info.values():
             current.allocated_size *= 1024
