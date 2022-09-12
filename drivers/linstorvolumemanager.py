@@ -2195,7 +2195,7 @@ class LinstorVolumeManager(object):
 
     def _create_linstor_kv(self, namespace):
         return linstor.KV(
-            self._get_store_name(),
+            self._group_name,
             uri=self._linstor.controller_host(),
             namespace=namespace
         )
@@ -2204,9 +2204,6 @@ class LinstorVolumeManager(object):
         properties = self._get_kv_cache()
         properties.namespace = self._build_volume_namespace(volume_uuid)
         return properties
-
-    def _get_store_name(self):
-        return 'xcp-sr-{}'.format(self._group_name)
 
     @classmethod
     def _build_sr_namespace(cls):
