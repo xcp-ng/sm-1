@@ -72,6 +72,9 @@ USE_HTTP_NBD_SERVERS = True
 # Useful flag to trace calls using cProfile.
 TRACE_PERFS = False
 
+# Enable/Disable VHD key hash support.
+USE_KEY_HASH = False
+
 # ==============================================================================
 
 # TODO: Supports 'VDI_INTRODUCE', 'VDI_RESET_ON_BOOT/2', 'SR_TRIM',
@@ -1234,7 +1237,7 @@ class LinstorSR(SR.SR):
             vdi = self.vdi(vdi_uuid)
             self.vdis[vdi_uuid] = vdi
 
-            if vdi.vdi_type == vhdutil.VDI_TYPE_VHD:
+            if USE_KEY_HASH and vdi.vdi_type == vhdutil.VDI_TYPE_VHD:
                 # TODO: Replace pylint comment with this feature when possible:
                 # https://github.com/PyCQA/pylint/pull/2926
                 vdi.sm_config_override['key_hash'] = \
