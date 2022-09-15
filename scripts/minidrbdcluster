@@ -1,7 +1,6 @@
 #! /usr/bin/env python2
 
 import configparser
-import os
 import re
 import signal
 import subprocess
@@ -35,24 +34,42 @@ def sig_handler(sig, frame):
     )
 
 
+def preexec_subprocess():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def exec_subprocess(args):
+    proc = subprocess.Popen(args, preexec_fn=preexec_subprocess)
+    raise_sigint = False
+    while True:
+        try:
+            proc.wait()
+            break
+        except KeyboardInterrupt:
+            raise_sigint = True
+        except:  # noqa: E722
+            pass
+
+    if raise_sigint:
+        raise KeyboardInterrupt
+
+    return proc.returncode
+
+
 def call_systemd(operation, service):
     verbose = operation in ('start', 'stop')
     if verbose:
         print('Trying to %s %s' % (operation, service))
-    r = os.system('systemctl %s %s' % (operation, service))
+    ret = exec_subprocess(['systemctl', operation, service])
     if verbose:
         print('%s for %s %s' % (
-            'success' if r == 0 else 'failure', operation, service
+            'success' if ret == 0 else 'failure', operation, service
         ))
-    return r == 0
+    return ret == 0
 
 
 def ensure_systemd_started(service):
-    args = ['systemctl', 'is-active', '--quiet', service]
-
-    proc = subprocess.Popen(args)
-    proc.wait()
-    if not proc.returncode:
+    if not exec_subprocess(['systemctl', 'is-active', '--quiet', service]):
         return True  # Already active.
 
     return call_systemd('start', service)
