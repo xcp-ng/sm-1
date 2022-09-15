@@ -10,6 +10,7 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/xensource/libexec/minidrbdcluster
 KillMode=process
 KillSignal=SIGINT
+SendSIGKILL=no
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=minidrbdcluster
