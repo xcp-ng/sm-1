@@ -50,9 +50,7 @@ class TestZFSSR(unittest.TestCase):
             self.create_zfs_sr()
         except SR.SROSError as e:
             # Check SRUnavailable error.
-            if e.errno != 47:
-                raise
-            failed = True
+            failed = e.errno == 47
         self.assertTrue(failed)
 
     @mock.patch('ZFSSR.is_zfs_available', autospec=True)
@@ -77,9 +75,7 @@ class TestZFSSR(unittest.TestCase):
             sr.create(sr.uuid, 42)
         except SR.SROSError as e:
             # Check ZFSSRCreate error.
-            if e.errno != 5000:
-                raise
-            failed = True
+            failed = e.errno == 5000
         self.assertTrue(failed)
 
     @mock.patch('ZFSSR.is_zfs_available', autospec=True)
@@ -112,7 +108,5 @@ class TestZFSSR(unittest.TestCase):
             sr.scan(sr.uuid)
         except SR.SROSError as e:
             # Check SRUnavailable error.
-            if e.errno != 47:
-                raise
-            failed = True
+            failed = e.errno == 47
         self.assertTrue(failed)
