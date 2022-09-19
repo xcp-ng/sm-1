@@ -23,8 +23,6 @@ class TestMooseFSSR(unittest.TestCase):
             'masterhost': masterhost,
             'rootpath': rootpath
         }
-        if useroptions:
-            srcmd.dconf.update({'options': useroptions})
         srcmd.params = {
             'command': 'some_command',
             'device_config': {}
