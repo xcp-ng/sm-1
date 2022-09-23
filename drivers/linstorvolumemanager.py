@@ -1402,6 +1402,111 @@ class LinstorVolumeManager(object):
                 'Failed to destroy node `{}`: {}'.format(node_name, error_str)
             )
 
+    def get_nodes_info(self):
+        """
+        Get all nodes + statuses, used or not by the pool.
+        :rtype: dict(str, dict)
+        """
+        try:
+            nodes = {}
+            for node in self._linstor.node_list_raise().nodes:
+                nodes[node.name] = node.connection_status
+            return nodes
+        except Exception as e:
+            raise LinstorVolumeManagerError(
+                'Failed to get all nodes: `{}`'.format(e)
+            )
+
+    def get_storage_pools_info(self):
+        """
+        Give all storage pools of current group name.
+        :rtype: dict(str, list)
+        """
+        storage_pools = {}
+        for pool in self._get_storage_pools(force=True):
+            if pool.node_name not in storage_pools:
+                storage_pools[pool.node_name] = []
+
+            size = -1
+            capacity = -1
+
+            space = pool.free_space
+            if space:
+                size = space.free_capacity
+                if size < 0:
+                    size = -1
+                else:
+                    size *= 1024
+                capacity = space.total_capacity
+                if capacity <= 0:
+                    capacity = -1
+                else:
+                    capacity *= 1024
+
+            storage_pools[pool.node_name].append({
+                'storage-pool-name': pool.name,
+                'uuid': pool.uuid,
+                'free-size': size,
+                'capacity': capacity
+            })
+
+        return storage_pools
+
+    def get_resources_info(self):
+        """
+        Give all resources of current group name.
+        :rtype: dict(str, list)
+        """
+        resources = {}
+        resource_list = self._linstor.resource_list_raise()
+        for resource in resource_list.resources:
+            if resource.name not in resources:
+                resources[resource.name] = {}
+
+            resources[resource.name][resource.node_name] = {
+                'volumes': [],
+                'diskful': linstor.consts.FLAG_DISKLESS not in resource.flags,
+                'tie-breaker': linstor.consts.FLAG_TIE_BREAKER in resource.flags
+            }
+
+            for volume in resource.volumes:
+                # We ignore diskless pools of the form "DfltDisklessStorPool".
+                if volume.storage_pool_name != self._group_name:
+                    continue
+
+                usable_size = volume.usable_size
+                if usable_size < 0:
+                    usable_size = -1
+                else:
+                    usable_size *= 1024
+
+                allocated_size = volume.allocated_size
+                if allocated_size < 0:
+                    allocated_size = -1
+                else:
+                    allocated_size *= 1024
+
+            resources[resource.name][resource.node_name]['volumes'].append({
+                'storage-pool-name': volume.storage_pool_name,
+                'uuid': volume.uuid,
+                'number': volume.number,
+                'device-path': volume.device_path,
+                'usable-size': usable_size,
+                'allocated-size': allocated_size
+            })
+
+        for resource_state in resource_list.resource_states:
+            resource = resources[resource_state.rsc_name][resource_state.node_name]
+            resource['in-use'] = resource_state.in_use
+
+            volumes = resource['volumes']
+            for volume_state in resource_state.volume_states:
+                volume = next((x for x in volumes if x['number'] == volume_state.number), None)
+                if volume:
+                    volume['disk-state'] = volume_state.disk_state
+
+        return resources
+
     @classmethod
     def create_sr(
         cls, group_name, node_names, ips, redundancy,
