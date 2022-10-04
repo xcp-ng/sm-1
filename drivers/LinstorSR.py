@@ -277,7 +277,7 @@ def get_ips_from_xha_config_file():
         return IPS_XHA_CACHE
 
     ips = dict()
-    host_ip = None
+    host_id = None
     try:
         # Ensure there is no dirty read problem.
         # For example if the HA is reloaded.
@@ -287,7 +287,7 @@ def get_ips_from_xha_config_file():
             period=1
         )
     except:
-        return (host_ip, ips)
+        return (None, ips)
 
     def parse_host_nodes(ips, node):
         current_id = None
@@ -322,14 +322,14 @@ def get_ips_from_xha_config_file():
         if node.tag == 'common-config':
             parse_common_config(ips, node)
         elif node.tag == 'local-config':
-            host_ip = parse_local_config(ips, node)
+            host_id = parse_local_config(ips, node)
         else:
             continue
 
-        if ips and host_ip:
+        if ips and host_id:
             break
 
-    return (host_ip, ips)
+    return (host_id and ips.get(host_id), ips)
 
 
 def activate_lvm_group(group_name):
