@@ -307,19 +307,19 @@ class LinstorVolumeManager(object):
             'allocated_size',  # Allocated size, place count is not used.
             'virtual_size',    # Total virtual available size of this volume
                                # (i.e. the user size at creation).
-            'is_diskful'
+            'diskful'          # Array of nodes that have a diskful volume.
         )
 
         def __init__(self, name):
             self.name = name
             self.allocated_size = 0
             self.virtual_size = 0
-            self.is_diskful = False
+            self.diskful = []
 
         def __repr__(self):
             return 'VolumeInfo("{}", {}, {}, {})'.format(
                 self.name, self.allocated_size, self.virtual_size,
-                'diskful' if self.is_diskful else 'diskless'
+                self.diskful
             )
 
     # --------------------------------------------------------------------------
@@ -1878,7 +1878,8 @@ class LinstorVolumeManager(object):
             else:
                 current = all_volume_info[resource.name]
 
-            current.is_diskful = linstor.consts.FLAG_DISKLESS not in resource.flags
+            if linstor.consts.FLAG_DISKLESS not in resource.flags:
+                current.diskful.append(resource.node_name)
 
             for volume in resource.volumes:
                 # We ignore diskless pools of the form "DfltDisklessStorPool".
