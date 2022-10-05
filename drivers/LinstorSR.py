@@ -39,6 +39,7 @@ import os
 import re
 import scsiutil
 import signal
+import socket
 import SR
 import SRCommand
 import subprocess
@@ -2729,7 +2730,8 @@ class LinstorVDI(VDI.VDI):
                     .format(self.uuid, e)
                 )
 
-            must_get_device_path = volume_info.is_diskful
+            hostname = socket.gethostname()
+            must_get_device_path = hostname in volume_info.diskful
 
         drbd_path = None
         if must_get_device_path or self.sr._is_master:
