@@ -1199,12 +1199,6 @@ class LinstorVolumeManager(object):
                 rsc_name=clone_volume_name,
                 storage_pool=self._group_name
             ))
-        for node_name in diskless_node_names:
-            resources.append(linstor.ResourceData(
-                node_name=node_name,
-                rsc_name=clone_volume_name,
-                diskless=True
-            ))
 
         # 5. Create resources!
         def clean():
