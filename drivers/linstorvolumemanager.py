@@ -83,15 +83,30 @@ def get_all_volume_openers(resource_name, volume):
     volume = str(volume)
     openers = {}
 
-    session = util.get_localAPI_session()
+    # Make sure this call never stucks because this function can be called
+    # during HA init and in this case we can wait forever.
+    session = util.timeout_call(10, util.get_localAPI_session)
+
     hosts = session.xenapi.host.get_all_records()
     for host_ref, host_record in hosts.items():
-        openers[host_record['hostname']] = json.loads(
-            session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {
-                'resourceName': resource_name,
-                'volume': volume
-            })
-        )
+        node_name = host_record['hostname']
+        try:
+            if not session.xenapi.host_metrics.get_record(
+                host_record['metrics']
+            )['live']:
+                # Ensure we call plugin on online hosts only.
+                continue
+
+            openers[node_name] = json.loads(
+                session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {
+                    'resourceName': resource_name,
+                    'volume': volume
+                })
+            )
+        except Exception as e:
+            util.SMlog('Failed to get openers of `{}` on `{}`: {}'.format(
+                resource_name, node_name, e
+            ))
 
     return openers
 
@@ -162,12 +177,20 @@ def _get_controller_uri():
     # replicated volume. `drbdadm status xcp-persistent-database` returns
     # 3 connections by default.
     try:
-        session = util.get_localAPI_session()
+        session = util.timeout_call(10, util.get_localAPI_session)
+
         for host_ref, host_record in session.xenapi.host.get_all_records().items():
-            if distutils.util.strtobool(
-                session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
-            ):
-                return 'linstor://' + host_record['address']
+            node_name = host_record['hostname']
+            try:
+                if distutils.util.strtobool(
+                    session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
+                ):
+                    return 'linstor://' + host_record['address']
+            except Exception as e:
+                # Can throw and exception if a host is offline. So catch it.
+                util.SMlog('Unable to search controller on `{}`: {}'.format(
+                    node_name, e
+                ))
     except:
         # Not found, maybe we are trying to create the SR...
         pass
@@ -200,12 +223,24 @@ def get_controller_node_name():
         if res:
             return res.groups()[0]
 
-    session = util.get_localAPI_session()
+    session = util.timeout_call(5, util.get_localAPI_session)
+
     for host_ref, host_record in session.xenapi.host.get_all_records().items():
-        if distutils.util.strtobool(
-            session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
-        ):
-            return host_record['hostname']
+        node_name = host_record['hostname']
+        try:
+            if not session.xenapi.host_metrics.get_record(
+                host_record['metrics']
+            )['live']:
+                continue
+
+            if distutils.util.strtobool(session.xenapi.host.call_plugin(
+                host_ref, PLUGIN, PLUGIN_CMD, {}
+            )):
+                return node_name
+        except Exception as e:
+            util.SMlog('Failed to call plugin to get controller on `{}`: {}'.format(
+                node_name, e
+            ))
 
 # ==============================================================================
 
