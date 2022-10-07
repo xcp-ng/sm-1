@@ -1622,6 +1622,7 @@ class LinstorVolumeManager(object):
                     )
 
         driver_pool_name = group_name
+        base_group_name = group_name
         group_name = cls._build_group_name(group_name)
         pools = lin.storage_pool_list_raise(filter_by_stor_pools=[group_name])
         pools = pools.storage_pools
@@ -1784,6 +1785,7 @@ class LinstorVolumeManager(object):
         instance._linstor = lin
         instance._logger = logger
         instance._redundancy = redundancy
+        instance._base_group_name = base_group_name
         instance._group_name = group_name
         instance._volumes = set()
         instance._storage_pools_time = 0
