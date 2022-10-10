@@ -65,12 +65,17 @@ def linstorhostcall(local_method, remote_method):
             (node_names, in_use) = \
                 self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
 
+            local_e = None
             try:
                 if not in_use or socket.gethostname() in node_names:
-                    return self._call_local_vhd_util(local_method, device_path, *args[2:], **kwargs)
-            except util.CommandException as e:
-                if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
-                    raise
+                    # Don't call `_call_local_vhd_util`, we don't want to
+                    # trace failed calls now using opener files. It can be
+                    # normal to have an exception.
+                    def local_call():
+                        return local_method(device_path, *args[2:], **kwargs)
+                    return util.retry(local_call, 5, 2)
+            except util.CommandException as local_e:
+                self._handle_local_vhd_util_error(local_e)
 
             # B. Execute the plugin on master or slave.
             remote_args = {
@@ -80,12 +85,13 @@ def linstorhostcall(local_method, remote_method):
             remote_args.update(**kwargs)
             remote_args = {str(key): str(value) for key, value in remote_args.iteritems()}
 
-            def remote_call():
-                host_ref = self._get_readonly_host(
-                    vdi_uuid, device_path, node_names
-                )
-                return call_vhd_util_on_host(self._session, host_ref, remote_method, device_path, remote_args)
-            response = util.retry(remote_call, 5, 2)
+            try:
+                def remote_call():
+                    host_ref = self._get_readonly_host(vdi_uuid, device_path, node_names)
+                    return call_vhd_util_on_host(self._session, host_ref, remote_method, device_path, remote_args)
+                response = util.retry(remote_call, 5, 2)
+            except Exception as remote_e:
+                self._raise_openers_exception(device_path, local_e or remote_e)
 
             return response_parser(self, vdi_uuid, response)
         return wrapper
@@ -271,22 +277,13 @@ class LinstorVhdUtil:
 
     # --------------------------------------------------------------------------
 
-    def _call_local_vhd_util(self, local_method, device_path, *args, **kwargs):
-        try:
-            def local_call():
-                return local_method(device_path, *args, **kwargs)
-            return util.retry(local_call, 5, 2)
-        except util.CommandException as e:
-            if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
-                raise
-
-        # Volume is locked on a host, find openers.
+    def _raise_openers_exception(self, device_path, e):
         e_with_openers = None
         try:
             volume_uuid = self._linstor.get_volume_uuid_from_device_path(
                 device_path
             )
-            e_with_openers = util.CommandException(
+            e_wrapper = util.CommandException(
                 e.code,
                 e.cmd,
                 e.reason + ' (openers: {})'.format(
@@ -294,12 +291,29 @@ class LinstorVhdUtil:
                 )
             )
         except Exception as illformed_e:
-            raise util.CommandException(
+            e_wrapper = util.CommandException(
                 e.code,
                 e.cmd,
                 e.reason + ' (unable to get openers: {})'.format(illformed_e)
             )
-        raise e_with_openers  # pylint: disable = E0702
+        util.SMlog('raise opener exception: {} ({})'.format(e_wrapper, e_wrapper.reason))
+        raise e_wrapper  # pylint: disable = E0702
+
+    @staticmethod
+    def _handle_local_vhd_util_error(e):
+        if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
+            util.SMlog('failed to execute locally vhd-util (sys {})'.format(e.code))
+
+    def _call_local_vhd_util(self, local_method, device_path, *args, **kwargs):
+        try:
+            def local_call():
+                return local_method(device_path, *args, **kwargs)
+            return util.retry(local_call, 5, 2)
+        except util.CommandException as e:
+            self._handle_local_vhd_util_error(e)
+
+        # Volume is locked on a host, find openers.
+        self._raise_openers_exception(device_path, e)
 
     def _call_vhd_util(self, local_method, remote_method, device_path, *args, **kwargs):
         # A. Try to write locally...
@@ -308,8 +322,7 @@ class LinstorVhdUtil:
                 return local_method(device_path, *args, **kwargs)
             return util.retry(local_call, 5, 2)
         except util.CommandException as e:
-            if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
-                raise
+            self._handle_local_vhd_util_error(e)
 
         # B. Execute the command on another host.
         # B.1. Get host list.
@@ -362,11 +375,14 @@ class LinstorVhdUtil:
                     pass
 
             if no_host_found:
-                return local_method(device_path, *args, **kwargs)
+                try:
+                    return local_method(device_path, *args, **kwargs)
+                except Exception as e:
+                    self._raise_openers_exception(device_path, e)
 
             raise xs_errors.XenError(
                 'VDIUnavailable',
-                opterr='No valid host found to run vhd-util command `{}` (path={}): {}'
-                .format(remote_method, device_path, e)
+                opterr='No valid host found to run vhd-util command `{}` (path=`{}`, openers=`{}`): {}'
+                .format(remote_method, device_path, openers, e)
             )
         return util.retry(remote_call, 5, 2)
