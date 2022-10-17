@@ -951,7 +951,11 @@ class LinstorVolumeManager(object):
             volume_properties[self.PROP_UPDATING_UUID_SRC] = volume_uuid
 
             # 4. Copy the properties.
-            volume_properties[self.PROP_METADATA] = metadata
+            # Note: On new volumes, during clone for example, the metadata
+            # may be missing. So we must test it to avoid this error:
+            # "None has to be a str/unicode, but is <type 'NoneType'>"
+            if metadata:
+                volume_properties[self.PROP_METADATA] = metadata
             volume_properties[self.PROP_VOLUME_NAME] = volume_name
 
             # 5. Ok!
@@ -2288,6 +2292,16 @@ class LinstorVolumeManager(object):
                 self._logger(
                     'Cannot clean volume {}: {}'.format(volume_uuid, e)
                 )
+
+                # The volume can't be removed, maybe it's still in use,
+                # in this case rename it with the "DELETED_" prefix.
+                # This prefix is mandatory if it exists a snap transaction to
+                # rollback because the original VDI UUID can try to be renamed
+                # with the UUID we are trying to delete...
+                if not volume_uuid.startswith('DELETED_'):
+                    self.update_volume_uuid(
+                        volume_uuid, 'DELETED_' + volume_uuid, force=True
+                    )
 
         for dest_uuid, src_uuid in updating_uuid_volumes.items():
             dest_namespace = self._build_volume_namespace(dest_uuid)
