@@ -308,7 +308,7 @@ class LinstorVolumeManager(object):
 
     # Property namespaces.
     NAMESPACE_SR = 'xcp/sr'
-    NAMESPACE_VOLUME = 'volume'
+    NAMESPACE_VOLUME = 'xcp/volume'
 
     # Regex to match properties.
     REG_PROP = '^([^/]+)/{}$'
