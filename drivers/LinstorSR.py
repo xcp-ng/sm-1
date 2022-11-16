@@ -967,25 +967,48 @@ class LinstorSR(SR.SR):
     def _update_minidrbdcluster_on_all_hosts(
         self, enabled, controller_node_name=None
     ):
+        if controller_node_name == 'localhost':
+            controller_node_name = self.session.xenapi.host.get_record(
+                util.get_this_host_ref(self.session)
+            )['hostname']
+            assert controller_node_name
+            assert controller_node_name != 'localhost'
+
         controller_host = None
         secondary_hosts = []
 
         hosts = self.session.xenapi.host.get_all_records()
         for host_ref, host_rec in hosts.iteritems():
-            if controller_node_name == host_rec['hostname']:
+            hostname = host_rec['hostname']
+            if controller_node_name == hostname:
                 controller_host = host_ref
             else:
-                secondary_hosts.append(host_ref)
+                secondary_hosts.append((host_ref, hostname))
+
+        action_name = 'Starting' if enabled else 'Stopping'
+        if controller_node_name and not controller_host:
+            util.SMlog('Failed to find controller host: `{}`'.format(
+                controller_node_name
+            ))
 
         if enabled and controller_host:
+            util.SMlog('{} minidrbdcluster on controller host `{}`...'.format(
+                action_name, controller_node_name
+            ))
             # If enabled is true, we try to start the controller on the desired
             # node name first.
             self._update_minidrbdcluster(controller_host, enabled)
 
-        for host in secondary_hosts:
-            self._update_minidrbdcluster(host, enabled)
+        for host_ref, hostname in secondary_hosts:
+            util.SMlog('{} minidrbdcluster on host {}...'.format(
+                action_name, hostname
+            ))
+            self._update_minidrbdcluster(host_ref, enabled)
 
         if not enabled and controller_host:
+            util.SMlog('{} minidrbdcluster on controller host `{}`...'.format(
+                action_name, controller_node_name
+            ))
             # If enabled is false, we disable the minidrbdcluster service of
             # the controller host last. Why? Otherwise the linstor-controller
             # of other nodes can be started, and we don't want that.
