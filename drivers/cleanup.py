@@ -726,6 +726,12 @@ class VDI(object):
         lock.Lock.cleanupAll(self.uuid)
         self._clear()
 
+    def getParent(self):
+        return vhdutil.getParent(self.path, lambda x: x.strip())
+
+    def repair(self, parent):
+        vhdutil.repair(parent)
+
     def __str__(self):
         strHidden = ""
         if self.hidden:
@@ -876,11 +882,11 @@ class VDI(object):
             # Try a repair and reraise the exception
             parent = ""
             try:
-                parent = vhdutil.getParent(self.path, lambda x: x.strip())
+                parent = self.getParent()
                 # Repair error is logged and ignored. Error reraised later
                 util.SMlog('Coalesce failed on %s, attempting repair on ' \
                            'parent %s' % (self.uuid, parent))
-                vhdutil.repair(parent)
+                self.repair(parent)
             except Exception, e:
                 util.SMlog('(error ignored) Failed to repair parent %s ' \
                            'after failed coalesce on %s, err: %s' % 
@@ -1441,6 +1447,16 @@ class LinstorVDI(VDI):
 
     def coalesce(self):
         self.sr._vhdutil.force_coalesce(self.path)
+
+    def getParent(self):
+        return self.sr._vhdutil.get_parent(
+            self.sr._linstor.get_volume_uuid_from_device_path(self.path)
+        )
+
+    def repair(self, parent_uuid):
+        self.sr._vhdutil.force_repair(
+            self.sr._linstor.get_device_path(parent_uuid)
+        )
 
     def _relinkSkip(self):
         abortFlag = IPCFlag(self.sr.uuid)
