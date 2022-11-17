@@ -1170,6 +1170,9 @@ class LinstorSR(SR.SR):
                     )
                     continue
 
+                if vdi_uuid.startswith('DELETED_'):
+                    continue
+
                 util.SMlog(
                     'Trying to introduce VDI {} as it is present in '
                     'LINSTOR and not in XAPI...'
