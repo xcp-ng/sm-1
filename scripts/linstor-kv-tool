@@ -48,7 +48,7 @@ def remove_all_volumes(controller_uri, group_name):
     )
 
     for key, value in list(kv.items()):
-        if key.startswith('xcp/volume/'):
+        if key.startswith('xcp/volume/') or key.startswith('xcp/sr/journal/'):
             size = key.rindex('/')
             kv.namespace = key[:size]
             del kv[key[size + 1:]]
