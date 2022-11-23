@@ -228,15 +228,15 @@ class LinstorVhdUtil:
             'parentPath': str(parentPath),
             'parentRaw': parentRaw
         }
-        return self._call_vhd_util(vhdutil.setParent, 'setParent', path, **kwargs)
+        return self._call_vhd_util(vhdutil.setParent, 'setParent', path, use_parent=False, **kwargs)
 
     @linstormodifier()
     def force_coalesce(self, path):
-        return self._call_vhd_util(vhdutil.coalesce, 'coalesce', path)
+        return self._call_vhd_util(vhdutil.coalesce, 'coalesce', path, use_parent=True)
 
     @linstormodifier()
     def force_repair(self, path):
-        return self._call_vhd_util(vhdutil.repair, 'repair', path)
+        return self._call_vhd_util(vhdutil.repair, 'repair', path, use_parent=False)
 
     # --------------------------------------------------------------------------
     # Helpers.
@@ -315,7 +315,12 @@ class LinstorVhdUtil:
         # Volume is locked on a host, find openers.
         self._raise_openers_exception(device_path, e)
 
-    def _call_vhd_util(self, local_method, remote_method, device_path, *args, **kwargs):
+    def _call_vhd_util(self, local_method, remote_method, device_path, use_parent, *args, **kwargs):
+        # Note: `use_parent` exists to know if the VHD parent is used by the local/remote method.
+        # Normally in case of failure, if the parent is unused we try to execute the method on
+        # another host using the DRBD opener list. In the other case, if the parent is required,
+        # we must check where this last one is open instead of the child.
+
         # A. Try to write locally...
         try:
             def local_call():
@@ -346,11 +351,16 @@ class LinstorVhdUtil:
         volume_uuid = self._linstor.get_volume_uuid_from_device_path(
             device_path
         )
+        parent_volume_uuid = None
+        if use_parent:
+            parent_volume_uuid = self.get_parent(volume_uuid)
+
+        openers_uuid = parent_volume_uuid if use_parent else volume_uuid
 
         # B.3. Call!
         def remote_call():
             try:
-                all_openers = self._linstor.get_volume_openers(volume_uuid)
+                all_openers = self._linstor.get_volume_openers(openers_uuid)
             except Exception as e:
                 raise xs_errors.XenError(
                     'VDIUnavailable',
