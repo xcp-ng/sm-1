@@ -124,11 +124,11 @@ class LinstorVhdUtil:
             'ignoreMissingFooter': str(ignore_missing_footer),
             'fast': str(fast)
         }
-        return self._check(vdi_uuid, **kwargs)
+        return self._check(vdi_uuid, **kwargs)  # pylint: disable = E1123
 
     @linstorhostcall(vhdutil.check, 'check')
-    def _check(self, vdi_uuid, **kwargs):
-        return distutils.util.strtobool(kwargs['response'])
+    def _check(self, vdi_uuid, response):
+        return distutils.util.strtobool(response)
 
     def get_vhd_info(self, vdi_uuid, include_parent=True):
         kwargs = {'includeParent': str(include_parent)}
