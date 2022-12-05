@@ -242,6 +242,29 @@ def get_controller_node_name():
                 node_name, e
             ))
 
+
+def demote_drbd_resource(node_name, resource_name):
+    PLUGIN_CMD = 'demoteDrbdResource'
+
+    session = util.timeout_call(5, util.get_localAPI_session)
+
+    for host_ref, host_record in session.xenapi.host.get_all_records().items():
+        if host_record['hostname'] != node_name:
+            continue
+
+        try:
+            session.xenapi.host.call_plugin(
+                host_ref, PLUGIN, PLUGIN_CMD, {'resource_name': resource_name}
+            )
+        except Exception as e:
+            util.SMlog('Failed to demote resource `{}` on `{}`: {}'.format(
+                resource_name, node_name, e
+            ))
+    raise Exception(
+        'Can\'t demote resource `{}`, unable to find node `{}`'
+        .format(resource_name, node_name)
+    )
+
 # ==============================================================================
 
 class LinstorVolumeManagerError(Exception):
@@ -615,6 +638,7 @@ class LinstorVolumeManager(object):
             no_diskless=no_diskless
         )
 
+        # Volume created! Now try to find the device path.
         try:
             self._logger(
                 'Find device path of LINSTOR volume {}...'.format(volume_uuid)
@@ -627,8 +651,10 @@ class LinstorVolumeManager(object):
                 'LINSTOR volume {} created!'.format(volume_uuid)
             )
             return device_path
-        except Exception:
-            self._force_destroy_volume(volume_uuid)
+        except Exception as e:
+            # There is an issue to find the path.
+            # At this point the volume has just been created, so force flag can be used.
+            self._destroy_volume(volume_uuid, force=True)
             raise
 
     def mark_volume_as_persistent(self, volume_uuid):
@@ -1242,7 +1268,7 @@ class LinstorVolumeManager(object):
         # 5. Create resources!
         def clean():
             try:
-                self._destroy_volume(clone_uuid)
+                self._destroy_volume(clone_uuid, force=True)
             except Exception as e:
                 self._logger(
                     'Unable to destroy volume {} after shallow clone fail: {}'
@@ -1250,12 +1276,16 @@ class LinstorVolumeManager(object):
                 )
 
         def create():
-            try:
-                volume_properties = self._create_volume_with_properties(
-                    clone_uuid, clone_volume_name, size,
-                    place_resources=False
-                )
+            # Note: placed outside try/except block because we create only definition first.
+            # There is no reason to call `clean` before the real resource creation.
+            volume_properties = self._create_volume_with_properties(
+                clone_uuid, clone_volume_name, size,
+                place_resources=False
+            )
 
+            # After this point, `clean` can be called for any fail because the clone UUID
+            # is really unique. No risk to remove existing data.
+            try:
                 result = self._linstor.resource_create(resources)
                 error_str = self._get_error_str(result)
                 if error_str:
@@ -1298,6 +1328,7 @@ class LinstorVolumeManager(object):
         resource_names = self._fetch_resource_names()
         for volume_uuid, volume_name in self.get_volumes_with_name().items():
             if not volume_name or volume_name not in resource_names:
+                # Don't force, we can be sure of what's happening.
                 self.destroy_volume(volume_uuid)
 
     def destroy(self):
@@ -2064,7 +2095,7 @@ class LinstorVolumeManager(object):
         # B.2. Create volume!
         def clean():
             try:
-                self._destroy_volume(volume_uuid)
+                self._destroy_volume(volume_uuid, force=True)
             except Exception as e:
                 self._logger(
                     'Unable to destroy volume {} after creation fail: {}'
@@ -2136,7 +2167,7 @@ class LinstorVolumeManager(object):
             # It can only happen if the same volume uuid is used in the same
             # call in another host.
             if e.code != LinstorVolumeManagerError.ERR_VOLUME_EXISTS:
-                self._force_destroy_volume(volume_uuid)
+                self._destroy_volume(volume_uuid, force=True)
             raise
 
     def _find_device_path(self, volume_uuid, volume_name):
@@ -2184,22 +2215,52 @@ class LinstorVolumeManager(object):
         # Contains a path of the /dev/drbd<id> form.
         return resources[0].volumes[0].device_path
 
-    def _destroy_resource(self, resource_name):
-        self._mark_resource_cache_as_dirty()
+    def _destroy_resource(self, resource_name, force=False):
         result = self._linstor.resource_dfn_delete(resource_name)
         error_str = self._get_error_str(result)
-        if error_str:
+        if not error_str:
+            self._mark_resource_cache_as_dirty()
+            return
+
+        if not force:
+            self._mark_resource_cache_as_dirty()
             raise LinstorVolumeManagerError(
-                'Could not destroy resource `{}` from SR `{}`: {}'
+               'Could not destroy resource `{}` from SR `{}`: {}'
                 .format(resource_name, self._group_name, error_str)
             )
 
-    def _destroy_volume(self, volume_uuid):
+        # If force is used, ensure there is no opener.
+        all_openers = get_all_volume_openers(resource_name, '0')
+        for openers in all_openers.itervalues():
+            if openers:
+                self._mark_resource_cache_as_dirty()
+                raise LinstorVolumeManagerError(
+                    'Could not force destroy resource `{}` from SR `{}`: {} (openers=`{}`)'
+                    .format(resource_name, self._group_name, error_str, all_openers)
+                )
+
+        # Maybe the resource is blocked in primary mode. DRBD/LINSTOR issue?
+        resource_states = filter(
+            lambda resource_state: resource_state.name == resource_name,
+            self._get_resource_cache().resource_states
+        )
+
+        # Mark only after computation of states.
+        self._mark_resource_cache_as_dirty()
+
+        for resource_state in resource_states:
+            volume_state = resource_state.volume_states[0]
+            if resource_state.in_use:
+                demote_drbd_resource(resource_state.node_name, resource_name)
+                break
+        self._destroy_resource(resource_name)
+
+    def _destroy_volume(self, volume_uuid, force=False):
         volume_properties = self._get_volume_properties(volume_uuid)
         try:
             volume_name = volume_properties.get(self.PROP_VOLUME_NAME)
             if volume_name in self._fetch_resource_names():
-                self._destroy_resource(volume_name)
+                self._destroy_resource(volume_name, force)
 
             # Assume this call is atomic.
             volume_properties.clear()
@@ -2207,12 +2268,6 @@ class LinstorVolumeManager(object):
             raise LinstorVolumeManagerError(
                 'Cannot destroy volume `{}`: {}'.format(volume_uuid, e)
             )
-
-    def _force_destroy_volume(self, volume_uuid):
-        try:
-            self._destroy_volume(volume_uuid)
-        except Exception as e:
-            self._logger('Ignore fail: {}'.format(e))
 
     def _build_volumes(self, repair):
         properties = self._kv_cache
@@ -2283,7 +2338,7 @@ class LinstorVolumeManager(object):
                 # Little optimization, don't call `self._destroy_volume`,
                 # we already have resource name list.
                 if volume_name in resource_names:
-                    self._destroy_resource(volume_name)
+                    self._destroy_resource(volume_name, force=True)
 
                 # Assume this call is atomic.
                 properties.clear()

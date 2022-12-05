@@ -804,6 +804,18 @@ def create_sr(session, args):
         raise
 
 
+def demote_drbd_resource(session, args):
+    try:
+        resource_name = args['resource_name']
+        (ret, stdout, stderr) = util.doexec(['drbdsetup', 'secondary', resource_name])
+        if ret:
+            raise Exception('Failed to demote resource: {}'.format(stderr))
+        return str(True)
+    except Exception as e:
+        util.SMlog('linstor-manager:demote_drbd_resource error: {}'.format(e))
+    return str(False)
+
+
 def list_drbd_volumes(session, args):
     try:
         volume_group = args.get('volume_group')
@@ -998,6 +1010,7 @@ if __name__ == '__main__':
         'removeHost': remove_host,
         'createSr': create_sr,
         'listDrbdVolumes': list_drbd_volumes,
+        'demoteDrbdResource': demote_drbd_resource,
         'destroyDrbdVolume': destroy_drbd_volume,
         'destroyDrbdVolumes': destroy_drbd_volumes,
         'getDrbdOpeners': get_drbd_openers,
