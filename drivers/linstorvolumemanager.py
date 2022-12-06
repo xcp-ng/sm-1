@@ -2044,8 +2044,24 @@ class LinstorVolumeManager(object):
         self, volume_uuid, volume_name, size, place_resources,
         no_diskless=False
     ):
+        if no_diskless and not place_resources:
+            raise LinstorVolumeManagerError(
+                'Could not create volume `{}` from SR `{}`: it\'s impossible '
+                .format(volume_uuid, self._group_name) +
+                'to force no diskless without placing resources'
+            )
+
         size = self.round_up_volume_size(size)
         self._mark_resource_cache_as_dirty()
+
+        resources = []
+        if no_diskless:
+            for node_name in self._get_node_names():
+                resources.append(linstor.ResourceData(
+                    node_name=node_name,
+                    rsc_name=volume_name,
+                    storage_pool=self._group_name
+                ))
 
         def create_definition():
             self._check_volume_creation_errors(
@@ -2060,39 +2076,6 @@ class LinstorVolumeManager(object):
             )
             self._increase_volume_peer_slots(self._linstor, volume_name)
 
-        # A. Basic case when we use the default redundancy of the group.
-        if not no_diskless:
-            create_definition()
-            if place_resources:
-                self._check_volume_creation_errors(
-                    self._linstor.resource_auto_place(
-                        rsc_name=volume_name,
-                        place_count=self._redundancy,
-                        diskless_on_remaining=not no_diskless
-                    ),
-                    volume_uuid,
-                    self._group_name
-                )
-            return
-
-        # B. Complex case.
-        if not place_resources:
-            raise LinstorVolumeManagerError(
-                'Could not create volume `{}` from SR `{}`: it\'s impossible '
-                .format(volume_uuid, self._group_name) +
-                'to force no diskless without placing resources'
-            )
-
-        # B.1. Create resource list.
-        resources = []
-        for node_name in self._get_node_names():
-            resources.append(linstor.ResourceData(
-                node_name=node_name,
-                rsc_name=volume_name,
-                storage_pool=self._group_name
-            ))
-
-        # B.2. Create volume!
         def clean():
             try:
                 self._destroy_volume(volume_uuid, force=True)
@@ -2105,13 +2088,26 @@ class LinstorVolumeManager(object):
         def create():
             try:
                 create_definition()
-                result = self._linstor.resource_create(resources)
-                error_str = self._get_error_str(result)
-                if error_str:
-                    raise LinstorVolumeManagerError(
-                        'Could not create volume `{}` from SR `{}`: {}'.format(
-                            volume_uuid, self._group_name, error_str
+                if no_diskless:
+                    # Create a physical resource on each node.
+                    result = self._linstor.resource_create(resources)
+                    error_str = self._get_error_str(result)
+                    if error_str:
+                        raise LinstorVolumeManagerError(
+                            'Could not create volume `{}` from SR `{}`: {}'.format(
+                                volume_uuid, self._group_name, error_str
+                            )
                         )
+                elif place_resources:
+                    # Basic case when we use the default redundancy of the group.
+                    self._check_volume_creation_errors(
+                        self._linstor.resource_auto_place(
+                            rsc_name=volume_name,
+                            place_count=self._redundancy,
+                            diskless_on_remaining=not no_diskless
+                        ),
+                        volume_uuid,
+                        self._group_name
                     )
             except LinstorVolumeManagerError as e:
                 if e.code != LinstorVolumeManagerError.ERR_VOLUME_EXISTS:
