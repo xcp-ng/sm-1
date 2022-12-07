@@ -47,6 +47,14 @@ def call_vhd_util_on_host(session, host_ref, method, device_path, args):
     return response
 
 
+class ErofsLinstorCallException(Exception):
+    def __init__(self, cmd_err):
+        self.cmd_err = cmd_err
+
+    def __str__(self):
+        return str(self.cmd_err)
+
+
 def linstorhostcall(local_method, remote_method):
     def decorated(response_parser):
         def wrapper(*args, **kwargs):
@@ -68,14 +76,17 @@ def linstorhostcall(local_method, remote_method):
             local_e = None
             try:
                 if not in_use or socket.gethostname() in node_names:
-                    # Don't call `_call_local_vhd_util`, we don't want to
-                    # trace failed calls now using opener files. It can be
-                    # normal to have an exception.
-                    def local_call():
-                        return local_method(device_path, *args[2:], **kwargs)
-                    return util.retry(local_call, 5, 2)
-            except util.CommandException as local_e:
-                self._handle_local_vhd_util_error(local_e)
+                    return self._call_local_vhd_util(local_method, device_path, *args[2:], **kwargs)
+            except ErofsLinstorCallException as e:
+                local_e = e.cmd_err
+            except Exception as e:
+                local_e = e
+
+            util.SMlog(
+                'unable to execute `{}` locally, retry using a readable host... (cause: {})'.format(
+                    remote_method, local_e if local_e else 'local diskless + in use or not up to date'
+                )
+            )
 
             # B. Execute the plugin on master or slave.
             remote_args = {
@@ -188,35 +199,35 @@ class LinstorVhdUtil:
 
     @linstormodifier()
     def create(self, path, size, static, msize=0):
-        return self._call_local_vhd_util(vhdutil.create, path, size, static, msize)
+        return self._call_local_vhd_util_or_fail(vhdutil.create, path, size, static, msize)
 
     @linstormodifier()
     def set_size_virt_fast(self, path, size):
-        return self._call_local_vhd_util(vhdutil.setSizeVirtFast, path, size)
+        return self._call_local_vhd_util_or_fail(vhdutil.setSizeVirtFast, path, size)
 
     @linstormodifier()
     def set_size_phys(self, path, size, debug=True):
-        return self._call_local_vhd_util(vhdutil.setSizePhys, path, size, debug)
+        return self._call_local_vhd_util_or_fail(vhdutil.setSizePhys, path, size, debug)
 
     @linstormodifier()
     def set_parent(self, path, parentPath, parentRaw=False):
-        return self._call_local_vhd_util(vhdutil.setParent, path, parentPath, parentRaw)
+        return self._call_local_vhd_util_or_fail(vhdutil.setParent, path, parentPath, parentRaw)
 
     @linstormodifier()
     def set_hidden(self, path, hidden=True):
-        return self._call_local_vhd_util(vhdutil.setHidden, path, hidden)
+        return self._call_local_vhd_util_or_fail(vhdutil.setHidden, path, hidden)
 
     @linstormodifier()
     def set_key(self, path, key_hash):
-        return self._call_local_vhd_util(vhdutil.setKey, path, key_hash)
+        return self._call_local_vhd_util_or_fail(vhdutil.setKey, path, key_hash)
 
     @linstormodifier()
     def kill_data(self, path):
-        return self._call_local_vhd_util(vhdutil.killData, path)
+        return self._call_local_vhd_util_or_fail(vhdutil.killData, path)
 
     @linstormodifier()
     def snapshot(self, path, parent, parentRaw, msize=0, checkEmpty=True):
-        return self._call_local_vhd_util(vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
+        return self._call_local_vhd_util_or_fail(vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
 
     # --------------------------------------------------------------------------
     # Remote setters: write locally and try on another host in case of failure.
@@ -299,21 +310,27 @@ class LinstorVhdUtil:
         util.SMlog('raise opener exception: {} ({})'.format(e_wrapper, e_wrapper.reason))
         raise e_wrapper  # pylint: disable = E0702
 
-    @staticmethod
-    def _handle_local_vhd_util_error(e):
-        if e.code != errno.EROFS and e.code != EMEDIUMTYPE:
-            util.SMlog('failed to execute locally vhd-util (sys {})'.format(e.code))
-
     def _call_local_vhd_util(self, local_method, device_path, *args, **kwargs):
         try:
             def local_call():
-                return local_method(device_path, *args, **kwargs)
-            return util.retry(local_call, 5, 2)
+                try:
+                    return local_method(device_path, *args, **kwargs)
+                except util.CommandException as e:
+                    if e.code == errno.EROFS or e.code == EMEDIUMTYPE:
+                        raise ErofsLinstorCallException(e)  # Break retry calls.
+                    raise e
+            # Retry only locally if it's not an EROFS exception.
+            return util.retry(local_call, 5, 2, exceptions=[util.CommandException])
         except util.CommandException as e:
-            self._handle_local_vhd_util_error(e)
+            util.SMlog('failed to execute locally vhd-util (sys {})'.format(e.code))
+            raise e
 
-        # Volume is locked on a host, find openers.
-        self._raise_openers_exception(device_path, e)
+    def _call_local_vhd_util_or_fail(self, local_method, device_path, *args, **kwargs):
+        try:
+            return self._call_local_vhd_util(local_method, device_path, *args, **kwargs)
+        except ErofsLinstorCallException as e:
+            # Volume is locked on a host, find openers.
+            self._raise_openers_exception(device_path, e)
 
     def _call_vhd_util(self, local_method, remote_method, device_path, use_parent, *args, **kwargs):
         # Note: `use_parent` exists to know if the VHD parent is used by the local/remote method.
@@ -323,11 +340,11 @@ class LinstorVhdUtil:
 
         # A. Try to write locally...
         try:
-            def local_call():
-                return local_method(device_path, *args, **kwargs)
-            return util.retry(local_call, 5, 2)
-        except util.CommandException as e:
-            self._handle_local_vhd_util_error(e)
+            return self._call_local_vhd_util(local_method, device_path, *args, **kwargs)
+        except Exception:
+            pass
+
+        util.SMlog('unable to execute `{}` locally, retry using a writable host...'.format(remote_method))
 
         # B. Execute the command on another host.
         # B.1. Get host list.
