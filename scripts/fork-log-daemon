@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
 import select
+import signal
 import subprocess
 import sys
 import syslog
 
 def main():
     process = subprocess.Popen(sys.argv[1:], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
     write_to_stdout = True
 
     while process.poll() is None:
