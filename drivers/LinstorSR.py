@@ -2527,13 +2527,10 @@ class LinstorVDI(VDI.VDI):
 
     @staticmethod
     def _start_persistent_http_server(volume_name):
-        null = None
         pid_path = None
         http_server = None
 
         try:
-            null = open(os.devnull, 'w')
-
             if volume_name == 'xcp-persistent-ha-statefile':
                 port = '8076'
             else:
@@ -2566,8 +2563,8 @@ class LinstorVDI(VDI.VDI):
             util.SMlog('Starting {} on port {}...'.format(arguments[0], port))
             http_server = subprocess.Popen(
                 [FORK_LOG_DAEMON] + arguments,
-                stdout=null,
-                stderr=null,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 # Ensure we use another group id to kill this process without
                 # touch the current one.
                 preexec_fn=os.setsid
@@ -2576,6 +2573,17 @@ class LinstorVDI(VDI.VDI):
             pid_path = '/run/http-server-{}.pid'.format(volume_name)
             with open(pid_path, 'w') as pid_file:
                 pid_file.write(str(http_server.pid))
+
+            def is_ready():
+                while http_server.poll() is None:
+                    if http_server.stdout.readline().rstrip() == 'Server ready!':
+                        return True
+                return False
+            try:
+                if not util.timeout_call(10, is_ready):
+                    raise Exception('Failed to wait HTTP server startup, bad output')
+            except util.TimeoutException:
+                raise Exception('Failed to wait for HTTP server startup during given delay')
         except Exception as e:
             if pid_path:
                 try:
@@ -2594,19 +2602,13 @@ class LinstorVDI(VDI.VDI):
                 'VDIUnavailable',
                 opterr='Failed to start http-server: {}'.format(e)
             )
-        finally:
-            if null:
-                null.close()
 
     def _start_persistent_nbd_server(self, volume_name):
-        null = None
         pid_path = None
         nbd_path = None
         nbd_server = None
 
         try:
-            null = open(os.devnull, 'w')
-
             if volume_name == 'xcp-persistent-ha-statefile':
                 port = '8076'
             else:
@@ -2643,6 +2645,10 @@ class LinstorVDI(VDI.VDI):
                 preexec_fn=os.setsid
             )
 
+            pid_path = '/run/nbd-server-{}.pid'.format(volume_name)
+            with open(pid_path, 'w') as pid_file:
+                pid_file.write(str(nbd_server.pid))
+
             reg_nbd_path = re.compile("^NBD `(/dev/nbd[0-9]+)` is now attached.$")
             def get_nbd_path():
                 while nbd_server.poll() is None:
@@ -2657,10 +2663,6 @@ class LinstorVDI(VDI.VDI):
                     raise Exception('Empty NBD path (NBD server is probably dead)')
             except util.TimeoutException:
                 raise Exception('Unable to read NBD path')
-
-            pid_path = '/run/nbd-server-{}.pid'.format(volume_name)
-            with open(pid_path, 'w') as pid_file:
-                pid_file.write(str(nbd_server.pid))
 
             util.SMlog('Create symlink: {} -> {}'.format(self.path, nbd_path))
             os.symlink(nbd_path, self.path)
@@ -2688,9 +2690,6 @@ class LinstorVDI(VDI.VDI):
                 'VDIUnavailable',
                 opterr='Failed to start nbd-server: {}'.format(e)
             )
-        finally:
-            if null:
-                null.close()
 
     @classmethod
     def _kill_persistent_server(self, type, volume_name, sig):
