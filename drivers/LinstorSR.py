@@ -234,7 +234,7 @@ def inflate(journaler, linstor, vdi_uuid, vdi_path, new_size, old_size):
         return
 
     util.SMlog(
-        'Inflate {} (new VHD size={}, previous={})'
+        'Inflate {} (size={}, previous={})'
         .format(vdi_uuid, new_size, old_size)
     )
 
@@ -243,8 +243,15 @@ def inflate(journaler, linstor, vdi_uuid, vdi_path, new_size, old_size):
     )
     linstor.resize_volume(vdi_uuid, new_size)
 
+    result_size = linstor.get_volume_size(vdi_uuid)
+    if result_size < new_size:
+        util.SMlog(
+            'WARNING: Cannot inflate volume to {}B, result size: {}B'
+            .format(new_size, result_size)
+        )
+
     if not util.zeroOut(
-        vdi_path, new_size - vhdutil.VHD_FOOTER_SIZE,
+        vdi_path, result_size - vhdutil.VHD_FOOTER_SIZE,
         vhdutil.VHD_FOOTER_SIZE
     ):
         raise xs_errors.XenError(
@@ -252,7 +259,7 @@ def inflate(journaler, linstor, vdi_uuid, vdi_path, new_size, old_size):
             opterr='Failed to zero out VHD footer {}'.format(vdi_path)
         )
 
-    LinstorVhdUtil(None, linstor).set_size_phys(vdi_path, new_size, False)
+    LinstorVhdUtil(None, linstor).set_size_phys(vdi_path, result_size, False)
     journaler.remove(LinstorJournaler.INFLATE, vdi_uuid)
 
 
@@ -1399,7 +1406,12 @@ class LinstorSR(SR.SR):
             util.SMlog('Cannot deflate missing VDI {}'.format(vdi_uuid))
             return
 
-        current_size = self._all_volume_info_cache.get(self.uuid).virtual_size
+        assert not self._all_volume_info_cache
+        volume_info = self._linstor.get_volume_info(vdi_uuid)
+
+        current_size = volume_info.virtual_size
+        assert current_size > 0
+
         util.zeroOut(
             vdi.path,
             current_size - vhdutil.VHD_FOOTER_SIZE,
@@ -1695,11 +1707,11 @@ class LinstorVDI(VDI.VDI):
 
         # 2. Compute size and check space available.
         size = vhdutil.validate_and_round_vhd_size(long(size))
-        util.SMlog('LinstorVDI.create: type={}, size={}'.format(
-            self.vdi_type, size
-        ))
-
         volume_size = compute_volume_size(size, self.vdi_type)
+        util.SMlog(
+            'LinstorVDI.create: type={}, vhd-size={}, volume-size={}'
+            .format(self.vdi_type, size, volume_size)
+        )
         self.sr._ensure_space_available(volume_size)
 
         # 3. Set sm_config attribute of VDI parent class.
@@ -1917,8 +1929,22 @@ class LinstorVDI(VDI.VDI):
 
     def resize(self, sr_uuid, vdi_uuid, size):
         util.SMlog('LinstorVDI.resize for {}'.format(self.uuid))
+        if not self.sr._is_master:
+            raise xs_errors.XenError(
+                'VDISize',
+                opterr='resize on slave not allowed'
+            )
+
         if self.hidden:
             raise xs_errors.XenError('VDIUnavailable', opterr='hidden VDI')
+
+        # Compute the virtual VHD and DRBD volume size.
+        size = vhdutil.validate_and_round_vhd_size(long(size))
+        volume_size = compute_volume_size(size, self.vdi_type)
+        util.SMlog(
+            'LinstorVDI.resize: type={}, vhd-size={}, volume-size={}'
+            .format(self.vdi_type, size, volume_size)
+        )
 
         if size < self.size:
             util.SMlog(
@@ -1927,18 +1953,13 @@ class LinstorVDI(VDI.VDI):
             )
             raise xs_errors.XenError('VDISize', opterr='shrinking not allowed')
 
-        # Compute the virtual VHD size.
-        size = vhdutil.validate_and_round_vhd_size(long(size))
-
         if size == self.size:
             return VDI.VDI.get_params(self)
 
-        # Compute the LINSTOR volume size.
-        new_volume_size = compute_volume_size(size, self.vdi_type)
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
             old_volume_size = self.size
         else:
-            old_volume_size = self.capacity
+            old_volume_size = self.utilisation
             if self.sr._provisioning == 'thin':
                 # VDI is currently deflated, so keep it deflated.
                 new_volume_size = old_volume_size
