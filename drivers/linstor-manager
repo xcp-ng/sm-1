@@ -40,11 +40,12 @@ LVM_PLUGIN = 'lvm.py'
 THIN_POOL = 'thin_pool'
 
 FIREWALL_PORT_SCRIPT = '/etc/xapi.d/plugins/firewall-port'
-LINSTOR_PORTS = [3366, 3370, 3376, 3377, '7000:8000', 8076, 8077]
+LINSTOR_PORTS = [3366, 3370, 3376, 3377, 8076, 8077]
+DRBD_PORTS = '7000:8000'
 
 
-def update_port(port, open):
-    fn = 'open' if open else 'close'
+def update_linstor_port(port, open_ports):
+    fn = 'open' if open_ports else 'close'
     args = (
         FIREWALL_PORT_SCRIPT, fn, str(port), 'tcp'
     )
@@ -55,9 +56,36 @@ def update_port(port, open):
     raise Exception('Failed to {} port: {} {}'.format(fn, out, err))
 
 
-def update_all_ports(open):
+def has_iptables_rule(rule):
+    (ret, stdout, stderr) = util.doexec(['iptables', '-C'] + rule)
+    return not ret
+
+
+def update_drbd_ports(open_ports):
+    # We want to use a static rule regarding DRBD volumes,
+    # so we can't use the XAPI firewall port script, we have to manually
+    # check for existing rules before updating iptables service.
+    rule = ['INPUT', '-p', 'tcp', '--dport', DRBD_PORTS, '-j', 'ACCEPT']
+    if open_ports == has_iptables_rule(rule):
+        return
+    if open_ports:
+        rule.insert(1, '1')
+        (ret, stdout, stderr) = util.doexec(['iptables', '-I'] + rule)
+        if ret:
+            raise Exception('Failed to add DRBD rule: {}'.format(stderr))
+    else:
+        (ret, stdout, stderr) = util.doexec(['iptables', '-D'] + rule)
+        if ret:
+            raise Exception('Failed to remove DRBD rule: {}'.format(stderr))
+    (ret, stdout, stderr) = util.doexec(['service', 'iptables', 'save'])
+    if ret:
+        raise Exception('Failed to save DRBD rule: {}'.format(stderr))
+
+
+def update_all_ports(open_ports):
     for port in LINSTOR_PORTS:
-        update_port(port, open)
+        update_linstor_port(port, open_ports)
+    update_drbd_ports(open_ports)
 
 
 def update_linstor_satellite_service(start):
@@ -202,7 +230,7 @@ def prepare_sr(session, args):
     try:
         LinstorSR.activate_lvm_group(args['groupName'])
 
-        update_all_ports(open=True)
+        update_all_ports(open_ports=True)
         # We don't want to enable and start minidrbdcluster daemon during
         # SR creation.
         update_minidrbdcluster_service(start=False)
@@ -217,7 +245,7 @@ def release_sr(session, args):
     try:
         update_linstor_satellite_service(start=False)
         update_minidrbdcluster_service(start=False)
-        update_all_ports(open=False)
+        update_all_ports(open_ports=False)
         return str(True)
     except Exception as e:
         util.SMlog('linstor-manager:release_sr error: {}'.format(e))
@@ -533,7 +561,7 @@ def add_host(session, args):
 
     try:
         # 4. Enable services.
-        update_all_ports(open=True)
+        update_all_ports(open_ports=True)
         update_minidrbdcluster_service(start=True)
         update_linstor_satellite_service(start=True)
 
@@ -664,7 +692,7 @@ def add_host(session, args):
             if stop_services and not linstor.has_node(node_name):
                 update_linstor_satellite_service(start=False)
                 update_minidrbdcluster_service(start=False)
-                update_all_ports(open=False)
+                update_all_ports(open_ports=False)
         except Exception:
             pass
 
@@ -747,7 +775,7 @@ def remove_host(session, args):
     try:
         update_linstor_satellite_service(start=False)
         update_minidrbdcluster_service(start=False)
-        update_all_ports(open=False)
+        update_all_ports(open_ports=False)
     except Exception as e:
         util.SMlog('Error while stopping services: {}'.format(e))
         pass
