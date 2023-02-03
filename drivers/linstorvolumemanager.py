@@ -851,6 +851,25 @@ class LinstorVolumeManager(object):
             )
         return size * 1024
 
+
+    def set_auto_promote_timeout(self, volume_uuid, timeout):
+        """
+        Define the blocking time of open calls when a DRBD
+        is already open on another host.
+        :param str volume_uuid: The volume uuid to modify.
+        """
+
+        volume_name = self.get_volume_name(volume_uuid)
+        result = self._linstor.resource_dfn_modify(volume_name, {
+            'DrbdOptions/Resource/auto-promote-timeout': timeout
+        })
+        error_str = self._get_error_str(result)
+        if error_str:
+            raise LinstorVolumeManagerError(
+                'Could not change the auto promote timeout of `{}`: {}'
+                .format(volume_uuid, error_str)
+            )
+
     def get_volume_info(self, volume_uuid):
         """
         Get the volume info of a particular volume.
