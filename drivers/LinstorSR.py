@@ -1761,6 +1761,13 @@ class LinstorVDI(VDI.VDI):
                 METADATA_OF_POOL_TAG: ''
             }
             self._linstor.set_volume_metadata(self.uuid, volume_metadata)
+
+            # Set the open timeout to 1min to reduce CPU usage
+            # in http-disk-server when a secondary server tries to open
+            # an already opened volume.
+            if self.ty == 'ha_statefile' or self.ty == 'redo_log':
+                self._linstor.set_auto_promote_timeout(self.uuid, 600)
+
             self._linstor.mark_volume_as_persistent(self.uuid)
         except util.CommandException as e:
             failed = True
@@ -2595,9 +2602,11 @@ class LinstorVDI(VDI.VDI):
             with open(pid_path, 'w') as pid_file:
                 pid_file.write(str(http_server.pid))
 
+            reg_server_ready = re.compile("Server ready!$")
             def is_ready():
                 while http_server.poll() is None:
-                    if http_server.stdout.readline().rstrip() == 'Server ready!':
+                    line = http_server.stdout.readline()
+                    if reg_server_ready.search(line):
                         return True
                 return False
             try:
@@ -2630,10 +2639,16 @@ class LinstorVDI(VDI.VDI):
         nbd_server = None
 
         try:
+            # We use a precomputed device size.
+            # So if the XAPI is modified, we must update these values!
             if volume_name == 'xcp-persistent-ha-statefile':
+                # See: https://github.com/xapi-project/xen-api/blob/703479fa448a8d7141954bb6e8964d8e25c4ac2e/ocaml/xapi/xha_statefile.ml#L32-L37
                 port = '8076'
+                device_size = 4 * 1024 * 1024
             else:
+                # See: https://github.com/xapi-project/xen-api/blob/703479fa448a8d7141954bb6e8964d8e25c4ac2e/ocaml/database/redo_log.ml#L41-L44
                 port = '8077'
+                device_size = 256 * 1024 * 1024
 
             try:
                 session = util.timeout_call(5, util.get_localAPI_session)
@@ -2653,7 +2668,9 @@ class LinstorVDI(VDI.VDI):
                 '--nbd-name',
                 volume_name,
                 '--urls',
-                ','.join(map(lambda ip: 'http://' + ip + ':' + port, ips))
+                ','.join(map(lambda ip: 'http://' + ip + ':' + port, ips)),
+                '--device-size',
+                str(device_size)
             ]
 
             util.SMlog('Starting {} using port {}...'.format(arguments[0], port))
@@ -2670,11 +2687,11 @@ class LinstorVDI(VDI.VDI):
             with open(pid_path, 'w') as pid_file:
                 pid_file.write(str(nbd_server.pid))
 
-            reg_nbd_path = re.compile("^NBD `(/dev/nbd[0-9]+)` is now attached.$")
+            reg_nbd_path = re.compile("NBD `(/dev/nbd[0-9]+)` is now attached.$")
             def get_nbd_path():
                 while nbd_server.poll() is None:
                     line = nbd_server.stdout.readline()
-                    match = reg_nbd_path.match(line)
+                    match = reg_nbd_path.search(line)
                     if match:
                         return match.group(1)
             # Use a timeout to never block the smapi if there is a problem.
