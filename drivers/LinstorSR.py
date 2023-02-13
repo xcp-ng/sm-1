@@ -1496,10 +1496,6 @@ class LinstorSR(SR.SR):
         # Remove the child nodes.
         if snap_uuid and snap_uuid in volume_names:
             util.SMlog('Destroying snap {}...'.format(snap_uuid))
-            snap_metadata = self._linstor.get_volume_metadata(snap_uuid)
-
-            if snap_metadata.get(VDI_TYPE_TAG) != vhdutil.VDI_TYPE_VHD:
-                raise util.SMException('Clone {} not VHD'.format(snap_uuid))
 
             try:
                 self._linstor.destroy_volume(snap_uuid)
