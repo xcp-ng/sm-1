@@ -1169,15 +1169,15 @@ class LinstorSR(SR.SR):
                 if not introduce:
                     continue
 
+                if vdi_uuid.startswith('DELETED_'):
+                    continue
+
                 volume_metadata = volumes_metadata.get(vdi_uuid)
                 if not volume_metadata:
                     util.SMlog(
                         'Skipping volume {} because no metadata could be found'
                         .format(vdi_uuid)
                     )
-                    continue
-
-                if vdi_uuid.startswith('DELETED_'):
                     continue
 
                 util.SMlog(
