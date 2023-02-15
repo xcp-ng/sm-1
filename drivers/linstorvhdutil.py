@@ -289,25 +289,26 @@ class LinstorVhdUtil:
     # --------------------------------------------------------------------------
 
     def _raise_openers_exception(self, device_path, e):
+        if isinstance(e, util.CommandException):
+            e_str = 'cmd: `{}`, code: `{}`, reason: `{}`'.format(e.cmd, e.code, e.reason)
+        else:
+            e_str = str(e)
+
         e_with_openers = None
         try:
             volume_uuid = self._linstor.get_volume_uuid_from_device_path(
                 device_path
             )
-            e_wrapper = util.CommandException(
-                e.code,
-                e.cmd,
-                e.reason + ' (openers: {})'.format(
+            e_wrapper = Exception(
+                e_str + ' (openers: {})'.format(
                     self._linstor.get_volume_openers(volume_uuid)
                 )
             )
         except Exception as illformed_e:
-            e_wrapper = util.CommandException(
-                e.code,
-                e.cmd,
-                e.reason + ' (unable to get openers: {})'.format(illformed_e)
+            e_wrapper = Exception(
+                e_str + ' (unable to get openers: {})'.format(illformed_e)
             )
-        util.SMlog('raise opener exception: {} ({})'.format(e_wrapper, e_wrapper.reason))
+        util.SMlog('raise opener exception: {}'.format(e_wrapper))
         raise e_wrapper  # pylint: disable = E0702
 
     def _call_local_vhd_util(self, local_method, device_path, *args, **kwargs):
@@ -330,7 +331,7 @@ class LinstorVhdUtil:
             return self._call_local_vhd_util(local_method, device_path, *args, **kwargs)
         except ErofsLinstorCallException as e:
             # Volume is locked on a host, find openers.
-            self._raise_openers_exception(device_path, e)
+            self._raise_openers_exception(device_path, e.cmd_err)
 
     def _call_vhd_util(self, local_method, remote_method, device_path, use_parent, *args, **kwargs):
         # Note: `use_parent` exists to know if the VHD parent is used by the local/remote method.
