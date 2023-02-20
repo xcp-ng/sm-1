@@ -104,10 +104,11 @@ def process(events2, resources, running_services, status):
         res_name, may_promote, promotion_score = m.groups()
         if res_name in resources and may_promote == 'yes':
             for systemd_unit in resources[res_name]['systemd-units']:
-                if not ensure_systemd_started(systemd_unit):
-                    break
                 if systemd_unit not in running_services:
                     running_services.append(systemd_unit)
+                if not ensure_systemd_started(systemd_unit):
+                    running_services.pop()
+                    break
     m = PEER_ROLE_RE.match(line)
     if m:
         res_name, conn_name, role = m.groups()
