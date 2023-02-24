@@ -22,6 +22,7 @@ sys.path[0] = '/opt/xensource/sm/'
 
 import base64
 import distutils.util
+import os
 import socket
 import XenAPI
 import XenAPIPlugin
@@ -42,6 +43,19 @@ THIN_POOL = 'thin_pool'
 FIREWALL_PORT_SCRIPT = '/etc/xapi.d/plugins/firewall-port'
 LINSTOR_PORTS = [3366, 3370, 3376, 3377, 8076, 8077]
 DRBD_PORTS = '7000:8000'
+
+DRBD_REACTOR_CONF = '/etc/drbd-reactor.d/sm-linstor.toml'
+
+DRBD_REACTOR_CONF_CONTENT = """[[promoter]]
+
+[promoter.resources.xcp-persistent-database]
+start = [ "var-lib-linstor.service", "linstor-controller.service" ]
+"""
+
+DRBD_REACTOR_DEPS = [
+    '/run/systemd/system/linstor-controller.service.d/reactor.conf',
+    '/run/systemd/system/var-lib-linstor.service.d/reactor.conf'
+]
 
 
 def update_linstor_port(port, open_ports):
@@ -101,8 +115,35 @@ def update_linstor_satellite_service(start):
         util.enable_and_start_service(service, True)
 
 
-def update_minidrbdcluster_service(start):
-    util.enable_and_start_service('minidrbdcluster', start)
+def update_drbd_reactor_service(start):
+    if start:
+        util.atomicFileWrite(DRBD_REACTOR_CONF, None, DRBD_REACTOR_CONF_CONTENT)
+    else:
+        try:
+            os.remove(DRBD_REACTOR_CONF)
+        except Exception:
+            pass
+
+        util.stop_service('drbd-reactor')
+
+        try:
+            util.stop_service('drbd-promote@xcp\x2dpersistent\x2ddatabase.service')
+        except Exception as e:
+            if str(e).rstrip().endswith(' not loaded.'):
+                pass
+            raise e
+
+        util.stop_service('linstor-controller')
+        util.stop_service('var-lib-linstor.service')
+
+        for dep in DRBD_REACTOR_DEPS:
+            try:
+                os.remove(dep)
+            except Exception:
+                pass
+
+    util.doexec(['systemctl', 'daemon-reload'])
+    util.enable_and_start_service('drbd-reactor', start)
 
 
 def exec_create_sr(session, name, description, disks, volume_group, redundancy, provisioning, force):
@@ -231,9 +272,9 @@ def prepare_sr(session, args):
         LinstorSR.activate_lvm_group(args['groupName'])
 
         update_all_ports(open_ports=True)
-        # We don't want to enable and start minidrbdcluster daemon during
+        # We don't want to enable and start drbd-reactor daemon during
         # SR creation.
-        update_minidrbdcluster_service(start=False)
+        update_drbd_reactor_service(start=False)
         update_linstor_satellite_service(start=True)
         return str(True)
     except Exception as e:
@@ -244,7 +285,7 @@ def prepare_sr(session, args):
 def release_sr(session, args):
     try:
         update_linstor_satellite_service(start=False)
-        update_minidrbdcluster_service(start=False)
+        update_drbd_reactor_service(start=False)
         update_all_ports(open_ports=False)
         return str(True)
     except Exception as e:
@@ -252,14 +293,14 @@ def release_sr(session, args):
     return str(False)
 
 
-def update_minidrbdcluster(session, args):
+def update_drbd_reactor(session, args):
     try:
         enabled = distutils.util.strtobool(args['enabled'])
-        update_minidrbdcluster_service(start=enabled)
+        update_drbd_reactor_service(start=enabled)
         return str(True)
     except Exception as e:
         util.SMlog(
-            'linstor-manager:update_minidrbdcluster error: {}'.format(e)
+            'linstor-manager:update_drbd_reactor error: {}'.format(e)
         )
     return str(False)
 
@@ -308,7 +349,7 @@ def destroy(session, args):
     try:
         group_name = args['groupName']
 
-        # When destroy is called, there are no running minidrbdcluster daemons.
+        # When destroy is called, there are no running drbd-reactor daemons.
         # So the controllers are stopped too, we must start an instance.
         util.restart_service('var-lib-linstor.service')
         util.restart_service('linstor-controller')
@@ -562,7 +603,7 @@ def add_host(session, args):
     try:
         # 4. Enable services.
         update_all_ports(open_ports=True)
-        update_minidrbdcluster_service(start=True)
+        update_drbd_reactor_service(start=True)
         update_linstor_satellite_service(start=True)
 
         # 5. Try to create local node.
@@ -691,7 +732,7 @@ def add_host(session, args):
             # If we failed to remove the node, we don't stop services.
             if stop_services and not linstor.has_node(node_name):
                 update_linstor_satellite_service(start=False)
-                update_minidrbdcluster_service(start=False)
+                update_drbd_reactor_service(start=False)
                 update_all_ports(open_ports=False)
         except Exception:
             pass
@@ -774,7 +815,7 @@ def remove_host(session, args):
     # 3. Stop services.
     try:
         update_linstor_satellite_service(start=False)
-        update_minidrbdcluster_service(start=False)
+        update_drbd_reactor_service(start=False)
         update_all_ports(open_ports=False)
     except Exception as e:
         util.SMlog('Error while stopping services: {}'.format(e))
@@ -1005,7 +1046,7 @@ if __name__ == '__main__':
     XenAPIPlugin.dispatch({
         'prepareSr': prepare_sr,
         'releaseSr': release_sr,
-        'updateMinidrbdcluster': update_minidrbdcluster,
+        'updateDrbdReactor': update_drbd_reactor,
         'attach': attach,
         'detach': detach,
         'destroy': destroy,
