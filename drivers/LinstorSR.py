@@ -461,6 +461,10 @@ class LinstorSR(SR.SR):
             return method(self, *args, **kwargs)
 
         def load(self, *args, **kwargs):
+            # Activate all LVMs to make drbd-reactor happy.
+            if self.srcmd.cmd == 'sr_attach':
+                activate_lvm_group(self._group_name)
+
             if not self._has_session:
                 if self.srcmd.cmd in (
                     'vdi_attach_from_config',
@@ -707,7 +711,7 @@ class LinstorSR(SR.SR):
             )
 
         # Ensure ports are opened and LINSTOR satellites
-        # are activated. In the same time the minidrbdcluster instances
+        # are activated. In the same time the drbd-reactor instances
         # must be stopped.
         self._prepare_sr_on_all_hosts(self._group_name, enabled=True)
 
@@ -730,9 +734,9 @@ class LinstorSR(SR.SR):
 
         try:
             util.SMlog(
-                "Finishing SR creation, enable minidrbdcluster on all hosts..."
+                "Finishing SR creation, enable drbd-reactor on all hosts..."
             )
-            self._update_minidrbdcluster_on_all_hosts(enabled=True)
+            self._update_drbd_reactor_on_all_hosts(enabled=True)
         except Exception as e:
             try:
                 self._linstor.destroy()
@@ -777,7 +781,7 @@ class LinstorSR(SR.SR):
             )
 
         try:
-            self._update_minidrbdcluster_on_all_hosts(
+            self._update_drbd_reactor_on_all_hosts(
                 controller_node_name=node_name, enabled=False
             )
 
@@ -789,12 +793,12 @@ class LinstorSR(SR.SR):
             )
         except Exception as e:
             try:
-                self._update_minidrbdcluster_on_all_hosts(
+                self._update_drbd_reactor_on_all_hosts(
                     controller_node_name=node_name, enabled=True
                 )
             except Exception as e2:
                 util.SMlog(
-                    'Failed to restart minidrbdcluster after destroy fail: {}'
+                    'Failed to restart drbd-reactor after destroy fail: {}'
                     .format(e2)
                 )
             util.SMlog('Failed to delete LINSTOR SR: {}'.format(e))
@@ -838,7 +842,6 @@ class LinstorSR(SR.SR):
                 'SRUnavailable',
                 opterr='no such group: {}'.format(self._group_name)
             )
-        activate_lvm_group(self._group_name)
 
     @_locked_load
     def detach(self, uuid):
@@ -963,15 +966,15 @@ class LinstorSR(SR.SR):
         for slave in util.get_all_slaves(self.session):
             self._prepare_sr(slave, group_name, enabled)
 
-    def _update_minidrbdcluster(self, host, enabled):
+    def _update_drbd_reactor(self, host, enabled):
         self._exec_manager_command(
             host,
-            'updateMinidrbdcluster',
+            'updateDrbdReactor',
             {'enabled': str(enabled)},
             'SRUnavailable'
         )
 
-    def _update_minidrbdcluster_on_all_hosts(
+    def _update_drbd_reactor_on_all_hosts(
         self, enabled, controller_node_name=None
     ):
         if controller_node_name == 'localhost':
@@ -999,27 +1002,27 @@ class LinstorSR(SR.SR):
             ))
 
         if enabled and controller_host:
-            util.SMlog('{} minidrbdcluster on controller host `{}`...'.format(
+            util.SMlog('{} drbd-reactor on controller host `{}`...'.format(
                 action_name, controller_node_name
             ))
             # If enabled is true, we try to start the controller on the desired
             # node name first.
-            self._update_minidrbdcluster(controller_host, enabled)
+            self._update_drbd_reactor(controller_host, enabled)
 
         for host_ref, hostname in secondary_hosts:
-            util.SMlog('{} minidrbdcluster on host {}...'.format(
+            util.SMlog('{} drbd-reactor on host {}...'.format(
                 action_name, hostname
             ))
-            self._update_minidrbdcluster(host_ref, enabled)
+            self._update_drbd_reactor(host_ref, enabled)
 
         if not enabled and controller_host:
-            util.SMlog('{} minidrbdcluster on controller host `{}`...'.format(
+            util.SMlog('{} drbd-reactor on controller host `{}`...'.format(
                 action_name, controller_node_name
             ))
-            # If enabled is false, we disable the minidrbdcluster service of
+            # If enabled is false, we disable the drbd-reactor service of
             # the controller host last. Why? Otherwise the linstor-controller
             # of other nodes can be started, and we don't want that.
-            self._update_minidrbdcluster(controller_host, enabled)
+            self._update_drbd_reactor(controller_host, enabled)
 
     # --------------------------------------------------------------------------
     # Metadata.
