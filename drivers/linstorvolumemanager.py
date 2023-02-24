@@ -1622,7 +1622,7 @@ class LinstorVolumeManager(object):
             )
         finally:
             # Controller must be stopped and volume unmounted because
-            # it is the role of the minidrbdcluster daemon to do the right
+            # it is the role of the drbd-reactor daemon to do the right
             # actions.
             cls._start_controller(start=False)
             cls._mount_volume(
@@ -2625,7 +2625,7 @@ class LinstorVolumeManager(object):
             )
 
         # We must modify the quorum. Otherwise we can't use correctly the
-        # minidrbdcluster daemon.
+        # drbd-reactor daemon.
         if auto_quorum:
             result = lin.resource_dfn_modify(DATABASE_VOLUME_NAME, {
                 'DrbdOptions/auto-quorum': 'disabled',
