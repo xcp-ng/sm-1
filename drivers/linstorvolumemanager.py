@@ -1410,12 +1410,12 @@ class LinstorVolumeManager(object):
         The disk must be up to data to be used.
         :param str volume_uuid: The volume to use.
         :return: The available nodes.
-        :rtype: tuple(set(str), bool)
+        :rtype: tuple(set(str), str)
         """
 
         volume_name = self.get_volume_name(volume_uuid)
 
-        in_use = False
+        in_use_by = None
         node_names = set()
 
         resource_states = filter(
@@ -1428,9 +1428,9 @@ class LinstorVolumeManager(object):
             if volume_state.disk_state == 'UpToDate':
                 node_names.add(resource_state.node_name)
             if resource_state.in_use:
-                in_use = True
+                in_use_by = resource_state.node_name
 
-        return (node_names, in_use)
+        return (node_names, in_use_by)
 
     def invalidate_resource_cache(self):
         """
