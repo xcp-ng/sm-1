@@ -1884,9 +1884,12 @@ class LinstorVDI(VDI.VDI):
             return self._attach_using_http_nbd()
 
         if not util.pathexists(self.path):
-            raise xs_errors.XenError(
-                'VDIUnavailable', opterr='Could not find: {}'.format(self.path)
-            )
+            # Ensure we have a path...
+            self._linstor.get_device_path(vdi_uuid)
+            if not util.pathexists(self.path):
+                raise xs_errors.XenError(
+                    'VDIUnavailable', opterr='Could not find: {}'.format(self.path)
+                )
 
         self.attached = True
         return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
@@ -2137,16 +2140,7 @@ class LinstorVDI(VDI.VDI):
             self.size = volume_info.virtual_size
             self.parent = ''
         else:
-            try:
-                vhd_info = self.sr._vhdutil.get_vhd_info(self.uuid)
-            except util.CommandException as e:
-                if e.code != errno.ENOENT:
-                    raise
-                # Path doesn't exist. Probably a diskless without local path.
-                # Force creation and retry.
-                self._linstor.get_device_path(self.uuid)
-                vhd_info = self.sr._vhdutil.get_vhd_info(self.uuid)
-
+            vhd_info = self.sr._vhdutil.get_vhd_info(self.uuid)
             self.hidden = vhd_info.hidden
             self.size = vhd_info.sizeVirt
             self.parent = vhd_info.parentUuid
