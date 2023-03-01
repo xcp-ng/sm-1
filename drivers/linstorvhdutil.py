@@ -47,12 +47,20 @@ def call_vhd_util_on_host(session, host_ref, method, device_path, args):
     return response
 
 
-class ErofsLinstorCallException(Exception):
+class LinstorCallException(Exception):
     def __init__(self, cmd_err):
         self.cmd_err = cmd_err
 
     def __str__(self):
         return str(self.cmd_err)
+
+
+class ErofsLinstorCallException(LinstorCallException):
+    pass
+
+
+class NoPathLinstorCallException(LinstorCallException):
+    pass
 
 
 def linstorhostcall(local_method, remote_method):
@@ -70,12 +78,12 @@ def linstorhostcall(local_method, remote_method):
 
             # Try to read locally if the device is not in use or if the device
             # is up to date and not diskless.
-            (node_names, in_use) = \
+            (node_names, in_use_by) = \
                 self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
 
             local_e = None
             try:
-                if not in_use or socket.gethostname() in node_names:
+                if not in_use_by or socket.gethostname() in node_names:
                     return self._call_local_vhd_util(local_method, device_path, *args[2:], **kwargs)
             except ErofsLinstorCallException as e:
                 local_e = e.cmd_err
@@ -87,6 +95,9 @@ def linstorhostcall(local_method, remote_method):
                     remote_method, local_e if local_e else 'local diskless + in use or not up to date'
                 )
             )
+
+            if in_use_by:
+                node_names = {in_use_by}
 
             # B. Execute the plugin on master or slave.
             remote_args = {
@@ -319,6 +330,8 @@ class LinstorVhdUtil:
                 except util.CommandException as e:
                     if e.code == errno.EROFS or e.code == EMEDIUMTYPE:
                         raise ErofsLinstorCallException(e)  # Break retry calls.
+                    if e.code == errno.ENOENT:
+                        raise NoPathLinstorCallException(e)
                     raise e
             # Retry only locally if it's not an EROFS exception.
             return util.retry(local_call, 5, 2, exceptions=[util.CommandException])
