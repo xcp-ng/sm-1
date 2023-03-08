@@ -21,7 +21,7 @@
 import errno
 import os
 import syslog as _syslog
-import xmlrpclib
+import xmlrpc.client
 from syslog import syslog
 
 # careful with the import order here
@@ -277,8 +277,8 @@ class CephFSFileVDI(FileSR.FileVDI):
                 'command': 'vdi_attach_from_config'}
         # Return the 'config' encoded within a normal XMLRPC response so that
         # we can use the regular response/error parsing code.
-        config = xmlrpclib.dumps(tuple([resp]), "vdi_attach_from_config")
-        return xmlrpclib.dumps((config,), "", True)
+        config = xmlrpc.client.dumps(tuple([resp]), "vdi_attach_from_config")
+        return xmlrpc.client.dumps((config,), "", True)
 
     def attach_from_config(self, sr_uuid, vdi_uuid):
         try:
