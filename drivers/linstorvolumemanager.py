@@ -28,7 +28,7 @@ import util
 def round_up(value, divisor):
     assert divisor
     divisor = int(divisor)
-    return int((int(value) + divisor - 1) / divisor) * divisor
+    return ((int(value) + divisor - 1) // divisor) * divisor
 
 
 def round_down(value, divisor):
@@ -540,7 +540,7 @@ class LinstorVolumeManager(object):
         result = self._linstor.volume_dfn_modify(
             rsc_name=volume_name,
             volume_nr=0,
-            size=new_size / 1024
+            size=new_size // 1024
         )
         error_str = self._get_error_str(result)
         if error_str:
