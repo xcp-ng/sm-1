@@ -1053,7 +1053,7 @@ class LinstorVolumeManager(object):
         # we can try to use it directly.
         pools = pools.storage_pools
         if pools:
-            existing_node_names = map(lambda pool: pool.node_name, pools)
+            existing_node_names = [pool.node_name for pool in pools]
             raise LinstorVolumeManagerError(
                 'Unable to create SR `{}`. It already exists on node(s): {}'
                 .format(group_name, existing_node_names)
