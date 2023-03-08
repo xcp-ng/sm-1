@@ -38,7 +38,7 @@ import traceback
 import util
 import VDI
 import vhdutil
-import xmlrpclib
+import xmlrpc.client
 import xs_errors
 
 from srmetadata import \
@@ -865,7 +865,7 @@ class LinstorSR(SR.SR):
                 if is_a_snapshot:
                     xenapi.VDI.set_snapshot_time(
                         vdi_ref,
-                        xmlrpclib.DateTime(
+                        xmlrpc.client.DateTime(
                             volume_metadata[SNAPSHOT_TIME_TAG] or
                             '19700101T00:00:00Z'
                         )
@@ -1617,8 +1617,8 @@ class LinstorVDI(VDI.VDI):
         resp['vdi_path'] = self.path
         resp['command'] = 'vdi_attach_from_config'
 
-        config = xmlrpclib.dumps(tuple([resp]), 'vdi_attach_from_config')
-        return xmlrpclib.dumps((config,), "", True)
+        config = xmlrpc.client.dumps(tuple([resp]), 'vdi_attach_from_config')
+        return xmlrpc.client.dumps((config,), "", True)
 
     def attach_from_config(self, sr_uuid, vdi_uuid):
         """
