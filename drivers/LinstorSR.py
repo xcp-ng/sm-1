@@ -460,7 +460,7 @@ class LinstorSR(SR.SR):
         srs = xenapi.SR.get_all_records_where(
             'field "type" = "{}"'.format(self.DRIVER_TYPE)
         )
-        srs = dict(filter(lambda e: e[1]['uuid'] != self.uuid, srs.items()))
+        srs = dict([e for e in srs.items() if e[1]['uuid'] != self.uuid])
 
         for sr in srs.values():
             for pbd in sr['PBDs']:
@@ -1296,7 +1296,7 @@ class LinstorVDI(VDI.VDI):
         assert self.vdi_type
 
         # 2. Compute size and check space available.
-        size = vhdutil.validate_and_round_vhd_size(long(size))
+        size = vhdutil.validate_and_round_vhd_size(int(size))
         util.SMlog('LinstorVDI.create: type={}, size={}'.format(
             self.vdi_type, size
         ))
@@ -1514,7 +1514,7 @@ class LinstorVDI(VDI.VDI):
             raise xs_errors.XenError('VDISize', opterr='shrinking not allowed')
 
         # Compute the virtual VHD size.
-        size = vhdutil.validate_and_round_vhd_size(long(size))
+        size = vhdutil.validate_and_round_vhd_size(int(size))
 
         if size == self.size:
             return VDI.VDI.get_params(self)
@@ -1985,10 +1985,7 @@ class LinstorVDI(VDI.VDI):
             # See: `tap_unpause` in `blktap2.py`.
             vdi_ref = self.session.xenapi.VDI.get_by_uuid(active_uuid)
             sm_config = self.session.xenapi.VDI.get_sm_config(vdi_ref)
-            for key in filter(
-                lambda x: x == 'paused' or x.startswith('host_'),
-                sm_config.keys()
-            ):
+            for key in [x for x in sm_config.keys() if x == 'paused' or x.startswith('host_')]:
                 active_vdi.sm_config[key] = sm_config[key]
 
             # 7. Verify parent locator field of both children and
