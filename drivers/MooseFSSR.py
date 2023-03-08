@@ -139,12 +139,12 @@ class MooseFSSR(FileSR.FileSR):
         try:
             if not util.ioretry(lambda: util.isdir(mountpoint)):
                 util.ioretry(lambda: util.makedirs(mountpoint))
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             raise MooseFSException("Failed to make directory: code is %d" % inst.code)
 
         try:
             options = []
-            if self.dconf.has_key('options'):
+            if 'options' in self.dconf:
                 options.append(self.dconf['options'])
             if options:
                 options = ['-o', ','.join(options)]
@@ -153,7 +153,7 @@ class MooseFSSR(FileSR.FileSR):
             )
             command = ["mount", '-t', 'moosefs', remote, mountpoint] + options
             util.ioretry(lambda: util.pread(command), errlist=[errno.EPIPE, errno.EIO], maxretry=2, nofail=True)
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             syslog(_syslog.LOG_ERR, 'MooseFS mount failed ' + inst.__str__())
             raise MooseFSException("Mount failed with return code %d" % inst.code)
 
@@ -171,12 +171,12 @@ class MooseFSSR(FileSR.FileSR):
     def unmount(self, mountpoint, rmmountpoint):
         try:
             util.pread(["umount", mountpoint])
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             raise MooseFSException("Command umount failed with return code %d" % inst.code)
         if rmmountpoint:
             try:
                 os.rmdir(mountpoint)
-            except OSError, inst:
+            except OSError as inst:
                 raise MooseFSException("Command rmdir failed with error '%s'" % inst.strerror)
 
     def attach(self, sr_uuid):
@@ -215,7 +215,7 @@ class MooseFSSR(FileSR.FileSR):
         assert self.remotepath == self.rootpath
         try:
             self.mount()
-        except MooseFSException, exc:
+        except MooseFSException as exc:
             # noinspection PyBroadException
             try:
                 os.rmdir(self.mountpoint)
@@ -267,7 +267,7 @@ class MooseFSSR(FileSR.FileSR):
                 if util.ioretry(lambda: util.pathexists(subdir)):
                     util.ioretry(lambda: os.rmdir(subdir))
                 self.detach(sr_uuid)
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             self.detach(sr_uuid)
             if inst.code != errno.ENOENT:
                 raise xs_errors.SROSError(114, "Failed to remove MooseFS mount point")

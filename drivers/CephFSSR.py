@@ -132,18 +132,18 @@ class CephFSSR(FileSR.FileSR):
         try:
             if not util.ioretry(lambda: util.isdir(mountpoint)):
                 util.ioretry(lambda: util.makedirs(mountpoint))
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             raise CephFSException("Failed to make directory: code is %d" % inst.code)
 
         try:
             options = []
-            if self.dconf.has_key('options'):
+            if 'options' in self.dconf:
                 options.append(self.dconf['options'])
             if options:
                 options = ['-o', ','.join(options)]
             command = ["mount", '-t', 'ceph', self.remoteserver+":"+self.remoteport+":"+self.remotepath, mountpoint] + options
             util.ioretry(lambda: util.pread(command), errlist=[errno.EPIPE, errno.EIO], maxretry=2, nofail=True)
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             syslog(_syslog.LOG_ERR, 'CephFS mount failed ' + inst.__str__())
             raise CephFSException("mount failed with return code %d" % inst.code)
 
@@ -161,12 +161,12 @@ class CephFSSR(FileSR.FileSR):
     def unmount(self, mountpoint, rmmountpoint):
         try:
             util.pread(["umount", mountpoint])
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             raise CephFSException("umount failed with return code %d" % inst.code)
         if rmmountpoint:
             try:
                 os.rmdir(mountpoint)
-            except OSError, inst:
+            except OSError as inst:
                 raise CephFSException("rmdir failed with error '%s'" % inst.strerror)
 
     def attach(self, sr_uuid):
@@ -206,7 +206,7 @@ class CephFSSR(FileSR.FileSR):
 
         try:
             self.mount()
-        except CephFSException, exc:
+        except CephFSException as exc:
             # noinspection PyBroadException
             try:
                 os.rmdir(self.mountpoint)
@@ -223,7 +223,7 @@ class CephFSSR(FileSR.FileSR):
             try:
                 util.ioretry(lambda: util.makedirs(self.linkpath))
                 os.symlink(self.linkpath, self.path)
-            except util.CommandException, inst:
+            except util.CommandException as inst:
                 if inst.code != errno.EEXIST:
                     try:
                         self.unmount(self.mountpoint, True)
@@ -244,7 +244,7 @@ class CephFSSR(FileSR.FileSR):
             if util.ioretry(lambda: util.pathexists(self.linkpath)):
                 util.ioretry(lambda: os.rmdir(self.linkpath))
             util.SMlog(str(self.unmount(self.mountpoint, True)))
-        except util.CommandException, inst:
+        except util.CommandException as inst:
             self.detach(sr_uuid)
             if inst.code != errno.ENOENT:
                 raise xs_errors.SROSError(114, "Failed to remove CephFS mount point")

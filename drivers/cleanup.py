@@ -3004,7 +3004,7 @@ class LinstorSR(SR):
 
     def scan(self, force=False):
         all_vdi_info = self._scan(force)
-        for uuid, vdiInfo in all_vdi_info.iteritems():
+        for uuid, vdiInfo in all_vdi_info.items():
             # When vdiInfo is None, the VDI is RAW.
             vdi = self.getVDI(uuid)
             if not vdi:
@@ -3048,7 +3048,7 @@ class LinstorSR(SR):
             error = False
             try:
                 all_vdi_info = self._load_vdi_info()
-                for uuid, vdiInfo in all_vdi_info.iteritems():
+                for uuid, vdiInfo in all_vdi_info.items():
                     if vdiInfo and vdiInfo.error:
                         error = True
                         break
@@ -3113,7 +3113,7 @@ class LinstorSR(SR):
 
     def _handleInterruptedCoalesceLeaf(self):
         entries = self.journaler.get_all(VDI.JRN_LEAF)
-        for uuid, parentUuid in entries.iteritems():
+        for uuid, parentUuid in entries.items():
             if self._hasValidDevicePath(parentUuid) or \
                     self._hasValidDevicePath(self.TMP_RENAME_PREFIX + uuid):
                 self._undoInterruptedCoalesceLeaf(uuid, parentUuid)
