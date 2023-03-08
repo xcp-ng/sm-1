@@ -30,6 +30,7 @@ class Test_on_slave_is_open(unittest.TestCase):
         self.mock_import.side_effect = self.fake_import
 
         self.mock_sr = mock.MagicMock()
+        self.mock_sr.MOUNT_BASE = "/tmp/sr_mount"
         self.mocks['SR'] = self.mock_sr
         self.mock_blktap2 = mock.MagicMock()
         self.mocks['blktap2'] = self.mock_blktap2
