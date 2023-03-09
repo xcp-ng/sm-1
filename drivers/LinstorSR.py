@@ -215,7 +215,7 @@ def detach_thin(session, linstor, sr_uuid, vdi_uuid):
         new_volume_size = LinstorVolumeManager.round_up_volume_size(
             # TODO: Replace pylint comment with this feature when possible:
             # https://github.com/PyCQA/pylint/pull/2926
-            LinstorVhdUtil(session, linstor).get_size_phys(device_path)  # pylint: disable = E1120
+            LinstorVhdUtil(session, linstor).get_size_phys(vdi_uuid)  # pylint: disable = E1120
         )
 
         volume_info = linstor.get_volume_info(vdi_uuid)
