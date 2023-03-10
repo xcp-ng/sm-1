@@ -914,28 +914,17 @@ class LinstorVolumeManager(object):
 
     def get_volume_name_from_device_path(self, device_path):
         """
-        Get the volume name of a device_path on the current host.
+        Get the volume name of a device_path.
         :param str device_path: The dev path to find the volume name.
-        :return: The volume name of the local device path.
+        :return: The volume name of the device path.
         :rtype: str
         """
 
-        node_name = socket.gethostname()
+        assert device_path.startswith(DRBD_BY_RES_PATH)
 
-        resources = filter(
-            lambda resource: resource.node_name == node_name,
-            self._get_resource_cache().resources
-        )
-
-        real_device_path = os.path.realpath(device_path)
-        for resource in resources:
-            if resource.volumes[0].device_path == real_device_path:
-                return resource.name
-
-        raise LinstorVolumeManagerError(
-            'Unable to find volume name from dev path `{}`'
-            .format(device_path)
-        )
+        res_name_end = device_path.find('/', len(DRBD_BY_RES_PATH))
+        assert res_name_end != -1
+        return device_path[len(DRBD_BY_RES_PATH):res_name_end]
 
     def update_volume_uuid(self, volume_uuid, new_volume_uuid, force=False):
         """
