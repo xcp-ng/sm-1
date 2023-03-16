@@ -100,13 +100,16 @@ def fullSizeVHD(virtual_size):
 def ioretry(cmd, errlist=[errno.EIO, errno.EAGAIN]):
     return util.ioretry(lambda: util.pread2(cmd), errlist)
 
-def getVHDInfo(path, extractUuidFunction, includeParent = True):
+def getVHDInfo(path, extractUuidFunction, includeParent=True, resolveParent=True):
     """Get the VHD info. The parent info may optionally be omitted: vhd-util
     tries to verify the parent by opening it, which results in error if the VHD
     resides on an inactive LV"""
     opts = "-vsf"
     if includeParent:
         opts += "p"
+        if not resolveParent:
+            opts += "u"
+
     cmd = [VHD_UTIL, "query", OPT_LOG_ERR, opts, "-n", path]
     ret = ioretry(cmd)
     fields = ret.strip().split('\n')
