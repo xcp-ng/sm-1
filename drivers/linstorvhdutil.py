@@ -143,8 +143,8 @@ class LinstorVhdUtil:
 
     def check(self, vdi_uuid, ignore_missing_footer=False, fast=False):
         kwargs = {
-            'ignoreMissingFooter': str(ignore_missing_footer),
-            'fast': str(fast)
+            'ignoreMissingFooter': ignore_missing_footer,
+            'fast': fast
         }
         return self._check(vdi_uuid, **kwargs)  # pylint: disable = E1123
 
@@ -153,7 +153,10 @@ class LinstorVhdUtil:
         return distutils.util.strtobool(response)
 
     def get_vhd_info(self, vdi_uuid, include_parent=True):
-        kwargs = {'includeParent': str(include_parent)}
+        kwargs = {
+            'includeParent': include_parent,
+            'resolveParent': False
+        }
         # TODO: Replace pylint comment with this feature when possible:
         # https://github.com/PyCQA/pylint/pull/2926
         return self._get_vhd_info(vdi_uuid, self._extract_uuid, **kwargs)  # pylint: disable = E1123
