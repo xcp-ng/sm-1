@@ -920,11 +920,18 @@ class LinstorVolumeManager(object):
         :rtype: str
         """
 
-        assert device_path.startswith(DRBD_BY_RES_PATH)
+        # Assume that we have a path like this:
+        # - "/dev/drbd/by-res/xcp-volume-<UUID>/0"
+        # - "../xcp-volume-<UUID>/0"
+        if device_path.startswith(DRBD_BY_RES_PATH):
+            prefix_len = len(DRBD_BY_RES_PATH)
+        else:
+            assert device_path.startswith('../')
+            prefix_len = 3
 
-        res_name_end = device_path.find('/', len(DRBD_BY_RES_PATH))
+        res_name_end = device_path.find('/', prefix_len)
         assert res_name_end != -1
-        return device_path[len(DRBD_BY_RES_PATH):res_name_end]
+        return device_path[prefix_len:res_name_end]
 
     def update_volume_uuid(self, volume_uuid, new_volume_uuid, force=False):
         """
