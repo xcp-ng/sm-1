@@ -400,7 +400,7 @@ def get_vhd_info(session, args):
             )
 
         vhd_info = vhdutil.getVHDInfo(
-            device_path, extract_uuid, include_parent
+            device_path, extract_uuid, include_parent, False
         )
         return json.dumps(vhd_info.__dict__)
     except Exception as e:
