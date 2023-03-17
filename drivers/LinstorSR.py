@@ -1883,13 +1883,14 @@ class LinstorVDI(VDI.VDI):
         ):
             return self._attach_using_http_nbd()
 
-        if not util.pathexists(self.path):
-            # Ensure we have a path...
-            self._linstor.get_device_path(vdi_uuid)
-            if not util.pathexists(self.path):
+        # Ensure we have a path...
+        while vdi_uuid:
+            path = self._linstor.get_device_path(vdi_uuid)
+            if not util.pathexists(path):
                 raise xs_errors.XenError(
-                    'VDIUnavailable', opterr='Could not find: {}'.format(self.path)
+                    'VDIUnavailable', opterr='Could not find: {}'.format(path)
                 )
+            vdi_uuid = self.sr._vhdutil.get_vhd_info(vdi_uuid).parentUuid
 
         self.attached = True
         return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
