@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # Original work copyright (C) Citrix systems
 # Modified work copyright (C) Vates SAS and XCP-ng community
