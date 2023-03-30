@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 #
-# Copyright (C) Citrix Systems Inc.
+# Original work copyright (C) Citrix systems
+# Modified work copyright (C) Vates SAS and XCP-ng community
 #
 # This program is free software; you can redistribute it and/or modify 
 # it under the terms of the GNU Lesser General Public License as published 
@@ -15,10 +16,9 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# EXTSR: Based on local-file storage repository, mounts ext3 partition
+# EXT4SR: Based on local-file storage repository, mounts ext4 partition
 
 import SR, SRCommand, FileSR, util, lvutil, scsiutil
-from SR import deviceCheck
 
 import os
 import xs_errors
@@ -31,15 +31,15 @@ CAPABILITIES = ["SR_PROBE","SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING", \
                 "VDI_UPDATE","VDI_CLONE","VDI_SNAPSHOT","VDI_RESIZE","VDI_MIRROR", \
                 "VDI_GENERATE_CONFIG",                                \
                 "VDI_RESET_ON_BOOT/2","ATOMIC_PAUSE", "VDI_CONFIG_CBT", 
-                "VDI_ACTIVATE", "VDI_DEACTIVATE", "THIN_PROVISIONING", "VDI_READ_CACHING"]
+                "VDI_ACTIVATE", "VDI_DEACTIVATE"]
 
 CONFIGURATION = [ [ 'device', 'local device path (required) (e.g. /dev/sda3)' ] ]
                   
 DRIVER_INFO = {
-    'name': 'Local EXT3 VHD',
-    'description': 'SR plugin which represents disks as VHD files stored on a local EXT3 filesystem, created inside an LVM volume',
-    'vendor': 'Citrix Systems Inc',
-    'copyright': '(C) 2008 Citrix Systems Inc',
+    'name': 'Local EXT4 VHD',
+    'description': 'SR plugin which represents disks as VHD files stored on a local EXT4 filesystem, created inside an LVM volume',
+    'vendor': 'Vates SAS',
+    'copyright': '(C) 2019 Vates SAS',
     'driver_version': '1.0',
     'required_api_version': '1.0',
     'capabilities': CAPABILITIES,
@@ -48,16 +48,24 @@ DRIVER_INFO = {
 
 DRIVER_CONFIG = {"ATTACH_FROM_CONFIG_WITH_TAPDISK": True}
 
-class EXTSR(FileSR.FileSR):
-    """EXT3 Local file storage repository"""
+class EXT4SR(FileSR.FileSR):
+    """EXT4 Local file storage repository"""
     def handles(srtype):
-        return srtype == 'ext'
+        return srtype == 'ext4'
     handles = staticmethod(handles)
 
     def load(self, sr_uuid):
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
+        if not self.dconf.has_key('device') or not self.dconf['device']:
+            raise xs_errors.XenError('ConfigDeviceMissing')
+
+        self.root = self.dconf['device']
+        for dev in self.root.split(','):
+            if not self._isvalidpathstring(dev):
+                raise xs_errors.XenError('ConfigDeviceInvalid', \
+                      opterr='path is %s' % dev)
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
         self.vgname = EXT_PREFIX + sr_uuid
         self.remotepath = os.path.join("/dev",self.vgname,sr_uuid)
@@ -65,7 +73,7 @@ class EXTSR(FileSR.FileSR):
         self.driver_config = DRIVER_CONFIG
 
     def delete(self, sr_uuid):
-        super(EXTSR, self).delete(sr_uuid)
+        super(EXT4SR, self).delete(sr_uuid)
 
         # Check PVs match VG
         try:
@@ -133,7 +141,7 @@ class EXTSR(FileSR.FileSR):
         for dev in self.root.split(','): self.block_setscheduler(dev)
 
     def detach(self, sr_uuid):
-        super(EXTSR, self).detach(sr_uuid)
+        super(EXT4SR, self).detach(sr_uuid)
         try:
             # deactivate SR
             cmd = ["lvchange", "-an", self.remotepath]
@@ -142,13 +150,16 @@ class EXTSR(FileSR.FileSR):
             raise xs_errors.XenError('LVMUnMount', \
                   opterr='lvm -an failed errno is %d' % inst.code)
 
-    @deviceCheck
     def probe(self):
         return lvutil.srlist_toxml(lvutil.scan_srlist(EXT_PREFIX, self.root),
                 EXT_PREFIX)
 
-    @deviceCheck
     def create(self, sr_uuid, size):
+        # THIS DRIVER IS DEPRECATED. RAISE.
+        raise Exception('The `ext4` SR type is deprecated since XCP-ng 8.1.\n'
+                        'Use the main `ext` driver instead. It will create an EXT4 filesystem now, '
+                        'not EXT3 anymore as it used to.')
+
         if self._checkmount():
             raise xs_errors.XenError('SRExists')
 
@@ -223,6 +234,6 @@ class EXTFileVDI(FileSR.FileVDI):
 
 
 if __name__ == '__main__':
-    SRCommand.run(EXTSR, DRIVER_INFO)
+    SRCommand.run(EXT4SR, DRIVER_INFO)
 else:
-    SR.registerSR(EXTSR)
+    SR.registerSR(EXT4SR)
