@@ -1,24 +1,24 @@
 #!/usr/bin/env python
 #
-# Copyright (C) Citrix Systems Inc.
+# Original work copyright (C) Citrix systems
+# Modified work copyright (C) Vates SAS and XCP-ng community
 #
-# This program is free software; you can redistribute it and/or modify 
-# it under the terms of the GNU Lesser General Public License as published 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published
 # by the Free Software Foundation; version 2.1 only.
 #
-# This program is distributed in the hope that it will be useful, 
-# but WITHOUT ANY WARRANTY; without even the implied warranty of 
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# EXTSR: Based on local-file storage repository, mounts ext3 partition
+# XFSSR: Based on local-file storage repository, mounts xfs partition
 
 import SR, SRCommand, FileSR, util, lvutil, scsiutil
-from SR import deviceCheck
 
 import os
 import xs_errors
@@ -30,16 +30,16 @@ CAPABILITIES = ["SR_PROBE","SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING", \
                 "VDI_CREATE","VDI_DELETE","VDI_ATTACH","VDI_DETACH", \
                 "VDI_UPDATE","VDI_CLONE","VDI_SNAPSHOT","VDI_RESIZE","VDI_MIRROR", \
                 "VDI_GENERATE_CONFIG",                                \
-                "VDI_RESET_ON_BOOT/2","ATOMIC_PAUSE", "VDI_CONFIG_CBT", 
-                "VDI_ACTIVATE", "VDI_DEACTIVATE", "THIN_PROVISIONING", "VDI_READ_CACHING"]
+                "VDI_RESET_ON_BOOT/2","ATOMIC_PAUSE", "VDI_CONFIG_CBT",
+                "VDI_ACTIVATE", "VDI_DEACTIVATE"]
 
 CONFIGURATION = [ [ 'device', 'local device path (required) (e.g. /dev/sda3)' ] ]
-                  
+
 DRIVER_INFO = {
-    'name': 'Local EXT3 VHD',
-    'description': 'SR plugin which represents disks as VHD files stored on a local EXT3 filesystem, created inside an LVM volume',
-    'vendor': 'Citrix Systems Inc',
-    'copyright': '(C) 2008 Citrix Systems Inc',
+    'name': 'Local XFS VHD',
+    'description': 'SR plugin which represents disks as VHD files stored on a local XFS filesystem, created inside an LVM volume',
+    'vendor': 'Vates SAS',
+    'copyright': '(C) 2019 Vates SAS',
     'driver_version': '1.0',
     'required_api_version': '1.0',
     'capabilities': CAPABILITIES,
@@ -48,16 +48,33 @@ DRIVER_INFO = {
 
 DRIVER_CONFIG = {"ATTACH_FROM_CONFIG_WITH_TAPDISK": True}
 
-class EXTSR(FileSR.FileSR):
-    """EXT3 Local file storage repository"""
+
+class XFSSR(FileSR.FileSR):
+    DRIVER_TYPE = 'xfs'
+
+    """XFS Local file storage repository"""
     def handles(srtype):
-        return srtype == 'ext'
+        return srtype == XFSSR.DRIVER_TYPE
     handles = staticmethod(handles)
 
     def load(self, sr_uuid):
+        if not self._is_xfs_available():
+            raise xs_errors.XenError(
+                'SRUnavailable',
+                opterr='xfsprogs is not installed'
+            )
+
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
+        if not self.dconf.has_key('device') or not self.dconf['device']:
+            raise xs_errors.XenError('ConfigDeviceMissing')
+
+        self.root = self.dconf['device']
+        for dev in self.root.split(','):
+            if not self._isvalidpathstring(dev):
+                raise xs_errors.XenError('ConfigDeviceInvalid', \
+                      opterr='path is %s' % dev)
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
         self.vgname = EXT_PREFIX + sr_uuid
         self.remotepath = os.path.join("/dev",self.vgname,sr_uuid)
@@ -65,7 +82,7 @@ class EXTSR(FileSR.FileSR):
         self.driver_config = DRIVER_CONFIG
 
     def delete(self, sr_uuid):
-        super(EXTSR, self).delete(sr_uuid)
+        super(XFSSR, self).delete(sr_uuid)
 
         # Check PVs match VG
         try:
@@ -83,7 +100,7 @@ class EXTSR(FileSR.FileSR):
         try:
             cmd = ["lvremove", "-f", self.remotepath]
             util.pread2(cmd)
-            
+
             cmd = ["vgremove", self.vgname]
             util.pread2(cmd)
 
@@ -93,21 +110,21 @@ class EXTSR(FileSR.FileSR):
         except util.CommandException, inst:
             raise xs_errors.XenError('LVMDelete', \
                   opterr='errno is %d' % inst.code)
-            
+
     def attach(self, sr_uuid):
         if not self._checkmount():
             try:
                 #Activate LV
                 cmd = ['lvchange','-ay',self.remotepath]
                 util.pread2(cmd)
-                
+
                 # make a mountpoint:
                 if not os.path.isdir(self.path):
                     os.makedirs(self.path)
             except util.CommandException, inst:
                 raise xs_errors.XenError('LVMMount', \
                       opterr='Unable to activate LV. Errno is %d' % inst.code)
-            
+
             try:
                 util.pread(["fsck", "-a", self.remotepath])
             except util.CommandException, inst:
@@ -128,12 +145,12 @@ class EXTSR(FileSR.FileSR):
         #Update SCSIid string
         scsiutil.add_serial_record(self.session, self.sr_ref, \
                 scsiutil.devlist_to_serialstring(self.root.split(',')))
-        
+
         # Set the block scheduler
         for dev in self.root.split(','): self.block_setscheduler(dev)
 
     def detach(self, sr_uuid):
-        super(EXTSR, self).detach(sr_uuid)
+        super(XFSSR, self).detach(sr_uuid)
         try:
             # deactivate SR
             cmd = ["lvchange", "-an", self.remotepath]
@@ -142,12 +159,10 @@ class EXTSR(FileSR.FileSR):
             raise xs_errors.XenError('LVMUnMount', \
                   opterr='lvm -an failed errno is %d' % inst.code)
 
-    @deviceCheck
     def probe(self):
         return lvutil.srlist_toxml(lvutil.scan_srlist(EXT_PREFIX, self.root),
                 EXT_PREFIX)
 
-    @deviceCheck
     def create(self, sr_uuid, size):
         if self._checkmount():
             raise xs_errors.XenError('SRExists')
@@ -197,7 +212,7 @@ class EXTSR(FileSR.FileSR):
                   opterr='Insufficient space in VG %s' % self.vgname)
 
         try:
-            util.pread2(["mkfs.ext4", "-F", self.remotepath])
+            util.pread2(["mkfs.xfs", self.remotepath])
         except util.CommandException, inst:
             raise xs_errors.XenError('LVMFilesystem', \
                   opterr='mkfs failed error %d' % inst.code)
@@ -206,23 +221,26 @@ class EXTSR(FileSR.FileSR):
         scsiutil.add_serial_record(self.session, self.sr_ref, \
                   scsiutil.devlist_to_serialstring(self.root.split(',')))
 
-    def vdi(self, uuid, loadLocked = False):
-        if not loadLocked:
-            return EXTFileVDI(self, uuid)
-        return EXTFileVDI(self, uuid)
+    def vdi(self, uuid, loadLocked=False):
+        return XFSFileVDI(self, uuid)
+
+    @staticmethod
+    def _is_xfs_available():
+        import distutils.spawn
+        return distutils.spawn.find_executable('mkfs.xfs')
 
 
-class EXTFileVDI(FileSR.FileVDI):
+class XFSFileVDI(FileSR.FileVDI):
     def attach(self, sr_uuid, vdi_uuid):
         if not hasattr(self,'xenstore_data'):
             self.xenstore_data = {}
 
-        self.xenstore_data["storage-type"]="ext"
+        self.xenstore_data['storage-type'] = XFSSR.DRIVER_TYPE
 
-        return super(EXTFileVDI, self).attach(sr_uuid, vdi_uuid)
+        return super(XFSFileVDI, self).attach(sr_uuid, vdi_uuid)
 
 
 if __name__ == '__main__':
-    SRCommand.run(EXTSR, DRIVER_INFO)
+    SRCommand.run(XFSSR, DRIVER_INFO)
 else:
-    SR.registerSR(EXTSR)
+    SR.registerSR(XFSSR)
