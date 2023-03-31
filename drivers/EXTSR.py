@@ -1,15 +1,15 @@
 #!/usr/bin/env python
 #
-# Original work copyright (C) Citrix systems
+# Original work copyright (C) Citrix Systems Inc.
 # Modified work copyright (C) Vates SAS and XCP-ng community
 #
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published
+# This program is free software; you can redistribute it and/or modify 
+# it under the terms of the GNU Lesser General Public License as published 
 # by the Free Software Foundation; version 2.1 only.
 #
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# This program is distributed in the hope that it will be useful, 
+# but WITHOUT ANY WARRANTY; without even the implied warranty of 
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the 
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
@@ -19,6 +19,7 @@
 # XFSSR: Based on local-file storage repository, mounts xfs partition
 
 import SR, SRCommand, FileSR, util, lvutil, scsiutil
+from SR import deviceCheck
 
 import os
 import xs_errors
@@ -30,8 +31,8 @@ CAPABILITIES = ["SR_PROBE","SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING", \
                 "VDI_CREATE","VDI_DELETE","VDI_ATTACH","VDI_DETACH", \
                 "VDI_UPDATE","VDI_CLONE","VDI_SNAPSHOT","VDI_RESIZE","VDI_MIRROR", \
                 "VDI_GENERATE_CONFIG",                                \
-                "VDI_RESET_ON_BOOT/2","ATOMIC_PAUSE", "VDI_CONFIG_CBT",
-                "VDI_ACTIVATE", "VDI_DEACTIVATE"]
+                "VDI_RESET_ON_BOOT/2","ATOMIC_PAUSE", "VDI_CONFIG_CBT", 
+                "VDI_ACTIVATE", "VDI_DEACTIVATE", "THIN_PROVISIONING", "VDI_READ_CACHING"]
 
 CONFIGURATION = [ [ 'device', 'local device path (required) (e.g. /dev/sda3)' ] ]
 
@@ -68,14 +69,6 @@ class XFSSR(FileSR.FileSR):
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
-        if not self.dconf.has_key('device') or not self.dconf['device']:
-            raise xs_errors.XenError('ConfigDeviceMissing')
-
-        self.root = self.dconf['device']
-        for dev in self.root.split(','):
-            if not self._isvalidpathstring(dev):
-                raise xs_errors.XenError('ConfigDeviceInvalid', \
-                      opterr='path is %s' % dev)
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
         self.vgname = EXT_PREFIX + sr_uuid
         self.remotepath = os.path.join("/dev",self.vgname,sr_uuid)
@@ -101,7 +94,7 @@ class XFSSR(FileSR.FileSR):
         try:
             cmd = ["lvremove", "-f", self.remotepath]
             util.pread2(cmd)
-
+            
             cmd = ["vgremove", self.vgname]
             util.pread2(cmd)
 
@@ -111,21 +104,21 @@ class XFSSR(FileSR.FileSR):
         except util.CommandException, inst:
             raise xs_errors.XenError('LVMDelete', \
                   opterr='errno is %d' % inst.code)
-
+            
     def attach(self, sr_uuid):
         if not self._checkmount():
             try:
                 #Activate LV
                 cmd = ['lvchange','-ay',self.remotepath]
                 util.pread2(cmd)
-
+                
                 # make a mountpoint:
                 if not os.path.isdir(self.path):
                     os.makedirs(self.path)
             except util.CommandException, inst:
                 raise xs_errors.XenError('LVMMount', \
                       opterr='Unable to activate LV. Errno is %d' % inst.code)
-
+            
             try:
                 util.pread(["fsck", "-a", self.remotepath])
             except util.CommandException, inst:
@@ -146,7 +139,7 @@ class XFSSR(FileSR.FileSR):
         #Update SCSIid string
         scsiutil.add_serial_record(self.session, self.sr_ref, \
                 scsiutil.devlist_to_serialstring(self.root.split(',')))
-
+        
         # Set the block scheduler
         for dev in self.root.split(','): self.block_setscheduler(dev)
 
@@ -160,10 +153,12 @@ class XFSSR(FileSR.FileSR):
             raise xs_errors.XenError('LVMUnMount', \
                   opterr='lvm -an failed errno is %d' % inst.code)
 
+    @deviceCheck
     def probe(self):
         return lvutil.srlist_toxml(lvutil.scan_srlist(EXT_PREFIX, self.root),
                 EXT_PREFIX)
 
+    @deviceCheck
     def create(self, sr_uuid, size):
         if self._checkmount():
             raise xs_errors.XenError('SRExists')
@@ -222,7 +217,7 @@ class XFSSR(FileSR.FileSR):
         scsiutil.add_serial_record(self.session, self.sr_ref, \
                   scsiutil.devlist_to_serialstring(self.root.split(',')))
 
-    def vdi(self, uuid, loadLocked=False):
+    def vdi(self, uuid, loadLocked = False):
         return XFSFileVDI(self, uuid)
 
     @staticmethod
