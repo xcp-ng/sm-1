@@ -50,9 +50,10 @@ DRIVER_CONFIG = {"ATTACH_FROM_CONFIG_WITH_TAPDISK": True}
 
 
 class XFSSR(FileSR.FileSR):
+    """XFS Local file storage repository"""
+
     DRIVER_TYPE = 'xfs'
 
-    """XFS Local file storage repository"""
     def handles(srtype):
         return srtype == XFSSR.DRIVER_TYPE
     handles = staticmethod(handles)
