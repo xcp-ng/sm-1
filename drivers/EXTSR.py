@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 #
-# Original work copyright (C) Citrix systems
+# Original work copyright (C) Citrix Systems Inc.
 # Modified work copyright (C) Vates SAS and XCP-ng community
 #
 # This program is free software; you can redistribute it and/or modify 
@@ -19,6 +19,7 @@
 # EXT4SR: Based on local-file storage repository, mounts ext4 partition
 
 import SR, SRCommand, FileSR, util, lvutil, scsiutil
+from SR import deviceCheck
 
 import os
 import xs_errors
@@ -31,7 +32,7 @@ CAPABILITIES = ["SR_PROBE","SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING", \
                 "VDI_UPDATE","VDI_CLONE","VDI_SNAPSHOT","VDI_RESIZE","VDI_MIRROR", \
                 "VDI_GENERATE_CONFIG",                                \
                 "VDI_RESET_ON_BOOT/2","ATOMIC_PAUSE", "VDI_CONFIG_CBT", 
-                "VDI_ACTIVATE", "VDI_DEACTIVATE"]
+                "VDI_ACTIVATE", "VDI_DEACTIVATE", "THIN_PROVISIONING", "VDI_READ_CACHING"]
 
 CONFIGURATION = [ [ 'device', 'local device path (required) (e.g. /dev/sda3)' ] ]
                   
@@ -58,14 +59,6 @@ class EXT4SR(FileSR.FileSR):
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
-        if not self.dconf.has_key('device') or not self.dconf['device']:
-            raise xs_errors.XenError('ConfigDeviceMissing')
-
-        self.root = self.dconf['device']
-        for dev in self.root.split(','):
-            if not self._isvalidpathstring(dev):
-                raise xs_errors.XenError('ConfigDeviceInvalid', \
-                      opterr='path is %s' % dev)
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
         self.vgname = EXT_PREFIX + sr_uuid
         self.remotepath = os.path.join("/dev",self.vgname,sr_uuid)
@@ -150,10 +143,12 @@ class EXT4SR(FileSR.FileSR):
             raise xs_errors.XenError('LVMUnMount', \
                   opterr='lvm -an failed errno is %d' % inst.code)
 
+    @deviceCheck
     def probe(self):
         return lvutil.srlist_toxml(lvutil.scan_srlist(EXT_PREFIX, self.root),
                 EXT_PREFIX)
 
+    @deviceCheck
     def create(self, sr_uuid, size):
         # THIS DRIVER IS DEPRECATED. RAISE.
         raise Exception('The `ext4` SR type is deprecated since XCP-ng 8.1.\n'
