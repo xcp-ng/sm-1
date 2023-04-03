@@ -1553,7 +1553,11 @@ class LinstorSR(SR.SR):
     def _create_linstor_cache(self):
         self._all_volume_metadata_cache = \
             self._linstor.get_volumes_with_metadata()
-        self._all_volume_info_cache = self._linstor.get_volumes_with_info()
+        self._all_volume_info_cache = util.retry(
+            self._linstor.get_volumes_with_info,
+            maxretry=10,
+            period=1
+        )
 
     def _destroy_linstor_cache(self):
         self._all_volume_info_cache = None
