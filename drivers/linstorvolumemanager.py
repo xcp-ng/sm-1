@@ -2089,7 +2089,7 @@ class LinstorVolumeManager(object):
                 volume_uuid,
                 self._group_name
             )
-            self._increase_volume_peer_slots(self._linstor, volume_name)
+            self._configure_volume_peer_slots(self._linstor, volume_name)
 
         def clean():
             try:
@@ -2475,12 +2475,12 @@ class LinstorVolumeManager(object):
         )
 
     @classmethod
-    def _increase_volume_peer_slots(cls, lin, volume_name):
-        result = lin.resource_dfn_modify(volume_name, {}, peer_slots=31)
+    def _configure_volume_peer_slots(cls, lin, volume_name):
+        result = lin.resource_dfn_modify(volume_name, {}, peer_slots=3)
         error_str = cls._get_error_str(result)
         if error_str:
             raise LinstorVolumeManagerError(
-                'Could not increase volume peer slots of {}: {}'
+                'Could not configure volume peer slots of {}: {}'
                 .format(volume_name, error_str)
             )
 
@@ -2581,7 +2581,7 @@ class LinstorVolumeManager(object):
             vlm_sizes=['{}B'.format(size)],
             definitions_only=True
         ), DATABASE_VOLUME_NAME, group_name)
-        cls._increase_volume_peer_slots(lin, DATABASE_VOLUME_NAME)
+        cls._configure_volume_peer_slots(lin, DATABASE_VOLUME_NAME)
 
         # Create real resources on the first nodes.
         resources = []
