@@ -124,6 +124,12 @@ def _is_open(session, args):
 
     driver = SR.driver(srType)
     sr = driver(cmd, sr_uuid)
+
+    # session_ref param is required to have a valid session when SR object is created.
+    # It's not the case here, so attach the current session object to make LinstorSR happy.
+    if srType == 'linstor':
+        sr.session = session
+
     vdi = sr.vdi(vdiUuid)
     tapdisk = blktap2.Tapdisk.find_by_path(vdi.path)
     util.SMlog("Tapdisk for %s: %s" % (vdi.path, tapdisk))
