@@ -2392,6 +2392,9 @@ class LinstorVDI(VDI.VDI):
         elif depth >= vhdutil.MAX_CHAIN_SIZE:
             raise xs_errors.XenError('SnapshotChainTooLong')
 
+        # Ensure we have a valid path if we don't have a local diskful.
+        self.sr._linstor.get_device_path(self.uuid)
+
         volume_path = self.path
         if not util.pathexists(volume_path):
             raise xs_errors.XenError(
