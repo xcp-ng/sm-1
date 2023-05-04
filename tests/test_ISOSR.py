@@ -80,7 +80,7 @@ class TestISOSR_overLocal(unittest.TestCase):
         isosr = self.create_isosr()
         with self.assertRaises(SR.SROSError) as ose:
             isosr.attach(None)
-        self.assertEquals(ose.exception.errno, 226)
+        self.assertEqual(ose.exception.errno, 226)
         self.assertFalse(pread.called)
 
 
