@@ -1588,14 +1588,13 @@ class LinstorVolumeManager(object):
 
     @classmethod
     def create_sr(
-        cls, group_name, node_names, ips, redundancy,
+        cls, group_name, ips, redundancy,
         thin_provisioning, auto_quorum,
         logger=default_logger.__func__
     ):
         """
         Create a new SR on the given nodes.
         :param str group_name: The SR group_name to use.
-        :param list[str] node_names: String list of nodes.
         :param set(str) ips: Node ips.
         :param int redundancy: How many copy of volumes should we store?
         :param bool thin_provisioning: Use thin or thick provisioning.
@@ -1609,7 +1608,6 @@ class LinstorVolumeManager(object):
             cls._start_controller(start=True)
             sr = cls._create_sr(
                 group_name,
-                node_names,
                 ips,
                 redundancy,
                 thin_provisioning,
@@ -1630,7 +1628,7 @@ class LinstorVolumeManager(object):
 
     @classmethod
     def _create_sr(
-        cls, group_name, node_names, ips, redundancy,
+        cls, group_name, ips, redundancy,
         thin_provisioning, auto_quorum,
         logger=default_logger.__func__
     ):
@@ -1639,9 +1637,8 @@ class LinstorVolumeManager(object):
 
         lin = cls._create_linstor_instance(uri, keep_uri_unmodified=True)
 
-        for node_name in node_names:
-            ip = ips[node_name]
-
+        node_names = ips.keys()
+        for node_name, ip in ips.iteritems():
             while True:
                 # Try to create node.
                 result = lin.node_create(
