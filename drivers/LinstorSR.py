@@ -100,8 +100,6 @@ CAPABILITIES = [
 
 CONFIGURATION = [
     ['group-name', 'LVM group name'],
-    ['hosts', 'host names to use'],
-    ['ips', 'ips to use (optional, defaults to management networks)'],
     ['redundancy', 'replication count'],
     ['provisioning', '"thin" or "thick" are accepted (optional, defaults to thin)'],
     ['monitor-db-quorum', 'disable controller when only one host is online (optional, defaults to true)']
@@ -353,7 +351,6 @@ def activate_lvm_group(group_name):
 # Usage example:
 # xe sr-create type=linstor name-label=linstor-sr
 # host-uuid=d2deba7a-c5ad-4de1-9a20-5c8df3343e93
-# device-config:hosts=node-linstor1,node-linstor2,node-linstor3
 # device-config:group-name=vg_loop device-config:redundancy=2
 
 
@@ -385,8 +382,6 @@ class LinstorSR(SR.SR):
             )
 
         # Check parameters.
-        if 'hosts' not in self.dconf or not self.dconf['hosts']:
-            raise xs_errors.XenError('LinstorConfigHostsMissing')
         if 'group-name' not in self.dconf or not self.dconf['group-name']:
             raise xs_errors.XenError('LinstorConfigGroupNameMissing')
         if 'redundancy' not in self.dconf or not self.dconf['redundancy']:
@@ -430,12 +425,6 @@ class LinstorSR(SR.SR):
         self.path = LinstorVolumeManager.DEV_ROOT_PATH
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
-
-        self._hosts = list(set(self.dconf['hosts'].split(',')))
-        if 'ips' not in self.dconf or not self.dconf['ips']:
-            self._ips = None
-        else:
-            self._ips = self.dconf['ips'].split(',')
 
         if self.cmd == 'sr_create':
             self._redundancy = int(self.dconf['redundancy']) or 1
@@ -647,7 +636,8 @@ class LinstorSR(SR.SR):
     def create(self, uuid, size):
         util.SMlog('LinstorSR.create for {}'.format(self.uuid))
 
-        if self._redundancy > len(self._hosts):
+        host_adresses = util.get_host_addresses(self.session)
+        if self._redundancy > len(host_adresses):
             raise xs_errors.XenError(
                 'LinstorSRCreate',
                 opterr='Redundancy greater than host count'
@@ -676,39 +666,17 @@ class LinstorSR(SR.SR):
             )
 
         online_hosts = util.get_online_hosts(self.session)
-        if len(online_hosts) < len(self._hosts):
+        if len(online_hosts) < len(host_adresses):
             raise xs_errors.XenError(
                 'LinstorSRCreate',
                 opterr='Not enough online hosts'
             )
 
         ips = {}
-        if not self._ips:
-            for host in online_hosts:
-                record = self.session.xenapi.host.get_record(host)
-                hostname = record['hostname']
-                if hostname in self._hosts:
-                    ips[hostname] = record['address']
-        elif len(self._ips) != len(self._hosts):
-            raise xs_errors.XenError(
-                'LinstorSRCreate',
-                opterr='ips must be equal to host count'
-            )
-        else:
-            for host in online_hosts:
-                record = self.session.xenapi.host.get_record(host)
-                hostname = record['hostname']
-                try:
-                    index = self._hosts.index(hostname)
-                    ips[hostname] = self._ips[index]
-                except ValueError as e:
-                    pass
-
-        if len(ips) != len(self._hosts):
-            raise xs_errors.XenError(
-                'LinstorSRCreate',
-                opterr='Not enough online hosts'
-            )
+        for host_ref in online_hosts:
+            record = self.session.xenapi.host.get_record(host_ref)
+            hostname = record['hostname']
+            ips[hostname] = record['address']
 
         # Ensure ports are opened and LINSTOR satellites
         # are activated. In the same time the drbd-reactor instances
@@ -720,7 +688,6 @@ class LinstorSR(SR.SR):
         try:
             self._linstor = LinstorVolumeManager.create_sr(
                 self._group_name,
-                self._hosts,
                 ips,
                 self._redundancy,
                 thin_provisioning=self._provisioning == 'thin',
