@@ -1065,8 +1065,8 @@ class LinstorSR(SR.SR):
     def _update_physical_size(self):
         # We use the size of the smallest disk, this is an approximation that
         # ensures the displayed physical size is reachable by the user.
-        self.physical_size = \
-            self._linstor.min_physical_size * len(self._hosts) / \
+        (min_physical_size, pool_count) = self._linstor.get_min_physical_size()
+        self.physical_size = min_physical_size * pool_count / \
             self._linstor.redundancy
 
         self.physical_utilisation = self._linstor.allocated_volume_size
