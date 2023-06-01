@@ -493,28 +493,6 @@ class LinstorVolumeManager(object):
         return self._compute_size('free_capacity')
 
     @property
-    def min_physical_size(self):
-        """
-        Give the minimum physical size of the SR.
-        I.e. the size of the smallest disk.
-        :return: The physical min size.
-        :rtype: int
-        """
-        size = None
-        for pool in self._get_storage_pools(force=True):
-            space = pool.free_space
-            if space:
-                current_size = space.total_capacity
-                if current_size < 0:
-                    raise LinstorVolumeManagerError(
-                        'Failed to get pool total_capacity attr of `{}`'
-                        .format(pool.node_name)
-                    )
-                if size is None or current_size < size:
-                    size = current_size
-        return (size or 0) * 1024
-
-    @property
     def allocated_volume_size(self):
         """
         Give the allocated size for all volumes. The place count is not
@@ -553,6 +531,29 @@ class LinstorVolumeManager(object):
                 total_size += size
 
         return total_size * 1024
+
+    def get_min_physical_size(self):
+        """
+        Give the minimum physical size of the SR.
+        I.e. the size of the smallest disk + the number of pools.
+        :return: The physical min size.
+        :rtype: tuple(int, int)
+        """
+        size = None
+        pool_count = 0
+        for pool in self._get_storage_pools(force=True):
+            space = pool.free_space
+            if space:
+                pool_count += 1
+                current_size = space.total_capacity
+                if current_size < 0:
+                    raise LinstorVolumeManagerError(
+                        'Failed to get pool total_capacity attr of `{}`'
+                        .format(pool.node_name)
+                    )
+                if size is None or current_size < size:
+                    size = current_size
+        return (pool_count, (size or 0) * 1024)
 
     @property
     def metadata(self):
