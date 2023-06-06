@@ -36,7 +36,6 @@ import json
 import xs_errors
 import XenAPI
 import scsiutil
-from linstorvolumemanager import log_drbd_openers
 from syslog import openlog, syslog
 from stat import * # S_ISBLK(), ...
 import nfs
@@ -50,6 +49,12 @@ import lvhdutil
 from xmlrpclib import ServerProxy, Transport
 from socket import socket, AF_UNIX, SOCK_STREAM
 from httplib import HTTP, HTTPConnection
+
+try:
+    from linstorvolumemanager import log_drbd_openers
+    LINSTOR_AVAILABLE = True
+except ImportError:
+    LINSTOR_AVAILABLE = False
 
 PLUGIN_TAP_PAUSE = "tapdisk-pause"
 
@@ -831,7 +836,7 @@ class Tapdisk(object):
                                     retry_open += 1
                                     time.sleep(1)
                                     continue
-                                if err == errno.EROFS:
+                                if LINSTOR_AVAILABLE and err == errno.EROFS:
                                     log_drbd_openers(path)
                             break
                     try:
