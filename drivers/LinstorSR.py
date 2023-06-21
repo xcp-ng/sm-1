@@ -523,28 +523,7 @@ class LinstorSR(SR.SR):
 
             if self.srcmd.cmd != 'sr_create' and self.srcmd.cmd != 'sr_detach':
                 try:
-                    controller_uri = get_controller_uri()
-
-                    self._journaler = LinstorJournaler(
-                        controller_uri, self._group_name, logger=util.SMlog
-                    )
-
-                    # Try to open SR if exists.
-                    # We can repair only if we are on the master AND if
-                    # we are trying to execute an exclusive operation.
-                    # Otherwise we could try to delete a VDI being created or
-                    # during a snapshot. An exclusive op is the guarantee that
-                    # the SR is locked.
-                    self._linstor = LinstorVolumeManager(
-                        controller_uri,
-                        self._group_name,
-                        repair=(
-                            self._is_master and
-                            self.srcmd.cmd in self.ops_exclusive
-                        ),
-                        logger=util.SMlog
-                    )
-                    self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
+                    self._reconnect()
                 except Exception as e:
                     raise xs_errors.XenError('SRUnavailable', opterr=str(e))
 
@@ -1518,12 +1497,25 @@ class LinstorSR(SR.SR):
     # --------------------------------------------------------------------------
 
     def _create_linstor_cache(self):
+        # TODO: use a nonlocal with python3.
+        class context:
+            reconnect = False
+
+        def create_cache():
+            try:
+                if context.reconnect:
+                    self._reconnect()
+                return self._linstor.get_volumes_with_info()
+            except Exception as e:
+                context.reconnect = True
+                raise e
+
         self._all_volume_metadata_cache = \
             self._linstor.get_volumes_with_metadata()
         self._all_volume_info_cache = util.retry(
-            self._linstor.get_volumes_with_info,
+            create_cache,
             maxretry=10,
-            period=1
+            period=3
         )
 
     def _destroy_linstor_cache(self):
@@ -1533,6 +1525,30 @@ class LinstorSR(SR.SR):
     # --------------------------------------------------------------------------
     # Misc.
     # --------------------------------------------------------------------------
+
+    def _reconnect(self):
+        controller_uri = get_controller_uri()
+
+        self._journaler = LinstorJournaler(
+            controller_uri, self._group_name, logger=util.SMlog
+        )
+
+        # Try to open SR if exists.
+        # We can repair only if we are on the master AND if
+        # we are trying to execute an exclusive operation.
+        # Otherwise we could try to delete a VDI being created or
+        # during a snapshot. An exclusive op is the guarantee that
+        # the SR is locked.
+        self._linstor = LinstorVolumeManager(
+            controller_uri,
+            self._group_name,
+            repair=(
+                self._is_master and
+                self.srcmd.cmd in self.ops_exclusive
+            ),
+            logger=util.SMlog
+        )
+        self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
 
     def _ensure_space_available(self, amount_needed):
         space_available = self._linstor.max_volume_size_allowed
