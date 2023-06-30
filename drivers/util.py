@@ -750,7 +750,7 @@ def get_this_host_address(session):
 def get_host_addresses(session):
     addresses = []
     hosts = session.xenapi.host.get_all_records()
-    for record in hosts.itervalues():
+    for record in hosts.values():
         addresses.append(record['address'])
     return addresses
 
