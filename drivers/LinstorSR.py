@@ -758,7 +758,7 @@ class LinstorSR(SR.SR):
         self._load_vdis()
         self._update_physical_size()
 
-        for vdi_uuid in self.vdis.keys():
+        for vdi_uuid in list(self.vdis.keys()):
             if self.vdis[vdi_uuid].deleted:
                 del self.vdis[vdi_uuid]
 
@@ -891,7 +891,7 @@ class LinstorSR(SR.SR):
         secondary_hosts = []
 
         hosts = self.session.xenapi.host.get_all_records()
-        for host_ref, host_rec in hosts.iteritems():
+        for host_ref, host_rec in hosts.items():
             hostname = host_rec['hostname']
             if controller_node_name == hostname:
                 controller_host = host_ref
@@ -1002,7 +1002,7 @@ class LinstorSR(SR.SR):
         # We use the size of the smallest disk, this is an approximation that
         # ensures the displayed physical size is reachable by the user.
         (min_physical_size, pool_count) = self._linstor.get_min_physical_size()
-        self.physical_size = min_physical_size * pool_count / \
+        self.physical_size = min_physical_size * pool_count // \
             self._linstor.redundancy
 
         self.physical_utilisation = self._linstor.allocated_volume_size
@@ -1242,7 +1242,7 @@ class LinstorSR(SR.SR):
 
         # 9. Remove all hidden leaf nodes to avoid introducing records that
         # will be GC'ed.
-        for vdi_uuid in self.vdis.keys():
+        for vdi_uuid in list(self.vdis.keys()):
             if vdi_uuid not in geneology and self.vdis[vdi_uuid].hidden:
                 util.SMlog(
                     'Scan found hidden leaf ({}), ignoring'.format(vdi_uuid)
@@ -1448,17 +1448,16 @@ class LinstorSR(SR.SR):
     # --------------------------------------------------------------------------
 
     def _create_linstor_cache(self):
-        # TODO: use a nonlocal with python3.
-        class context:
-            reconnect = False
+        reconnect = False
 
         def create_cache():
+            nonlocal reconnect
             try:
-                if context.reconnect:
+                if reconnect:
                     self._reconnect()
                 return self._linstor.get_volumes_with_info()
             except Exception as e:
-                context.reconnect = True
+                reconnect = True
                 raise e
 
         self._all_volume_metadata_cache = \
@@ -2627,7 +2626,7 @@ class LinstorVDI(VDI.VDI):
                 '--nbd-name',
                 volume_name,
                 '--urls',
-                ','.join(map(lambda ip: 'http://' + ip + ':' + port, ips)),
+                ','.join(['http://' + ip + ':' + port for ip in ips]),
                 '--device-size',
                 str(device_size)
             ]
