@@ -3335,7 +3335,7 @@ class LinstorSR(SR):
     def _checkSlaves(self, vdi):
         try:
             all_openers = self._linstor.get_volume_openers(vdi.uuid)
-            for openers in all_openers.itervalues():
+            for openers in all_openers.values():
                 for opener in openers.values():
                     if opener['process-name'] != 'tapdisk':
                         raise util.SMException(
