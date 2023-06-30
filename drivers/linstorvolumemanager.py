@@ -529,8 +529,8 @@ class LinstorVolumeManager(object):
                 current[volume.number] = max(current_size, current.get(volume.number) or 0)
 
         total_size = 0
-        for volumes in sizes.itervalues():
-            for size in volumes.itervalues():
+        for volumes in sizes.values():
+            for size in volumes.values():
                 total_size += size
 
         return total_size * 1024
@@ -1710,8 +1710,8 @@ class LinstorVolumeManager(object):
 
         lin = cls._create_linstor_instance(uri, keep_uri_unmodified=True)
 
-        node_names = ips.keys()
-        for node_name, ip in ips.iteritems():
+        node_names = list(ips.keys())
+        for node_name, ip in ips.items():
             while True:
                 # Try to create node.
                 result = lin.node_create(
@@ -2271,13 +2271,13 @@ class LinstorVolumeManager(object):
     def _request_device_path(self, volume_uuid, volume_name, activate=False):
         node_name = socket.gethostname()
 
-        resources = filter(
+        resource = next(filter(
             lambda resource: resource.node_name == node_name and
             resource.name == volume_name,
             self._get_resource_cache().resources
-        )
+        ), None)
 
-        if not resources:
+        if not resource:
             if activate:
                 self._mark_resource_cache_as_dirty()
                 self._activate_device_path(
@@ -2289,7 +2289,7 @@ class LinstorVolumeManager(object):
                 .format(volume_uuid)
             )
         # Contains a path of the /dev/drbd<id> form.
-        return resources[0].volumes[0].device_path
+        return resource.volumes[0].device_path
 
     def _destroy_resource(self, resource_name, force=False):
         result = self._linstor.resource_dfn_delete(resource_name)
@@ -2307,7 +2307,7 @@ class LinstorVolumeManager(object):
 
         # If force is used, ensure there is no opener.
         all_openers = get_all_volume_openers(resource_name, '0')
-        for openers in all_openers.itervalues():
+        for openers in all_openers.values():
             if openers:
                 self._mark_resource_cache_as_dirty()
                 raise LinstorVolumeManagerError(
@@ -2571,18 +2571,18 @@ class LinstorVolumeManager(object):
         node_name = socket.gethostname()
 
         try:
-            resources = filter(
+            resource = next(filter(
                 lambda resource: resource.node_name == node_name and
                 resource.name == DATABASE_VOLUME_NAME,
                 lin.resource_list_raise().resources
-            )
+            ), None)
         except Exception as e:
             raise LinstorVolumeManagerError(
                 'Unable to get resources during database creation: {}'
                 .format(e)
             )
 
-        if not resources:
+        if not resource:
             if activate:
                 cls._activate_device_path(
                     lin, node_name, DATABASE_VOLUME_NAME
@@ -2595,7 +2595,7 @@ class LinstorVolumeManager(object):
                 .format(DATABASE_PATH)
             )
         # Contains a path of the /dev/drbd<id> form.
-        return resources[0].volumes[0].device_path
+        return resource.volumes[0].device_path
 
     @classmethod
     def _create_database_volume(
@@ -2630,7 +2630,7 @@ class LinstorVolumeManager(object):
             )
 
         # Ensure we have a correct list of storage pools.
-        nodes_with_pool = map(lambda pool: pool.node_name, pools.storage_pools)
+        nodes_with_pool = [pool.node_name for pool in pools.storage_pools]
         assert nodes_with_pool  # We must have at least one storage pool!
         for node_name in nodes_with_pool:
             assert node_name in node_names
@@ -2874,7 +2874,7 @@ class LinstorVolumeManager(object):
     def _move_files(cls, src_dir, dest_dir, force=False):
         def listdir(dir):
             ignored = ['lost+found']
-            return filter(lambda file: file not in ignored, os.listdir(dir))
+            return [file for file in os.listdir(dir) if file not in ignored]
 
         try:
             if not force:

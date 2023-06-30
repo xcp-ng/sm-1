@@ -27,9 +27,6 @@ import xs_errors
 
 MANAGER_PLUGIN = 'linstor-manager'
 
-# EMEDIUMTYPE constant (124) is not available in python2.
-EMEDIUMTYPE = 124
-
 
 def call_remote_method(session, host_ref, method, device_path, args):
     try:
@@ -107,7 +104,7 @@ def linstorhostcall(local_method, remote_method):
                 'groupName': self._linstor.group_name
             }
             remote_args.update(**kwargs)
-            remote_args = {str(key): str(value) for key, value in remote_args.iteritems()}
+            remote_args = {str(key): str(value) for key, value in remote_args.items()}
 
             try:
                 def remote_call():
@@ -430,7 +427,7 @@ class LinstorVhdUtil:
                 try:
                     return local_method(device_path, *args, **kwargs)
                 except util.CommandException as e:
-                    if e.code == errno.EROFS or e.code == EMEDIUMTYPE:
+                    if e.code == errno.EROFS or e.code == errno.EMEDIUMTYPE:
                         raise ErofsLinstorCallException(e)  # Break retry calls.
                     if e.code == errno.ENOENT:
                         raise NoPathLinstorCallException(e)
@@ -482,7 +479,7 @@ class LinstorVhdUtil:
             'groupName': self._linstor.group_name
         }
         remote_args.update(**kwargs)
-        remote_args = {str(key): str(value) for key, value in remote_args.iteritems()}
+        remote_args = {str(key): str(value) for key, value in remote_args.items()}
 
         volume_uuid = self._linstor.get_volume_uuid_from_device_path(
             device_path
@@ -505,12 +502,12 @@ class LinstorVhdUtil:
                 )
 
             no_host_found = True
-            for hostname, openers in all_openers.iteritems():
+            for hostname, openers in all_openers.items():
                 if not openers:
                     continue
 
                 try:
-                    host_ref = next(ref for ref, rec in hosts.iteritems() if rec['hostname'] == hostname)
+                    host_ref = next(ref for ref, rec in hosts.items() if rec['hostname'] == hostname)
                 except StopIteration:
                     continue
 
