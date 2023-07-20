@@ -555,7 +555,7 @@ def has_controller_running(session, args):
 def add_host(session, args):
     group_name = args['groupName']
 
-    # 1. Find SR and PBDs.
+    # 1. Find all LINSTOR SRs and PBDs.
     srs = dict()
     for sr_ref, sr in session.xenapi.SR.get_all_records().items():
         if sr.get('type') == 'linstor':
@@ -597,7 +597,6 @@ def add_host(session, args):
     node_name = socket.gethostname()
     has_node = linstor.has_node(node_name)
 
-    pbd_id = 0
     new_pbd_ref = None
 
     try:
@@ -610,66 +609,30 @@ def add_host(session, args):
         if not has_node:
             linstor.create_node(node_name, util.get_this_host_address(session))
 
-        # 6. Recreate PBDs.
-        # Use the redundancy given by Linstor instead of smapi config.
-        redundancy = linstor.redundancy
-        default_device_config = None
+        # 6. Try to create PBD.
         this_host = util.get_this_host_ref(session)
         create_new_pbd = True
 
         assert pbds
-        pbds = pbds.items()
-        for pbd_ref, pbd in pbds:
+        for pbd in pbds.values():
+            if pbd['host'] == this_host:
+                create_new_pbd = False
+                break
+
             device_config = pbd['device_config']
-
-            hosts = filter(
-                lambda host: len(host.strip()),
-                device_config.get('hosts', []).split(',')
-            )
-            hosts.append(node_name)
-            hosts = ','.join(list(set(hosts)))
-
             # Should be the same on all hosts.
             provisioning = device_config['provisioning']
-
-            if not default_device_config:
-                default_device_config = {
-                    'group-name': group_name,
-                    'redundancy': redundancy,
-                    'hosts': hosts,
-                    'provisioning': provisioning
-                }
-
-            if pbd['currently_attached']:
-                session.xenapi.PBD.unplug(pbd_ref)
-            session.xenapi.PBD.destroy(pbd_ref)
-            pbd_id += 1
-
-            host = pbd['host']
-            if host == this_host:
-                create_new_pbd = False
-
-            pbd_ref = session.xenapi.PBD.create({
-                'host': host,
-                'SR': sr_ref,
-                'device_config': {
-                    'group-name': group_name,
-                    'redundancy': redundancy,
-                    'hosts': hosts,
-                    'provisioning': provisioning
-                }
-            })
-            try:
-                session.xenapi.PBD.plug(pbd_ref)
-            except Exception as e:
-                util.SMlog('Failed to replug PBD: {}'.format(e))
 
         # 7. Create new PBD.
         if create_new_pbd:
             new_pbd_ref = session.xenapi.PBD.create({
                 'host': this_host,
                 'SR': sr_ref,
-                'device_config': default_device_config
+                'device_config': {
+                    'group-name': group_name,
+                    'redundancy': linstor.redundancy,
+                    'provisioning': provisioning
+                }
             })
             try:
                 session.xenapi.PBD.plug(new_pbd_ref)
@@ -682,38 +645,6 @@ def add_host(session, args):
         if stop_services:
             try:
                 linstor.destroy_node(node_name)
-            except Exception:
-                pass
-
-        for pbd_ref, pbd in pbds[:pbd_id]:
-            try:
-                session.xenapi.PBD.unplug(pbd_ref)
-            except Exception:
-                pass
-
-            try:
-                session.xenapi.PBD.destroy(pbd_ref)
-            except Exception:
-                pass
-
-            try:
-                device_config = pbd['device_config']
-                session.xenapi.PBD.create({
-                    'host': host,
-                    'SR': sr_ref,
-                    'device_config': {
-                        'group-name': group_name,
-                        'redundancy': redundancy,
-                        'hosts': device_config['hosts'],
-                        'provisioning': device_config['provisioning']
-                    }
-                })
-            except Exception as pbd_error:
-                util.SMlog('Failed to recreate PBD: {}'.format(pbd_error))
-                pass
-
-            try:
-                session.xenapi.PBD.plug(pbd_ref)
             except Exception:
                 pass
 
@@ -743,7 +674,7 @@ def add_host(session, args):
 def remove_host(session, args):
     group_name = args['groupName']
 
-    # 1. Find SRs and PBDs.
+    # 1. Find all LINSTOR SRs and PBDs.
     srs = dict()
     for sr_ref, sr in session.xenapi.SR.get_all_records().items():
         if sr.get('type') == 'linstor':
@@ -772,45 +703,16 @@ def remove_host(session, args):
         if linstor.has_node(node_name):
             raise Exception('Failed to remove node! Unknown error.')
 
-    redundancy = linstor.redundancy
     this_host = util.get_this_host_ref(session)
 
-    # 3. Update PBDs.
+    # 3. Remove PBD.
     for pbd_ref, pbd in pbds.items():
         host = pbd['host']
         if host == this_host:
             if pbd['currently_attached']:
                 session.xenapi.PBD.unplug(pbd_ref)
             session.xenapi.PBD.destroy(pbd_ref)
-            continue
-
-        device_config = pbd['device_config']
-        hosts = device_config.get('hosts', []).split(',')
-        try:
-            hosts.remove(node_name)
-        except Exception as e:
-            continue
-        hosts = ','.join(list(set(hosts)))
-
-        if pbd['currently_attached']:
-            session.xenapi.PBD.unplug(pbd_ref)
-        session.xenapi.PBD.destroy(pbd_ref)
-
-        pbd_ref = session.xenapi.PBD.create({
-            'host': host,
-            'SR': pbd['SR'],
-            'device_config': {
-                'group-name': group_name,
-                'redundancy': redundancy,
-                'hosts': hosts,
-                'provisioning': device_config['provisioning']
-            }
-        })
-
-        try:
-            session.xenapi.PBD.plug(pbd_ref)
-        except Exception as e:
-            util.SMlog('Failed to replug PBD: {}'.format(e))
+            break
 
     # 3. Stop services.
     try:
