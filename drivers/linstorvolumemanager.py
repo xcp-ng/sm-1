@@ -781,6 +781,28 @@ class LinstorVolumeManager(object):
         if waiting:
             self._logger('No volume locked now!')
 
+    def remove_volume_if_diskless(self, volume_uuid):
+        """
+        Remove disless path from local node.
+        :param str volume_uuid: The volume uuid to remove.
+        """
+
+        self._ensure_volume_exists(volume_uuid)
+
+        volume_properties = self._get_volume_properties(volume_uuid)
+        volume_name = volume_properties.get(self.PROP_VOLUME_NAME)
+
+        node_name = socket.gethostname()
+        result = self._linstor.resource_delete_if_diskless(
+            node_name=node_name, rsc_name=volume_name
+        )
+        if not linstor.Linstor.all_api_responses_no_error(result):
+            raise LinstorVolumeManagerError(
+                'Unable to delete diskless path of `{}` on node `{}`: {}'
+                .format(volume_name, node_name, ', '.join(
+                    [str(x) for x in result]))
+                )
+
     def introduce_volume(self, volume_uuid):
         pass  # TODO: Implement me.
 
@@ -2459,9 +2481,7 @@ class LinstorVolumeManager(object):
 
     @classmethod
     def _activate_device_path(cls, lin, node_name, volume_name):
-        result = lin.resource_create([
-            linstor.ResourceData(node_name, volume_name, diskless=True)
-        ])
+        result = lin.resource_make_available(node_name, volume_name, diskful=True)
         if linstor.Linstor.all_api_responses_no_error(result):
             return
         errors = linstor.Linstor.filter_api_call_response_errors(result)
