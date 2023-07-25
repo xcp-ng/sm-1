@@ -785,6 +785,29 @@ class LinstorVolumeManager(object):
         if waiting:
             self._logger('No volume locked now!')
 
+    def make_volume_available(self, volume_uuid):
+        node_name = socket.gethostname()
+        volume_properties = self._get_volume_properties(volume_uuid)
+        volume_name = volume_properties.get(self.PROP_VOLUME_NAME)
+        replies = self._linstor.resource_make_available(node_name=node_name, rsc_name=volume_name)
+        if not linstor.Linstor.all_api_responses_no_error(replies):
+            raise LinstorVolumeManagerError(
+                'volume `{}` could not made available on `{}`'
+                .format(volume_uuid, node_name),
+            )
+
+    def remove_volume_if_diskless(self, volume_uuid):
+        node_name = socket.gethostname()
+        self._ensure_volume_exists(volume_uuid)
+        volume_properties = self._get_volume_properties(volume_uuid)
+        volume_name = volume_properties.get(self.PROP_VOLUME_NAME)
+        replies = self._linstor.resource_delete_if_diskless(node_name=node_name, rsc_name=volume_name)
+        if not linstor.Linstor.all_api_responses_no_error(replies):
+            raise LinstorVolumeManagerError(
+                'volume `{}` could not be deleted on `{}`'
+                .format(volume_uuid, node_name),
+            )
+
     def introduce_volume(self, volume_uuid):
         pass  # TODO: Implement me.
 
@@ -1750,7 +1773,7 @@ class LinstorVolumeManager(object):
                 name=group_name,
                 place_count=redundancy,
                 storage_pool=group_name,
-                diskless_on_remaining=True
+                diskless_on_remaining=False
             )
             error_str = cls._get_error_str(result)
             if error_str:
@@ -2484,9 +2507,7 @@ class LinstorVolumeManager(object):
 
     @classmethod
     def _activate_device_path(cls, lin, node_name, volume_name):
-        result = lin.resource_create([
-            linstor.ResourceData(node_name, volume_name, diskless=True)
-        ])
+        result = lin.resource_make_available(node_name, volume_name, diskful=True)
         if linstor.Linstor.all_api_responses_no_error(result):
             return
         errors = linstor.Linstor.filter_api_call_response_errors(result)

@@ -1922,6 +1922,8 @@ class LinstorVDI(VDI.VDI):
                     .format(e)
                 )
 
+        self._linstor.remove_volume_if_diskless(vdi_uuid)
+
     def resize(self, sr_uuid, vdi_uuid, size):
         util.SMlog('LinstorVDI.resize for {}'.format(self.uuid))
         if not self.sr._is_master:
