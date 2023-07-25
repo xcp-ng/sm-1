@@ -1943,6 +1943,26 @@ class LinstorVDI(VDI.VDI):
                     .format(e)
                 )
 
+        # We remove only on slaves because the volume can be used by the GC.
+        if self.sr._is_master:
+            return
+
+        while vdi_uuid:
+            try:
+                path = self._linstor.build_device_path(self._linstor.get_volume_name(vdi_uuid))
+                parent_vdi_uuid = self.sr._vhdutil.get_vhd_info(vdi_uuid).parentUuid
+            except Exception:
+                break
+
+            if util.pathexists(path):
+                try:
+                    self._linstor.remove_volume_if_diskless(vdi_uuid)
+                except Exception as e:
+                    # Ensure we can always detach properly.
+                    # I don't want to corrupt the XAPI info.
+                    util.SMlog('Failed to clean VDI {} during detach: {}'.format(vdi_uuid, e))
+            vdi_uuid = parent_vdi_uuid
+
     def resize(self, sr_uuid, vdi_uuid, size):
         util.SMlog('LinstorVDI.resize for {}'.format(self.uuid))
         if not self.sr._is_master:
