@@ -1394,11 +1394,6 @@ class LinstorVDI(VDI):
 
         self.fileName = self.sr._linstor.get_volume_name(self.uuid)
         self.path = self.sr._linstor.build_device_path(self.fileName)
-        if not util.pathexists(self.path):
-            raise util.SMException(
-                '{} of {} not found'
-                .format(self.fileName, self.uuid)
-            )
 
         if not info:
             try:
@@ -3020,8 +3015,6 @@ class LinstorSR(SR):
             parent.sizeVirt + meta_overhead + bitmap_overhead
         )
         volume_size = self._linstor.get_volume_size(parent.uuid)
-
-        assert virtual_size >= volume_size
         return virtual_size - volume_size
 
     def _hasValidDevicePath(self, uuid):
@@ -3041,6 +3034,11 @@ class LinstorSR(SR):
             return super(LinstorSR, self)._liveLeafCoalesce(vdi)
         finally:
             self.unlock()
+
+    def _prepareCoalesceLeaf(self, vdi):
+        # Move diskless path if necessary. We must have an access
+        # to modify locally the volume.
+        self._linstor.get_device_path(vdi.uuid)
 
     def _handleInterruptedCoalesceLeaf(self):
         entries = self.journaler.get_all(VDI.JRN_LEAF)
