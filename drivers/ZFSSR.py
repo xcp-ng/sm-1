@@ -23,7 +23,6 @@ import util
 import xs_errors
 
 CAPABILITIES = [
-    'SR_PROBE',
     'SR_UPDATE',
     'VDI_CREATE',
     'VDI_DELETE',
