@@ -142,14 +142,6 @@ def compute_volume_size(virtual_size, image_type):
     return LinstorVolumeManager.round_up_volume_size(virtual_size)
 
 
-def try_lock(lock):
-    for i in range(20):
-        if lock.acquireNoblock():
-            return
-        time.sleep(1)
-    raise util.SRBusyException()
-
-
 def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
     volume_metadata = linstor.get_volume_metadata(vdi_uuid)
     image_type = volume_metadata.get(VDI_TYPE_TAG)
@@ -158,7 +150,7 @@ def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
 
     lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
     try:
-        try_lock(lock)
+        lock.acquire()
 
         device_path = linstor.get_device_path(vdi_uuid)
 
@@ -191,7 +183,7 @@ def detach_thin(session, linstor, sr_uuid, vdi_uuid):
 
     lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
     try:
-        try_lock(lock)
+        lock.acquire()
 
         vdi_ref = session.xenapi.VDI.get_by_uuid(vdi_uuid)
         vbds = session.xenapi.VBD.get_all_records_where(
