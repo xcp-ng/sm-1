@@ -649,6 +649,12 @@ class LinstorSR(SR.SR):
             hostname = record['hostname']
             ips[hostname] = record['address']
 
+        if len(ips) != len(online_hosts):
+            raise xs_errors.XenError(
+                'LinstorSRCreate',
+                opterr='Multiple hosts with same hostname'
+            )
+
         # Ensure ports are opened and LINSTOR satellites
         # are activated. In the same time the drbd-reactor instances
         # must be stopped.
