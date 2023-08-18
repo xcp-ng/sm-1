@@ -461,6 +461,9 @@ class LinstorSR(SR.SR):
                             logger=util.SMlog,
                             attempt_count=attempt_count
                         )
+                        # Only required if we are attaching from config using a non-special VDI.
+                        # I.e. not an HA volume.
+                        self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
 
                     controller_uri = get_controller_uri()
                     if controller_uri:
