@@ -175,7 +175,7 @@ def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
         lock.release()
 
 
-def detach_thin(session, linstor, sr_uuid, vdi_uuid):
+def detach_thin_impl(session, linstor, sr_uuid, vdi_uuid):
     volume_metadata = linstor.get_volume_metadata(vdi_uuid)
     image_type = volume_metadata.get(VDI_TYPE_TAG)
     if image_type == vhdutil.VDI_TYPE_RAW:
@@ -185,21 +185,26 @@ def detach_thin(session, linstor, sr_uuid, vdi_uuid):
     try:
         lock.acquire()
 
-        vdi_ref = session.xenapi.VDI.get_by_uuid(vdi_uuid)
-        vbds = session.xenapi.VBD.get_all_records_where(
-            'field "VDI" = "{}"'.format(vdi_ref)
-        )
+        def check_vbd_count():
+            vdi_ref = session.xenapi.VDI.get_by_uuid(vdi_uuid)
+            vbds = session.xenapi.VBD.get_all_records_where(
+                'field "VDI" = "{}"'.format(vdi_ref)
+            )
 
-        num_plugged = 0
-        for vbd_rec in vbds.values():
-            if vbd_rec['currently_attached']:
-                num_plugged += 1
-                if num_plugged > 1:
-                    raise xs_errors.XenError(
-                        'VDIUnavailable',
-                        opterr='Cannot deflate VDI {}, already used by '
-                        'at least 2 VBDs'.format(vdi_uuid)
-                    )
+            num_plugged = 0
+            for vbd_rec in vbds.values():
+                if vbd_rec['currently_attached']:
+                    num_plugged += 1
+                    if num_plugged > 1:
+                        raise xs_errors.XenError(
+                            'VDIUnavailable',
+                            opterr='Cannot deflate VDI {}, already used by '
+                            'at least 2 VBDs'.format(vdi_uuid)
+                        )
+
+        # We can have multiple VBDs attached to a VDI during a VM-template clone.
+        # So we use a timeout to ensure that we can detach the volume properly.
+        util.retry(check_vbd_count, maxretry=10, period=1)
 
         device_path = linstor.get_device_path(vdi_uuid)
         new_volume_size = LinstorVolumeManager.round_up_volume_size(
@@ -215,6 +220,16 @@ def detach_thin(session, linstor, sr_uuid, vdi_uuid):
         )
     finally:
         lock.release()
+
+
+def detach_thin(session, linstor, sr_uuid, vdi_uuid):
+    # This function must always return without errors.
+    # Otherwise it could cause errors in the XAPI regarding the state of the VDI.
+    # It's why we use this `try` block.
+    try:
+        detach_thin_impl(session, linstor, sr_uuid, vdi_uuid)
+    except Exception as e:
+        util.SMlog('Failed to detach properly VDI {}: {}'.format(vdi_uuid, e))
 
 
 def inflate(journaler, linstor, vdi_uuid, vdi_path, new_size, old_size):
