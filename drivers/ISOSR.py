@@ -325,10 +325,18 @@ class ISOSR(SR.SR):
                 # For NFS, do a soft mount with tcp as protocol. Since ISO SR is
                 # going to be r-only, a failure in nfs link can be reported back
                 # to the process waiting.
-                serv_path = location.split(':')
+                serv_path = []
+                transport = 'tcp'
+                if location.startswith('['):
+                    transport = 'tcp6'
+                    ip6 = location[1:location.index(']')]
+                    path = location[location.index(']') + 2:]
+                    serv_path = [ip6, path]
+                else:
+                    serv_path = location.split(':')
                 util._testHost(serv_path[0], NFSPORT, 'NFSTarget')
                 nfs.soft_mount(self.mountpoint, serv_path[0], serv_path[1],
-                               'tcp', useroptions=options,
+                               transport, useroptions=options,
                                nfsversion=self.nfsversion)
             else:
                 smb3_fail_reason = None
