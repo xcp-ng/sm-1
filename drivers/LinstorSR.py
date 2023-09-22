@@ -779,9 +779,8 @@ class LinstorSR(SR.SR):
 
         # Update the database before the restart of the GC to avoid
         # bad sync in the process if new VDIs have been introduced.
-        ret = super(LinstorSR, self).scan(self.uuid)
+        super(LinstorSR, self).scan(self.uuid)
         self._kick_gc()
-        return ret
 
     @_locked_load
     def vdi(self, uuid):
