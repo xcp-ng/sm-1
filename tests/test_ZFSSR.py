@@ -1,8 +1,9 @@
+from unittest import mock
+import unittest
+
 import FileSR
-import mock
 import os
 import SR
-import unittest
 import ZFSSR
 
 
