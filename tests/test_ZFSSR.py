@@ -1,10 +1,10 @@
+from unittest import mock
+import unittest
 import uuid
 
 import FileSR
-import mock
 import os
 import SR
-import unittest
 import ZFSSR
 
 
