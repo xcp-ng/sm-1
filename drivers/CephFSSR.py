@@ -20,6 +20,7 @@
 
 import errno
 import os
+import socket
 import syslog as _syslog
 import xmlrpc.client
 from syslog import syslog
@@ -141,7 +142,17 @@ class CephFSSR(FileSR.FileSR):
                 options.append(self.dconf['options'])
             if options:
                 options = ['-o', ','.join(options)]
-            command = ["mount", '-t', 'ceph', self.remoteserver+":"+self.remoteport+":"+self.remotepath, mountpoint] + options
+            acc = []
+            for server in self.remoteserver.split(','):
+                try:
+                    addr_info = socket.getaddrinfo(server, 0)[0]
+                except Exception:
+                    continue
+
+                acc.append('[' + server + ']' if addr_info[0] == socket.AF_INET6 else server)
+
+            remoteserver = ','.join(acc)
+            command = ["mount", '-t', 'ceph', remoteserver + ":" + self.remoteport + ":" + self.remotepath, mountpoint] + options
             util.ioretry(lambda: util.pread(command), errlist=[errno.EPIPE, errno.EIO], maxretry=2, nofail=True)
         except util.CommandException as inst:
             syslog(_syslog.LOG_ERR, 'CephFS mount failed ' + inst.__str__())
