@@ -614,8 +614,7 @@ class LinstorVolumeManager(object):
         return volume_uuid in self._volumes
 
     def create_volume(
-        self, volume_uuid, size, persistent=True, volume_name=None,
-        no_diskless=False
+        self, volume_uuid, size, persistent=True, volume_name=None
     ):
         """
         Create a new volume on the SR.
@@ -625,8 +624,6 @@ class LinstorVolumeManager(object):
         on the next constructor call LinstorSR(...).
         :param str volume_name: If set, this name is used in the LINSTOR
         database instead of a generated name.
-        :param bool no_diskless: If set, the default group redundancy is not
-        used, instead the volume is created on all nodes.
         :return: The current device path of the volume.
         :rtype: str
         """
@@ -635,8 +632,7 @@ class LinstorVolumeManager(object):
         if not volume_name:
             volume_name = self.build_volume_name(util.gen_uuid())
         volume_properties = self._create_volume_with_properties(
-            volume_uuid, volume_name, size, place_resources=True,
-            no_diskless=no_diskless
+            volume_uuid, volume_name, size, place_resources=True
         )
 
         # Volume created! Now try to find the device path.
@@ -1295,8 +1291,7 @@ class LinstorVolumeManager(object):
             # Note: placed outside try/except block because we create only definition first.
             # There is no reason to call `clean` before the real resource creation.
             volume_properties = self._create_volume_with_properties(
-                clone_uuid, clone_volume_name, size,
-                place_resources=False
+                clone_uuid, clone_volume_name, size, place_resources=False
             )
 
             # After this point, `clean` can be called for any fail because the clone UUID
@@ -1758,7 +1753,7 @@ class LinstorVolumeManager(object):
                 name=group_name,
                 place_count=redundancy,
                 storage_pool=group_name,
-                diskless_on_remaining=True
+                diskless_on_remaining=False
             )
             error_str = cls._get_error_str(result)
             if error_str:
@@ -2062,27 +2057,10 @@ class LinstorVolumeManager(object):
         return self._storage_pools
 
     def _create_volume(
-        self, volume_uuid, volume_name, size, place_resources,
-        no_diskless=False
+        self, volume_uuid, volume_name, size, place_resources
     ):
-        if no_diskless and not place_resources:
-            raise LinstorVolumeManagerError(
-                'Could not create volume `{}` from SR `{}`: it\'s impossible '
-                .format(volume_uuid, self._group_name) +
-                'to force no diskless without placing resources'
-            )
-
         size = self.round_up_volume_size(size)
         self._mark_resource_cache_as_dirty()
-
-        resources = []
-        if no_diskless:
-            for node_name in self._get_node_names():
-                resources.append(linstor.ResourceData(
-                    node_name=node_name,
-                    rsc_name=volume_name,
-                    storage_pool=self._group_name
-                ))
 
         def create_definition():
             self._check_volume_creation_errors(
@@ -2109,23 +2087,13 @@ class LinstorVolumeManager(object):
         def create():
             try:
                 create_definition()
-                if no_diskless:
-                    # Create a physical resource on each node.
-                    result = self._linstor.resource_create(resources)
-                    error_str = self._get_error_str(result)
-                    if error_str:
-                        raise LinstorVolumeManagerError(
-                            'Could not create volume `{}` from SR `{}`: {}'.format(
-                                volume_uuid, self._group_name, error_str
-                            )
-                        )
-                elif place_resources:
+                if place_resources:
                     # Basic case when we use the default redundancy of the group.
                     self._check_volume_creation_errors(
                         self._linstor.resource_auto_place(
                             rsc_name=volume_name,
                             place_count=self._redundancy,
-                            diskless_on_remaining=not no_diskless
+                            diskless_on_remaining=False
                         ),
                         volume_uuid,
                         self._group_name
@@ -2141,8 +2109,7 @@ class LinstorVolumeManager(object):
         util.retry(create, maxretry=5)
 
     def _create_volume_with_properties(
-        self, volume_uuid, volume_name, size, place_resources,
-        no_diskless=False
+        self, volume_uuid, volume_name, size, place_resources
     ):
         if self.check_volume_exists(volume_uuid):
             raise LinstorVolumeManagerError(
@@ -2171,7 +2138,7 @@ class LinstorVolumeManager(object):
             volume_properties[self.PROP_VOLUME_NAME] = volume_name
 
             self._create_volume(
-                volume_uuid, volume_name, size, place_resources, no_diskless
+                volume_uuid, volume_name, size, place_resources
             )
 
             assert volume_properties.namespace == \
