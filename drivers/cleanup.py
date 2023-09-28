@@ -2995,11 +2995,11 @@ class LinstorSR(SR):
                         not list(volumes_metadata[vdi_uuid].items()):
                     continue  # Ignore it, probably deleted.
 
-                vdi_type = volumes_metadata[vdi_uuid][VDI_TYPE_TAG]
-                if vdi_type == vhdutil.VDI_TYPE_VHD:
-                    info = self._vhdutil.get_vhd_info(vdi_uuid)
-                else:
+                vdi_type = volumes_metadata[vdi_uuid].get(VDI_TYPE_TAG)
+                if vdi_type == vhdutil.VDI_TYPE_RAW:
                     info = None
+                else:
+                    info = self._vhdutil.get_vhd_info(vdi_uuid)
             except Exception as e:
                 Util.log(
                     ' [VDI {}: failed to load VDI info]: {}'
