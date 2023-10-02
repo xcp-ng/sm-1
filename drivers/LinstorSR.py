@@ -148,31 +148,25 @@ def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
     if image_type == vhdutil.VDI_TYPE_RAW:
         return
 
-    lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
-    try:
-        lock.acquire()
+    device_path = linstor.get_device_path(vdi_uuid)
 
-        device_path = linstor.get_device_path(vdi_uuid)
+    # If the virtual VHD size is lower than the LINSTOR volume size,
+    # there is nothing to do.
+    vhd_size = compute_volume_size(
+        # TODO: Replace pylint comment with this feature when possible:
+        # https://github.com/PyCQA/pylint/pull/2926
+        LinstorVhdUtil(session, linstor).get_size_virt(vdi_uuid),  # pylint: disable = E1120
+        image_type
+    )
 
-        # If the virtual VHD size is lower than the LINSTOR volume size,
-        # there is nothing to do.
-        vhd_size = compute_volume_size(
-            # TODO: Replace pylint comment with this feature when possible:
-            # https://github.com/PyCQA/pylint/pull/2926
-            LinstorVhdUtil(session, linstor).get_size_virt(vdi_uuid),  # pylint: disable = E1120
-            image_type
+    volume_info = linstor.get_volume_info(vdi_uuid)
+    volume_size = volume_info.virtual_size
+
+    if vhd_size > volume_size:
+        inflate(
+            journaler, linstor, vdi_uuid, device_path,
+            vhd_size, volume_size
         )
-
-        volume_info = linstor.get_volume_info(vdi_uuid)
-        volume_size = volume_info.virtual_size
-
-        if vhd_size > volume_size:
-            inflate(
-                journaler, linstor, vdi_uuid, device_path,
-                vhd_size, volume_size
-            )
-    finally:
-        lock.release()
 
 
 def detach_thin_impl(session, linstor, sr_uuid, vdi_uuid):
@@ -181,45 +175,39 @@ def detach_thin_impl(session, linstor, sr_uuid, vdi_uuid):
     if image_type == vhdutil.VDI_TYPE_RAW:
         return
 
-    lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
-    try:
-        lock.acquire()
-
-        def check_vbd_count():
-            vdi_ref = session.xenapi.VDI.get_by_uuid(vdi_uuid)
-            vbds = session.xenapi.VBD.get_all_records_where(
-                'field "VDI" = "{}"'.format(vdi_ref)
-            )
-
-            num_plugged = 0
-            for vbd_rec in vbds.values():
-                if vbd_rec['currently_attached']:
-                    num_plugged += 1
-                    if num_plugged > 1:
-                        raise xs_errors.XenError(
-                            'VDIUnavailable',
-                            opterr='Cannot deflate VDI {}, already used by '
-                            'at least 2 VBDs'.format(vdi_uuid)
-                        )
-
-        # We can have multiple VBDs attached to a VDI during a VM-template clone.
-        # So we use a timeout to ensure that we can detach the volume properly.
-        util.retry(check_vbd_count, maxretry=10, period=1)
-
-        device_path = linstor.get_device_path(vdi_uuid)
-        new_volume_size = LinstorVolumeManager.round_up_volume_size(
-            # TODO: Replace pylint comment with this feature when possible:
-            # https://github.com/PyCQA/pylint/pull/2926
-            LinstorVhdUtil(session, linstor).get_size_phys(vdi_uuid)  # pylint: disable = E1120
+    def check_vbd_count():
+        vdi_ref = session.xenapi.VDI.get_by_uuid(vdi_uuid)
+        vbds = session.xenapi.VBD.get_all_records_where(
+            'field "VDI" = "{}"'.format(vdi_ref)
         )
 
-        volume_info = linstor.get_volume_info(vdi_uuid)
-        old_volume_size = volume_info.virtual_size
-        deflate(
-            linstor, vdi_uuid, device_path, new_volume_size, old_volume_size
-        )
-    finally:
-        lock.release()
+        num_plugged = 0
+        for vbd_rec in vbds.values():
+            if vbd_rec['currently_attached']:
+                num_plugged += 1
+                if num_plugged > 1:
+                    raise xs_errors.XenError(
+                        'VDIUnavailable',
+                        opterr='Cannot deflate VDI {}, already used by '
+                        'at least 2 VBDs'.format(vdi_uuid)
+                    )
+
+    # We can have multiple VBDs attached to a VDI during a VM-template clone.
+    # So we use a timeout to ensure that we can detach the volume properly.
+    util.retry(check_vbd_count, maxretry=10, period=1)
+
+    device_path = linstor.get_device_path(vdi_uuid)
+    new_volume_size = LinstorVolumeManager.round_up_volume_size(
+        # TODO: Replace pylint comment with this feature when possible:
+        # https://github.com/PyCQA/pylint/pull/2926
+        LinstorVhdUtil(session, linstor).get_size_phys(vdi_uuid)  # pylint: disable = E1120
+    )
+
+    volume_info = linstor.get_volume_info(vdi_uuid)
+    old_volume_size = volume_info.virtual_size
+    deflate(
+        linstor, vdi_uuid, device_path, new_volume_size, old_volume_size
+    )
 
 
 def detach_thin(session, linstor, sr_uuid, vdi_uuid):
