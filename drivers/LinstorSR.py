@@ -824,6 +824,21 @@ class LinstorSR(SR.SR):
             if self.vdis[vdi_uuid].deleted:
                 del self.vdis[vdi_uuid]
 
+        # Security to prevent VDIs from being forgotten if the controller
+        # is started without a shared and mounted /var/lib/linstor path.
+        try:
+            self._linstor.get_database_path()
+        except Exception:
+            # Failed to get database path, ensure we don't have
+            # VDIs in the XAPI database...
+            if self.session.xenapi.SR.get_VDIs(
+                self.session.xenapi.SR.get_by_uuid(self.uuid)
+            ):
+                raise xs_errors.XenError(
+                    'SRUnavailable',
+                    opterr='Database is not mounted'
+                )
+
         # Update the database before the restart of the GC to avoid
         # bad sync in the process if new VDIs have been introduced.
         ret = super(LinstorSR, self).scan(self.uuid)
