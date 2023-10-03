@@ -884,7 +884,7 @@ class LinstorVolumeManager(object):
 
     def get_device_path(self, volume_uuid):
         """
-        Get the dev path of a volume.
+        Get the dev path of a volume, create a diskless if necessary.
         :param str volume_uuid: The volume uuid to get the dev path.
         :return: The current device path of the volume.
         :rtype: str
@@ -1586,6 +1586,14 @@ class LinstorVolumeManager(object):
                     volume['disk-state'] = volume_state.disk_state
 
         return resources
+
+    def get_database_path(self):
+        """
+        Get the database path.
+        :return: The current database path.
+        :rtype: str
+        """
+        return self._request_database_path(self._linstor)
 
     @classmethod
     def create_sr(
