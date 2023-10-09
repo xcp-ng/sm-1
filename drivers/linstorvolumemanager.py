@@ -2666,7 +2666,10 @@ class LinstorVolumeManager(object):
             )
 
         try:
-            util.pread2([DATABASE_MKFS, expected_device_path])
+            util.retry(
+                lambda: util.pread2([DATABASE_MKFS, expected_device_path]),
+                maxretry=5
+            )
         except Exception as e:
             raise LinstorVolumeManagerError(
                'Failed to execute {} on database volume: {}'
