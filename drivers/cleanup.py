@@ -2991,10 +2991,21 @@ class LinstorSR(SR):
                     continue  # Ignore it, probably deleted.
 
                 vdi_type = volumes_metadata[vdi_uuid].get(VDI_TYPE_TAG)
-                if vdi_type == vhdutil.VDI_TYPE_RAW:
-                    info = None
-                else:
+                if vdi_type == vhdutil.VDI_TYPE_VHD:
                     info = self._vhdutil.get_vhd_info(vdi_uuid)
+                elif not vdi_uuid.startswith('DELETED_'):
+                    # Ensure it's not a VHD...
+                    try:
+                        info = self._vhdutil.get_vhd_info(vdi_uuid)
+                    except:
+                        try:
+                            self.repair(vdi_uuid)
+                            info = self._vhdutil.get_vhd_info(vdi_uuid)
+                        except:
+                            info = None
+                else:
+                    # Assume it's really a RAW volume of a failed snap without VHD header/footer.
+                    info = None
             except Exception as e:
                 Util.log(
                     ' [VDI {}: failed to load VDI info]: {}'
