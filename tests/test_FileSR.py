@@ -15,7 +15,6 @@ import SRCommand
 import testlib
 import util
 import vhdutil
-from XenAPI import Failure
 
 
 class FakeFileVDI(FileSR.FileVDI):
@@ -193,6 +192,7 @@ class TestFileVDI(unittest.TestCase):
         vdi_uuid = str(uuid.uuid4())
         sr = mock.MagicMock()
         sr.path = "sr_path"
+        sr._check_hardlinks.return_value = False
         vdi = FakeFileVDI(sr, vdi_uuid)
         vdi.sr = sr
 
@@ -204,9 +204,6 @@ class TestFileVDI(unittest.TestCase):
         grandp_uuid = str(uuid.uuid4())
 
         mock_query_p_uuid.side_effect = [new_vdi_uuid, new_vdi_uuid, grandp_uuid]
-
-        sr.session.xenapi.SR.get_sm_config.return_value = {
-            "no_hardlinks": "True"}
 
         # Act
         clone_xml = vdi.clone(sr_uuid, vdi_uuid)
@@ -432,6 +429,8 @@ class FakeSharedFileSR(FileSR.SharedFileSR):
         self._check_writable()
         self._check_hardlinks()
 
+    def _read_hardlink_conf(self):
+        return None
 
 class TestShareFileSR(unittest.TestCase):
     """
@@ -439,7 +438,6 @@ class TestShareFileSR(unittest.TestCase):
     """
     TEST_SR_REF = "test_sr_ref"
     ERROR_524 = "Unknown error 524"
-    NO_HARDLINKS = "no_hardlinks"
 
     def setUp(self):
         util_patcher = mock.patch('FileSR.util', autospec=True)
@@ -478,13 +476,6 @@ class TestShareFileSR(unittest.TestCase):
                         'sr_ref': TestShareFileSR.TEST_SR_REF}
         return FakeSharedFileSR(srcmd, self.sr_uuid)
 
-    def create_sessionless_test_sr(self):
-        srcmd = mock.Mock()
-        srcmd.dconf = {}
-        srcmd.params = {'command': "some_command",
-                        'sr_ref': TestShareFileSR.TEST_SR_REF}
-        return FakeSharedFileSR(srcmd, self.sr_uuid)
-
     def test_attach_success(self):
         """
         Attach SR on FS with expected features
@@ -495,8 +486,7 @@ class TestShareFileSR(unittest.TestCase):
             test_sr.attach(self.sr_uuid)
 
         # Assert
-        self.mock_session.xenapi.SR.remove_from_sm_config.assert_called_with(
-            TestShareFileSR.TEST_SR_REF, TestShareFileSR.NO_HARDLINKS)
+        self.assertEqual(0, self.mock_session.xenapi.message.create.call_count)
 
     def test_attach_link_fail(self):
         """
@@ -511,48 +501,8 @@ class TestShareFileSR(unittest.TestCase):
             test_sr.attach(self.sr_uuid)
 
         # Assert
-        self.mock_session.xenapi.SR.add_to_sm_config.assert_called_with(
-            TestShareFileSR.TEST_SR_REF, TestShareFileSR.NO_HARDLINKS, 'True')
         self.mock_session.xenapi.message.create.assert_called_with(
             'sr_does_not_support_hardlinks', 2, "SR", self.sr_uuid, mock.ANY)
-
-    def test_attach_link_fail_already_set(self):
-        """
-        Attach SR on FS with no hardlinks with config set
-        """
-        test_sr = self.create_test_sr()
-
-        self.mock_link.side_effect = OSError(524, TestShareFileSR.ERROR_524)
-        self.mock_session.xenapi.SR.add_to_sm_config.side_effect = Failure(
-            ['MAP_DUPLICATE_KEY', 'SR', 'sm_config',
-            'OpaqueRef:be8cc595-4924-4946-9082-59aef531daae',
-             TestShareFileSR.NO_HARDLINKS])
-
-        # Act
-        with mock.patch('FileSR.open'):
-            test_sr.attach(self.sr_uuid)
-
-        # Assert
-        self.mock_session.xenapi.SR.add_to_sm_config.assert_called_with(
-            TestShareFileSR.TEST_SR_REF, TestShareFileSR.NO_HARDLINKS, 'True')
-
-    def test_attach_success_no_session(self):
-        test_sr = self.create_sessionless_test_sr()
-
-        with mock.patch('FileSR.open'):
-            test_sr.attach(self.sr_uuid)
-
-        self.mock_session.xenapi.SR.remove_from_sm_config.assert_not_called()
-
-    def test_attach_link_fail_no_session(self):
-        test_sr = self.create_sessionless_test_sr()
-        self.mock_link.side_effect = OSError(524, TestShareFileSR.ERROR_524)
-
-        with mock.patch('FileSR.open'):
-            test_sr.attach(self.sr_uuid)
-
-        self.mock_session.xenapi.SR.add_to_sm_config.assert_not_called()
-        self.mock_session.xenapi.message.create.assert_not_called()
 
     def test_attach_fist_active(self):
         """
@@ -567,8 +517,6 @@ class TestShareFileSR(unittest.TestCase):
             test_sr.attach(self.sr_uuid)
 
         # Assert
-        self.mock_session.xenapi.SR.add_to_sm_config.assert_called_with(
-            TestShareFileSR.TEST_SR_REF, TestShareFileSR.NO_HARDLINKS, 'True')
         self.mock_session.xenapi.message.create.assert_called_with(
             'sr_does_not_support_hardlinks', 2, "SR", self.sr_uuid, mock.ANY)
 
