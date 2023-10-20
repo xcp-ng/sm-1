@@ -1773,6 +1773,10 @@ class LinstorVDI(VDI.VDI):
             if self.ty == 'ha_statefile' or self.ty == 'redo_log':
                 self._linstor.set_auto_promote_timeout(self.uuid, 600)
 
+            # Increase `ping-timeout` parameter to ensure there is no failure in critical components like `tapdisk`.
+            # In fact a missed DRBD ACK packet causes EIO errors on `read/write` calls and completely blocks processes.
+            self._linstor.set_ping_timeout(self.uuid, 300)
+
             self._linstor.mark_volume_as_persistent(self.uuid)
         except util.CommandException as e:
             failed = True
