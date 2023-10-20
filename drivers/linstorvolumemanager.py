@@ -889,6 +889,23 @@ class LinstorVolumeManager(object):
                 .format(volume_uuid, error_str)
             )
 
+    def set_ping_timeout(self, volume_uuid, timeout):
+        """
+    Set the response time to answer a DRBD ping packet.
+        :param str volume_uuid: The volume uuid to modify.
+        """
+
+        volume_name = self.get_volume_name(volume_uuid)
+        result = self._linstor.resource_dfn_modify(volume_name, {
+            'DrbdOptions/Net/ping-timeout': timeout
+        })
+        error_str = self._get_error_str(result)
+        if error_str:
+            raise LinstorVolumeManagerError(
+                'Could not change the ping timeout of `{}`: {}'
+                .format(volume_uuid, error_str)
+            )
+
     def get_volume_info(self, volume_uuid):
         """
         Get the volume info of a particular volume.
