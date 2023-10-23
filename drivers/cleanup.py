@@ -1441,6 +1441,20 @@ class LinstorVDI(VDI):
         return super(LinstorVDI, self).pause(failfast)
 
     def coalesce(self):
+        # Note: We raise `SMException` here to skip the current coalesce in case of failure.
+        # Using another exception we can't execute the next coalesce calls.
+        try:
+            drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
+        except Exception as e:
+            raise util.SMException(
+                'VDI {} could not be coalesced because the DRBD block size cannot be read: {}'
+                .format(self.uuid, e))
+
+        if self._sizeVHD > drbd_size:
+            raise util.SMException(
+                'VDI {} could not be coalesced because VHD phys size > DRBD block size ({} > {})'
+                .format(self.uuid, self._sizeVHD, drbd_size))
+
         self.sr._vhdutil.force_coalesce(self.path)
 
     def getParent(self):
