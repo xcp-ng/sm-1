@@ -485,6 +485,18 @@ def get_block_bitmap(session, args):
         raise
 
 
+def get_drbd_size(session, args):
+    try:
+        device_path = args['devicePath']
+        (ret, stdout, stderr) = util.doexec(['blockdev', '--getsize64', device_path])
+        if ret == 0:
+            return stdout.strip()
+        raise Exception('Failed to get DRBD size: {}'.format(stderr))
+    except Exception:
+        util.SMlog('linstor-manager:get_drbd_size error: {}'.format(stderr))
+        raise
+
+
 def set_parent(session, args):
     try:
         device_path = args['devicePath']
@@ -968,6 +980,9 @@ if __name__ == '__main__':
         'getDepth': get_depth,
         'getKeyHash': get_key_hash,
         'getBlockBitmap': get_block_bitmap,
+
+        # Small helper to get the DRBD blockdev size.
+        'getDrbdSize': get_drbd_size,
 
         # Called by cleanup.py to coalesce when a primary
         # is opened on a non-local host.

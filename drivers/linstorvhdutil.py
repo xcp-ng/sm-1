@@ -38,7 +38,7 @@ def call_vhd_util_on_host(session, host_ref, method, device_path, args):
         util.SMlog('call-plugin ({} with {}) exception: {}'.format(
             method, args, e
         ))
-        raise
+        raise util.SMException(str(e))
 
     util.SMlog('call-plugin ({} with {}) returned: {}'.format(
         method, args, response
@@ -47,7 +47,7 @@ def call_vhd_util_on_host(session, host_ref, method, device_path, args):
     return response
 
 
-class LinstorCallException(Exception):
+class LinstorCallException(util.SMException):
     def __init__(self, cmd_err):
         self.cmd_err = cmd_err
 
@@ -207,6 +207,16 @@ class LinstorVhdUtil:
     def get_block_bitmap(self, vdi_uuid, response):
         return base64.b64decode(response)
 
+    @linstorhostcall('_get_drbd_size', 'getDrbdSize')
+    def get_drbd_size(self, vdi_uuid, response):
+        return int(response)
+
+    def _get_drbd_size(self, path):
+        (ret, stdout, stderr) = util.doexec(['blockdev', '--getsize64', path])
+        if ret == 0:
+            return int(stdout.strip())
+        raise util.SMException('Failed to get DRBD size: {}'.format(stderr))
+
     # --------------------------------------------------------------------------
     # Setters: only used locally.
     # --------------------------------------------------------------------------
@@ -308,7 +318,6 @@ class LinstorVhdUtil:
         else:
             e_str = str(e)
 
-        e_with_openers = None
         try:
             volume_uuid = self._linstor.get_volume_uuid_from_device_path(
                 device_path
@@ -326,6 +335,9 @@ class LinstorVhdUtil:
         raise e_wrapper  # pylint: disable = E0702
 
     def _call_local_vhd_util(self, local_method, device_path, *args, **kwargs):
+        if isinstance(local_method, str):
+            local_method = getattr(self, local_method)
+
         try:
             def local_call():
                 try:
@@ -354,6 +366,9 @@ class LinstorVhdUtil:
         # Normally in case of failure, if the parent is unused we try to execute the method on
         # another host using the DRBD opener list. In the other case, if the parent is required,
         # we must check where this last one is open instead of the child.
+
+        if isinstance(local_method, str):
+            local_method = getattr(self, local_method)
 
         # A. Try to write locally...
         try:
