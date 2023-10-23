@@ -2241,7 +2241,12 @@ class LinstorVDI(VDI.VDI):
                 'srUuid': self.sr.uuid,
                 'vdiUuid': self.uuid
             }
-            self.sr._exec_manager_command(master, fn, args, 'VDIUnavailable')
+
+            try:
+                self.sr._exec_manager_command(master, fn, args, 'VDIUnavailable')
+            except Exception:
+                if fn != 'detach':
+                    raise
 
         # Reload size attrs after inflate or deflate!
         self._load_this()
