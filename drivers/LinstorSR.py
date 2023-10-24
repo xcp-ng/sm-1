@@ -1901,6 +1901,25 @@ class LinstorVDI(VDI.VDI):
                 raise xs_errors.XenError(
                     'VDIUnavailable', opterr='Could not find: {}'.format(path)
                 )
+
+            # Diskless path can be created on the fly, ensure we can open it.
+            def check_volume_usable():
+                while True:
+                    try:
+                        with open(path, 'r+'):
+                            pass
+                    except IOError as e:
+                        if e.errno == errno.ENODATA:
+                            time.sleep(2)
+                            continue
+                        if e.errno == errno.EROFS:
+                            util.SMlog('Volume not attachable because RO. Openers: {}'.format(
+                                self.sr._linstor.get_volume_openers(vdi_uuid)
+                            ))
+                        raise
+                    break
+            util.retry(check_volume_usable, 15, 2)
+
             vdi_uuid = self.sr._vhdutil.get_vhd_info(vdi_uuid).parentUuid
 
         self.attached = True
