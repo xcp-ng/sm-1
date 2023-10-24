@@ -30,9 +30,11 @@ import time
 import util
 import uuid
 
+# Persistent prefix to add to RAW persistent volumes.
+PERSISTENT_PREFIX = 'xcp-persistent-'
 
 # Contains the data of the "/var/lib/linstor" directory.
-DATABASE_VOLUME_NAME = 'xcp-persistent-database'
+DATABASE_VOLUME_NAME = PERSISTENT_PREFIX + 'database'
 DATABASE_SIZE = 1 << 30  # 1GB.
 DATABASE_PATH = '/var/lib/linstor'
 DATABASE_MKFS = 'mkfs.ext4'
