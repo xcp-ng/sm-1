@@ -23,6 +23,7 @@ try:
     from linstorvolumemanager import get_controller_node_name
     from linstorvolumemanager import LinstorVolumeManager
     from linstorvolumemanager import LinstorVolumeManagerError
+    from linstorvolumemanager import PERSISTENT_PREFIX
 
     LINSTOR_AVAILABLE = True
 except ImportError:
@@ -75,6 +76,10 @@ TRACE_PERFS = False
 
 # Enable/Disable VHD key hash support.
 USE_KEY_HASH = False
+
+# Special volumes.
+HA_VOLUME_NAME = PERSISTENT_PREFIX + 'ha-statefile'
+REDO_LOG_VOLUME_NAME = PERSISTENT_PREFIX + 'redo-log'
 
 # ==============================================================================
 
@@ -1727,9 +1732,9 @@ class LinstorVDI(VDI.VDI):
         try:
             volume_name = None
             if self.ty == 'ha_statefile':
-                volume_name = 'xcp-persistent-ha-statefile'
+                volume_name = HA_VOLUME_NAME
             elif self.ty == 'redo_log':
-                volume_name = 'xcp-persistent-redo-log'
+                volume_name = REDO_LOG_VOLUME_NAME
 
             self._linstor.create_volume(
                 self.uuid, volume_size, persistent=False,
@@ -2085,7 +2090,7 @@ class LinstorVDI(VDI.VDI):
         # instead.
         volume_name = self._linstor.get_volume_name(self.uuid)
         if not USE_HTTP_NBD_SERVERS or volume_name not in [
-            'xcp-persistent-ha-statefile', 'xcp-persistent-redo-log'
+            HA_VOLUME_NAME, REDO_LOG_VOLUME_NAME
         ]:
             if not self.path or not util.pathexists(self.path):
                 available = False
@@ -2587,7 +2592,7 @@ class LinstorVDI(VDI.VDI):
         http_server = None
 
         try:
-            if volume_name == 'xcp-persistent-ha-statefile':
+            if volume_name == HA_VOLUME_NAME:
                 port = '8076'
             else:
                 port = '8077'
@@ -2669,7 +2674,7 @@ class LinstorVDI(VDI.VDI):
         try:
             # We use a precomputed device size.
             # So if the XAPI is modified, we must update these values!
-            if volume_name == 'xcp-persistent-ha-statefile':
+            if volume_name == HA_VOLUME_NAME:
                 # See: https://github.com/xapi-project/xen-api/blob/703479fa448a8d7141954bb6e8964d8e25c4ac2e/ocaml/xapi/xha_statefile.ml#L32-L37
                 port = '8076'
                 device_size = 4 * 1024 * 1024
@@ -2793,7 +2798,7 @@ class LinstorVDI(VDI.VDI):
     def _check_http_nbd_volume_name(self):
         volume_name = self.path[14:]
         if volume_name not in [
-            'xcp-persistent-ha-statefile', 'xcp-persistent-redo-log'
+            HA_VOLUME_NAME, REDO_LOG_VOLUME_NAME
         ]:
             raise xs_errors.XenError(
                 'VDIUnavailable',
@@ -2862,8 +2867,8 @@ class LinstorVDI(VDI.VDI):
         http_service = None
         if drbd_path:
             assert(drbd_path in (
-                '/dev/drbd/by-res/xcp-persistent-ha-statefile/0',
-                '/dev/drbd/by-res/xcp-persistent-redo-log/0'
+                '/dev/drbd/by-res/{}/0'.format(HA_VOLUME_NAME),
+                '/dev/drbd/by-res/{}/0'.format(REDO_LOG_VOLUME_NAME)
             ))
             self._start_persistent_http_server(volume_name)
 
