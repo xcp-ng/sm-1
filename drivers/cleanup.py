@@ -55,6 +55,7 @@ try:
     from linstorvolumemanager import get_controller_uri
     from linstorvolumemanager import LinstorVolumeManager
     from linstorvolumemanager import LinstorVolumeManagerError
+    from linstorvolumemanager import PERSISTENT_PREFIX as LINSTOR_PERSISTENT_PREFIX
 
     LINSTOR_AVAILABLE = True
 except ImportError:
@@ -3004,16 +3005,36 @@ class LinstorSR(SR):
         all_volume_info = self._linstor.get_volumes_with_info()
         volumes_metadata = self._linstor.get_volumes_with_metadata()
         for vdi_uuid, volume_info in all_volume_info.items():
-            deleted = False
             try:
-                if not volume_info.name and \
-                        not list(volumes_metadata[vdi_uuid].items()):
+                volume_metadata = volumes_metadata[vdi_uuid]
+                if not volume_info.name and not list(volume_metadata.items()):
                     continue  # Ignore it, probably deleted.
 
-                vdi_type = volumes_metadata[vdi_uuid].get(VDI_TYPE_TAG)
                 if vdi_uuid.startswith('DELETED_'):
                     # Assume it's really a RAW volume of a failed snap without VHD header/footer.
-                    deleted = True
+                    # We must remove this VDI now without adding it in the VDI list.
+                    # Otherwise `Relinking` calls and other actions can be launched on it.
+                    # We don't want that...
+                    Util.log('Deleting bad VDI {}'.format(vdi_uuid))
+
+                    self.lock()
+                    try:
+                        self._linstor.destroy_volume(vdi_uuid)
+                        try:
+                            self.forgetVDI(vdi_uuid)
+                        except:
+                            pass
+                    except Exception as e:
+                        Util.log('Cannot delete bad VDI: {}'.format(e))
+                    finally:
+                        self.unlock()
+                    continue
+
+                vdi_type = volume_metadata.get(VDI_TYPE_TAG)
+                volume_name = self._linstor.get_volume_name(vdi_uuid)
+                if volume_name.startswith(LINSTOR_PERSISTENT_PREFIX):
+                    # Always RAW!
+                    info = None
                 elif vdi_type == vhdutil.VDI_TYPE_VHD:
                     info = self._vhdutil.get_vhd_info(vdi_uuid)
                 else:
@@ -3037,28 +3058,7 @@ class LinstorSR(SR):
                 info = vhdutil.VHDInfo(vdi_uuid)
                 info.error = 1
 
-            if not deleted:
-                all_vdi_info[vdi_uuid] = info
-                continue
-
-            # We must remove this VDI now without adding it in the VDI list.
-            # Otherwise `Relinking` calls and other actions can be launched on it.
-            # We don't want that...
-            assert deleted
-            assert vdi_uuid.startswith('DELETED_')
-            Util.log('Deleting bad VDI {}'.format(vdi_uuid))
-
-            self.lock()
-            try:
-                self._linstor.destroy_volume(vdi_uuid)
-                try:
-                    self.forgetVDI(vdi_uuid)
-                except:
-                    pass
-            except Exception as e:
-                Util.log('Cannot delete bad VDI: {}'.format(e))
-            finally:
-                self.unlock()
+            all_vdi_info[vdi_uuid] = info
 
         return all_vdi_info
 
