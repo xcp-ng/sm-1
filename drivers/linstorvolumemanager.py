@@ -1372,35 +1372,55 @@ class LinstorVolumeManager(object):
         :param bool force: Try to destroy volumes before if true.
         """
 
+        # 1. Ensure volume list is empty. No cost.
         if self._volumes:
             raise LinstorVolumeManagerError(
                 'Cannot destroy LINSTOR volume manager: '
                 'It exists remaining volumes'
             )
 
+        # 2. Fetch ALL resource names.
+        # This list may therefore contain volumes created outside
+        # the scope of the driver.
+        resource_names = self._fetch_resource_names(ignore_deleted=False)
+        try:
+            del resource_names[DATABASE_VOLUME_NAME]
+        except KeyError:
+            # Really strange to reach that point.
+            # Normally we always have the database volume in the list.
+            pass
+
+        # 3. Ensure the resource name list is entirely empty...
+        if resource_names:
+            raise LinstorVolumeManagerError(
+                'Cannot destroy LINSTOR volume manager: '
+                'It exists remaining volumes (created externally or being deleted)'
+            )
+
+        # 4. Destroying...
         controller_is_running = self._controller_is_running()
         uri = 'linstor://localhost'
         try:
             if controller_is_running:
                 self._start_controller(start=False)
 
-            # 1. Umount LINSTOR database.
+            # 4.1. Umount LINSTOR database.
             self._mount_database_volume(
                 self.build_device_path(DATABASE_VOLUME_NAME),
                 mount=False,
                 force=True
             )
 
-            # 2. Refresh instance.
+            # 4.2. Refresh instance.
             self._start_controller(start=True)
             self._linstor = self._create_linstor_instance(
                 uri, keep_uri_unmodified=True
             )
 
-            # 3. Destroy database volume.
+            # 4.3. Destroy database volume.
             self._destroy_resource(DATABASE_VOLUME_NAME)
 
-            # 4. Destroy group and storage pools.
+            # 4.4. Destroy group and storage pools.
             self._destroy_resource_group(self._linstor, self._group_name)
             for pool in self._get_storage_pools(force=True):
                 self._destroy_storage_pool(
@@ -1961,12 +1981,14 @@ class LinstorVolumeManager(object):
             )
         return result[0].candidates
 
-    def _fetch_resource_names(self):
+    def _fetch_resource_names(self, ignore_deleted=True):
         resource_names = set()
         dfns = self._linstor.resource_dfn_list_raise().resource_definitions
         for dfn in dfns:
-            if dfn.resource_group_name == self._group_name and \
-                    linstor.consts.FLAG_DELETE not in dfn.flags:
+            if dfn.resource_group_name == self._group_name and (
+                ignore_deleted or
+                linstor.consts.FLAG_DELETE not in dfn.flags
+            ):
                 resource_names.add(dfn.name)
         return resource_names
 
