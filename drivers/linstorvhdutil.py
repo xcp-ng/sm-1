@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from linstorjournaler import LinstorJournaler
+from linstorvolumemanager import LinstorVolumeManager
 import base64
 import distutils.util
 import errno
@@ -133,6 +135,8 @@ def linstormodifier():
 
 
 class LinstorVhdUtil:
+    MAX_SIZE = 2 * 1024 * 1024 * 1024 * 1024  # Max VHD size.
+
     def __init__(self, session, linstor):
         self._session = session
         self._linstor = linstor
@@ -226,6 +230,10 @@ class LinstorVhdUtil:
         return self._call_local_vhd_util_or_fail(vhdutil.create, path, size, static, msize)
 
     @linstormodifier()
+    def set_size_virt(self, path, size, jfile):
+        return self._call_local_vhd_util_or_fail(vhdutil.setSizeVirt, path, size, jfile)
+
+    @linstormodifier()
     def set_size_virt_fast(self, path, size):
         return self._call_local_vhd_util_or_fail(vhdutil.setSizeVirtFast, path, size)
 
@@ -253,6 +261,54 @@ class LinstorVhdUtil:
     def snapshot(self, path, parent, parentRaw, msize=0, checkEmpty=True):
         return self._call_local_vhd_util_or_fail(vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
 
+    def inflate(self, journaler, vdi_uuid, vdi_path, new_size, old_size):
+        # Only inflate if the LINSTOR volume capacity is not enough.
+        new_size = LinstorVolumeManager.round_up_volume_size(new_size)
+        if new_size <= old_size:
+            return
+
+        util.SMlog(
+            'Inflate {} (size={}, previous={})'
+            .format(vdi_uuid, new_size, old_size)
+        )
+
+        journaler.create(
+            LinstorJournaler.INFLATE, vdi_uuid, old_size
+        )
+        self._linstor.resize_volume(vdi_uuid, new_size)
+
+        result_size = self._linstor.get_volume_size(vdi_uuid)
+        if result_size < new_size:
+            util.SMlog(
+                'WARNING: Cannot inflate volume to {}B, result size: {}B'
+                .format(new_size, result_size)
+            )
+
+        if not util.zeroOut(
+            vdi_path, result_size - vhdutil.VHD_FOOTER_SIZE,
+            vhdutil.VHD_FOOTER_SIZE
+        ):
+            raise xs_errors.XenError(
+                'EIO',
+                opterr='Failed to zero out VHD footer {}'.format(vdi_path)
+            )
+
+        self.set_size_phys(vdi_path, result_size, False)
+        journaler.remove(LinstorJournaler.INFLATE, vdi_uuid)
+
+    def deflate(self, vdi_uuid, vdi_path, new_size, old_size):
+        new_size = LinstorVolumeManager.round_up_volume_size(new_size)
+        if new_size >= old_size:
+            return
+
+        util.SMlog(
+            'Deflate {} (new size={}, previous={})'
+            .format(vdi_uuid, new_size, old_size)
+        )
+
+        self.set_size_phys(vdi_path, new_size)
+        # TODO: Change the LINSTOR volume size using linstor.resize_volume.
+
     # --------------------------------------------------------------------------
     # Remote setters: write locally and try on another host in case of failure.
     # --------------------------------------------------------------------------
@@ -272,6 +328,23 @@ class LinstorVhdUtil:
     @linstormodifier()
     def force_repair(self, path):
         return self._call_vhd_util(vhdutil.repair, 'repair', path, use_parent=False)
+
+    # --------------------------------------------------------------------------
+    # Static helpers.
+    # --------------------------------------------------------------------------
+
+    @classmethod
+    def compute_volume_size(cls, virtual_size, image_type):
+        if image_type == vhdutil.VDI_TYPE_VHD:
+            # All LINSTOR VDIs have the metadata area preallocated for
+            # the maximum possible virtual size (for fast online VDI.resize).
+            meta_overhead = vhdutil.calcOverheadEmpty(cls.MAX_SIZE)
+            bitmap_overhead = vhdutil.calcOverheadBitmap(virtual_size)
+            virtual_size += meta_overhead + bitmap_overhead
+        elif image_type != vhdutil.VDI_TYPE_RAW:
+            raise Exception('Invalid image type: {}'.format(image_type))
+
+        return LinstorVolumeManager.round_up_volume_size(virtual_size)
 
     # --------------------------------------------------------------------------
     # Helpers.

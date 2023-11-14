@@ -1383,8 +1383,6 @@ class LVHDVDI(VDI):
 class LinstorVDI(VDI):
     """Object representing a VDI in a LINSTOR SR"""
 
-    MAX_SIZE = 2 * 1024 * 1024 * 1024 * 1024  # Max VHD size.
-
     VOLUME_LOCK_TIMEOUT = 30
 
     def load(self, info=None):
@@ -1408,8 +1406,41 @@ class LinstorVDI(VDI):
         self.parentUuid = info.parentUuid
         self.sizeVirt = info.sizeVirt
         self._sizeVHD = info.sizePhys
+        self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
         self.hidden = info.hidden
         self.scanError = False
+        self.vdi_type = vhdutil.VDI_TYPE_VHD
+
+    def getDriverName(self):
+        if self.raw:
+            return self.DRIVER_NAME_RAW
+        return self.DRIVER_NAME_VHD
+
+    def inflate(self, size):
+        if self.raw:
+            return
+        self.sr.lock()
+        try:
+            self.sr._vhdutil.inflate(self.sr.journaler, self.uuid, self.path, size, self.drbd_size)
+        finally:
+            self.sr.unlock()
+        self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
+        self._sizeVHD = self.sr._vhdutil.get_size_phys(self.uuid)
+
+    def deflate(self):
+        if self.raw:
+            return
+        self.sr.lock()
+        try:
+            self.sr._vhdutil.deflate(self.uuid, self.path, self._sizeVHD, self.drbd_size)
+        finally:
+            self.sr.unlock()
+        self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
+        self._sizeVHD = self.sr._vhdutil.get_size_phys(self.uuid)
+
+    def inflateFully(self):
+        if not self.raw:
+            self.inflate(LinstorVhdUtil.compute_volume_size(self.sizeVirt, self.vdi_type))
 
     def rename(self, uuid):
         Util.log('Renaming {} -> {} (path={})'.format(
@@ -1432,7 +1463,7 @@ class LinstorVDI(VDI):
         VDI.delete(self)
 
     def validate(self, fast=False):
-        if not self.sr._vhdutil.check(self.uuid, fast=fast):
+        if not self.raw and not self.sr._vhdutil.check(self.uuid, fast=fast):
             raise util.SMException('VHD {} corrupted'.format(self))
 
     def pause(self, failfast=False):
@@ -1444,18 +1475,6 @@ class LinstorVDI(VDI):
     def coalesce(self):
         # Note: We raise `SMException` here to skip the current coalesce in case of failure.
         # Using another exception we can't execute the next coalesce calls.
-        try:
-            drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
-        except Exception as e:
-            raise util.SMException(
-                'VDI {} could not be coalesced because the DRBD block size cannot be read: {}'
-                .format(self.uuid, e))
-
-        if self._sizeVHD > drbd_size:
-            raise util.SMException(
-                'VDI {} could not be coalesced because VHD phys size > DRBD block size ({} > {})'
-                .format(self.uuid, self._sizeVHD, drbd_size))
-
         self.sr._vhdutil.force_coalesce(self.path)
 
     def getParent(self):
@@ -1505,6 +1524,22 @@ class LinstorVDI(VDI):
             Util.log("Failed to update %s with vhd-parent field %s" % \
                      (self.uuid, self.parentUuid))
 
+    def _doCoalesce(self):
+        try:
+            self._activateChain()
+            self.parent.validate()
+            self._inflateParentForCoalesce()
+            VDI._doCoalesce(self)
+        finally:
+            self.parent._sizeVHD = self.sr._vhdutil.get_size_phys(self.parent.uuid)
+            self.parent.deflate()
+
+    def _activateChain(self):
+        vdi = self
+        while vdi:
+            p = self.sr._linstor.get_device_path(vdi.uuid)
+            vdi = vdi.parent
+
     def _setHidden(self, hidden=True):
         HIDDEN_TAG = 'hidden'
 
@@ -1516,8 +1551,51 @@ class LinstorVDI(VDI):
         else:
             VDI._setHidden(self, hidden)
 
+    def _setSizeVirt(self, size):
+        jfile = self.uuid + '-jvhd'
+        self.sr._linstor.create_volume(
+            jfile, vhdutil.MAX_VHD_JOURNAL_SIZE, persistent=False, volume_name=jfile
+        )
+        try:
+            self.inflate(LinstorVhdUtil.compute_volume_size(size, self.vdi_type))
+            self.sr._vhdutil.set_size_virt(size, jfile)
+        finally:
+            try:
+                self.sr._linstor.destroy_volume(jfile)
+            except Exception:
+                # We can ignore it, in any case this volume is not persistent.
+                pass
+
     def _queryVHDBlocks(self):
         return self.sr._vhdutil.get_block_bitmap(self.uuid)
+
+    def _inflateParentForCoalesce(self):
+        if self.parent.raw:
+            return
+        inc = self._calcExtraSpaceForCoalescing()
+        if inc > 0:
+            self.parent.inflate(self.parent.drbd_size + inc)
+
+    def _calcExtraSpaceForCoalescing(self):
+        if self.parent.raw:
+            return 0
+        size_coalesced = LinstorVhdUtil.compute_volume_size(
+            self._getCoalescedSizeData(), self.vdi_type
+        )
+        Util.log("Coalesced size = %s" % Util.num2str(size_coalesced))
+        return size_coalesced - self.parent.drbd_size
+
+    def _calcExtraSpaceForLeafCoalescing(self):
+        assert self.drbd_size > 0
+        assert self._sizeVHD > 0
+        deflate_diff = self.drbd_size - LinstorVolumeManager.round_up_volume_size(self._sizeVHD)
+        assert deflate_diff >= 0
+        return self._calcExtraSpaceForCoalescing() - deflate_diff
+
+    def _calcExtraSpaceForSnapshotCoalescing(self):
+        assert self._sizeVHD > 0
+        return self._calcExtraSpaceForCoalescing() + \
+            LinstorVolumeManager.round_up_volume_size(self._sizeVHD)
 
 ################################################################################
 #
@@ -3057,17 +3135,19 @@ class LinstorSR(SR):
 
         return all_vdi_info
 
-    # TODO: Maybe implement _liveLeafCoalesce/_prepareCoalesceLeaf/
-    # _finishCoalesceLeaf/_updateSlavesOnResize like LVM plugin.
+    def _prepareCoalesceLeaf(self, vdi):
+        vdi._activateChain()
+        vdi.deflate()
+        vdi.inflateParentForCoalesce()
+
+    def _finishCoalesceLeaf(self, parent):
+        if not parent.isSnapshot() or parent.isAttachedRW():
+            parent.inflateFully()
+        else:
+            parent.deflate()
 
     def _calcExtraSpaceNeeded(self, child, parent):
-        meta_overhead = vhdutil.calcOverheadEmpty(LinstorVDI.MAX_SIZE)
-        bitmap_overhead = vhdutil.calcOverheadBitmap(parent.sizeVirt)
-        virtual_size = LinstorVolumeManager.round_up_volume_size(
-            parent.sizeVirt + meta_overhead + bitmap_overhead
-        )
-        volume_size = self._linstor.get_volume_size(parent.uuid)
-        return virtual_size - volume_size
+        return self._linstor.compute_volume_size(parent.sizeVirt, parent.vdi_type) - parent.drbd_size
 
     def _hasValidDevicePath(self, uuid):
         try:
