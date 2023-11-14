@@ -441,7 +441,7 @@ class LinstorVhdUtil:
 
             raise xs_errors.XenError(
                 'VDIUnavailable',
-                opterr='No valid host found to run vhd-util command `{}` (path=`{}`, openers=`{}`): {}'
-                .format(remote_method, device_path, openers, e)
+                opterr='No valid host found to run vhd-util command `{}` (path=`{}`, openers=`{}`)'
+                .format(remote_method, device_path, openers)
             )
         return util.retry(remote_call, 5, 2)
