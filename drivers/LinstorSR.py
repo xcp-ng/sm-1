@@ -134,19 +134,6 @@ OPS_EXCLUSIVE = [
 # ==============================================================================
 
 
-def compute_volume_size(virtual_size, image_type):
-    if image_type == vhdutil.VDI_TYPE_VHD:
-        # All LINSTOR VDIs have the metadata area preallocated for
-        # the maximum possible virtual size (for fast online VDI.resize).
-        meta_overhead = vhdutil.calcOverheadEmpty(LinstorVDI.MAX_SIZE)
-        bitmap_overhead = vhdutil.calcOverheadBitmap(virtual_size)
-        virtual_size += meta_overhead + bitmap_overhead
-    elif image_type != vhdutil.VDI_TYPE_RAW:
-        raise Exception('Invalid image type: {}'.format(image_type))
-
-    return LinstorVolumeManager.round_up_volume_size(virtual_size)
-
-
 def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
     volume_metadata = linstor.get_volume_metadata(vdi_uuid)
     image_type = volume_metadata.get(VDI_TYPE_TAG)
@@ -157,7 +144,7 @@ def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
 
     # If the virtual VHD size is lower than the LINSTOR volume size,
     # there is nothing to do.
-    vhd_size = compute_volume_size(
+    vhd_size = LinstorVhdUtil.compute_volume_size(
         # TODO: Replace pylint comment with this feature when possible:
         # https://github.com/PyCQA/pylint/pull/2926
         LinstorVhdUtil(session, linstor).get_size_virt(vdi_uuid),  # pylint: disable = E1120
@@ -168,9 +155,8 @@ def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
     volume_size = volume_info.virtual_size
 
     if vhd_size > volume_size:
-        inflate(
-            journaler, linstor, vdi_uuid, device_path,
-            vhd_size, volume_size
+        LinstorVhdUtil(session, linstor).inflate(
+            journaler, vdi_uuid, device_path, vhd_size, volume_size
         )
 
 
@@ -202,17 +188,16 @@ def detach_thin_impl(session, linstor, sr_uuid, vdi_uuid):
     util.retry(check_vbd_count, maxretry=10, period=1)
 
     device_path = linstor.get_device_path(vdi_uuid)
+    vhdutil_inst = LinstorVhdUtil(session, linstor)
     new_volume_size = LinstorVolumeManager.round_up_volume_size(
         # TODO: Replace pylint comment with this feature when possible:
         # https://github.com/PyCQA/pylint/pull/2926
-        LinstorVhdUtil(session, linstor).get_size_phys(vdi_uuid)  # pylint: disable = E1120
+        vhdutil_inst.get_size_phys(vdi_uuid)  # pylint: disable = E1120
     )
 
     volume_info = linstor.get_volume_info(vdi_uuid)
     old_volume_size = volume_info.virtual_size
-    deflate(
-        linstor, vdi_uuid, device_path, new_volume_size, old_volume_size
-    )
+    vhdutil_inst.deflate(vdi_uuid, device_path, new_volume_size, old_volume_size)
 
 
 def detach_thin(session, linstor, sr_uuid, vdi_uuid):
@@ -223,56 +208,6 @@ def detach_thin(session, linstor, sr_uuid, vdi_uuid):
         detach_thin_impl(session, linstor, sr_uuid, vdi_uuid)
     except Exception as e:
         util.SMlog('Failed to detach properly VDI {}: {}'.format(vdi_uuid, e))
-
-
-def inflate(journaler, linstor, vdi_uuid, vdi_path, new_size, old_size):
-    # Only inflate if the LINSTOR volume capacity is not enough.
-    new_size = LinstorVolumeManager.round_up_volume_size(new_size)
-    if new_size <= old_size:
-        return
-
-    util.SMlog(
-        'Inflate {} (size={}, previous={})'
-        .format(vdi_uuid, new_size, old_size)
-    )
-
-    journaler.create(
-        LinstorJournaler.INFLATE, vdi_uuid, old_size
-    )
-    linstor.resize_volume(vdi_uuid, new_size)
-
-    result_size = linstor.get_volume_size(vdi_uuid)
-    if result_size < new_size:
-        util.SMlog(
-            'WARNING: Cannot inflate volume to {}B, result size: {}B'
-            .format(new_size, result_size)
-        )
-
-    if not util.zeroOut(
-        vdi_path, result_size - vhdutil.VHD_FOOTER_SIZE,
-        vhdutil.VHD_FOOTER_SIZE
-    ):
-        raise xs_errors.XenError(
-            'EIO',
-            opterr='Failed to zero out VHD footer {}'.format(vdi_path)
-        )
-
-    LinstorVhdUtil(None, linstor).set_size_phys(vdi_path, result_size, False)
-    journaler.remove(LinstorJournaler.INFLATE, vdi_uuid)
-
-
-def deflate(linstor, vdi_uuid, vdi_path, new_size, old_size):
-    new_size = LinstorVolumeManager.round_up_volume_size(new_size)
-    if new_size >= old_size:
-        return
-
-    util.SMlog(
-        'Deflate {} (new size={}, previous={})'
-        .format(vdi_uuid, new_size, old_size)
-    )
-
-    LinstorVhdUtil(None, linstor).set_size_phys(vdi_path, new_size)
-    # TODO: Change the LINSTOR volume size using linstor.resize_volume.
 
 
 IPS_XHA_CACHE = None
@@ -1390,7 +1325,7 @@ class LinstorSR(SR.SR):
             current_size - vhdutil.VHD_FOOTER_SIZE,
             vhdutil.VHD_FOOTER_SIZE
         )
-        deflate(self._linstor, vdi_uuid, vdi.path, old_size, current_size)
+        self._vhdutil.deflate(vdi_uuid, vdi.path, old_size, current_size)
 
     def _handle_interrupted_clone(
         self, vdi_uuid, clone_info, force_undo=False
@@ -1502,9 +1437,9 @@ class LinstorSR(SR.SR):
         # Inflate to the right size.
         if base_type == vhdutil.VDI_TYPE_VHD:
             vdi = self.vdi(vdi_uuid)
-            volume_size = compute_volume_size(vdi.size, vdi.vdi_type)
-            inflate(
-                self._journaler, self._linstor, vdi_uuid, vdi.path,
+            volume_size = LinstorVhdUtil.compute_volume_size(vdi.size, vdi.vdi_type)
+            self._vhdutil.inflate(
+                self._journaler, vdi_uuid, vdi.path,
                 volume_size, vdi.capacity
             )
             self.vdis[vdi_uuid] = vdi
@@ -1619,8 +1554,6 @@ class LinstorVDI(VDI.VDI):
     TYPE_RAW = 'raw'
     TYPE_VHD = 'vhd'
 
-    MAX_SIZE = 2 * 1024 * 1024 * 1024 * 1024  # Max VHD size.
-
     # Metadata size given to the "S" param of vhd-util create.
     # "-S size (MB) for metadata preallocation".
     # Increase the performance when resize is called.
@@ -1717,7 +1650,7 @@ class LinstorVDI(VDI.VDI):
 
         # 2. Compute size and check space available.
         size = vhdutil.validate_and_round_vhd_size(long(size))
-        volume_size = compute_volume_size(size, self.vdi_type)
+        volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
         util.SMlog(
             'LinstorVDI.create: type={}, vhd-size={}, volume-size={}'
             .format(self.vdi_type, size, volume_size)
@@ -1869,7 +1802,7 @@ class LinstorVDI(VDI.VDI):
             if (
                 self.vdi_type == vhdutil.VDI_TYPE_RAW or
                 not writable or
-                self.capacity >= compute_volume_size(self.size, self.vdi_type)
+                self.capacity >= LinstorVhdUtil.compute_volume_size(self.size, self.vdi_type)
             ):
                 need_inflate = False
 
@@ -1938,7 +1871,7 @@ class LinstorVDI(VDI.VDI):
 
         # The VDI is already deflated if the VHD image size + metadata is
         # equal to the LINSTOR volume size.
-        volume_size = compute_volume_size(self.size, self.vdi_type)
+        volume_size = LinstorVhdUtil.compute_volume_size(self.size, self.vdi_type)
         already_deflated = self.capacity <= volume_size
 
         if already_deflated:
@@ -2000,7 +1933,7 @@ class LinstorVDI(VDI.VDI):
 
         # Compute the virtual VHD and DRBD volume size.
         size = vhdutil.validate_and_round_vhd_size(long(size))
-        volume_size = compute_volume_size(size, self.vdi_type)
+        volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
         util.SMlog(
             'LinstorVDI.resize: type={}, vhd-size={}, volume-size={}'
             .format(self.vdi_type, size, volume_size)
@@ -2033,7 +1966,7 @@ class LinstorVDI(VDI.VDI):
             self._linstor.resize(self.uuid, new_volume_size)
         else:
             if new_volume_size != old_volume_size:
-                inflate(
+                self.sr._vhdutil.inflate(
                     self.sr._journaler, self._linstor, self.uuid, self.path,
                     new_volume_size, old_volume_size
                 )
