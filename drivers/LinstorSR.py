@@ -210,13 +210,7 @@ def detach_thin(session, linstor, sr_uuid, vdi_uuid):
         util.SMlog('Failed to detach properly VDI {}: {}'.format(vdi_uuid, e))
 
 
-IPS_XHA_CACHE = None
-
-
 def get_ips_from_xha_config_file():
-    if IPS_XHA_CACHE:
-        return IPS_XHA_CACHE
-
     ips = dict()
     host_id = None
     try:
