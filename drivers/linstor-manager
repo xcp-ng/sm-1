@@ -28,6 +28,7 @@ import XenAPI
 import XenAPIPlugin
 
 from linstorjournaler import LinstorJournaler
+from linstorvhdutil import LinstorVhdUtil
 from linstorvolumemanager import get_controller_uri, get_local_volume_openers, LinstorVolumeManager
 from lock import Lock
 import json
@@ -528,6 +529,26 @@ def repair(session, args):
         raise
 
 
+def deflate(session, args):
+    try:
+        device_path = args['devicePath']
+        new_size = int(args['newSize'])
+        old_size = int(args['oldSize'])
+        zeroize = distutils.util.strtobool(args['zeroize'])
+        group_name = args['groupName']
+
+        linstor = LinstorVolumeManager(
+            get_controller_uri(),
+            group_name,
+            logger=util.SMlog
+        )
+        LinstorVhdUtil(session, linstor).deflate(device_path, new_size, old_size, zeroize)
+        return ''
+    except Exception as e:
+        util.SMlog('linstor-manager:deflate error: {}'.format(e))
+        raise
+
+
 def lock_vdi(session, args):
     lock = None
     try:
@@ -989,6 +1010,9 @@ if __name__ == '__main__':
         'setParent': set_parent,
         'coalesce': coalesce,
         'repair': repair,
+
+        # Misc writters.
+        'deflate': deflate,
 
         'lockVdi': lock_vdi,
         'hasControllerRunning': has_controller_running,
