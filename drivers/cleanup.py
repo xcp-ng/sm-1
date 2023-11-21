@@ -1432,7 +1432,7 @@ class LinstorVDI(VDI):
             return
         self.sr.lock()
         try:
-            self.sr._vhdutil.deflate(self.uuid, self.path, self._sizeVHD, self.drbd_size)
+            self.sr._vhdutil.force_deflate(self.path, self._sizeVHD, self.drbd_size, zeroize=False)
         finally:
             self.sr.unlock()
         self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
