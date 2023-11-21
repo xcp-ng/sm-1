@@ -31,7 +31,7 @@ MANAGER_PLUGIN = 'linstor-manager'
 EMEDIUMTYPE = 124
 
 
-def call_vhd_util_on_host(session, host_ref, method, device_path, args):
+def call_remote_method(session, host_ref, method, device_path, args):
     try:
         response = session.xenapi.host.call_plugin(
             host_ref, MANAGER_PLUGIN, method, args
@@ -86,7 +86,7 @@ def linstorhostcall(local_method, remote_method):
             local_e = None
             try:
                 if not in_use_by or socket.gethostname() in node_names:
-                    return self._call_local_vhd_util(local_method, device_path, *args[2:], **kwargs)
+                    return self._call_local_method(local_method, device_path, *args[2:], **kwargs)
             except ErofsLinstorCallException as e:
                 local_e = e.cmd_err
             except Exception as e:
@@ -112,7 +112,7 @@ def linstorhostcall(local_method, remote_method):
             try:
                 def remote_call():
                     host_ref = self._get_readonly_host(vdi_uuid, device_path, node_names)
-                    return call_vhd_util_on_host(self._session, host_ref, remote_method, device_path, remote_args)
+                    return call_remote_method(self._session, host_ref, remote_method, device_path, remote_args)
                 response = util.retry(remote_call, 5, 2)
             except Exception as remote_e:
                 self._raise_openers_exception(device_path, local_e or remote_e)
@@ -227,39 +227,39 @@ class LinstorVhdUtil:
 
     @linstormodifier()
     def create(self, path, size, static, msize=0):
-        return self._call_local_vhd_util_or_fail(vhdutil.create, path, size, static, msize)
+        return self._call_local_method_or_fail(vhdutil.create, path, size, static, msize)
 
     @linstormodifier()
     def set_size_virt(self, path, size, jfile):
-        return self._call_local_vhd_util_or_fail(vhdutil.setSizeVirt, path, size, jfile)
+        return self._call_local_method_or_fail(vhdutil.setSizeVirt, path, size, jfile)
 
     @linstormodifier()
     def set_size_virt_fast(self, path, size):
-        return self._call_local_vhd_util_or_fail(vhdutil.setSizeVirtFast, path, size)
+        return self._call_local_method_or_fail(vhdutil.setSizeVirtFast, path, size)
 
     @linstormodifier()
     def set_size_phys(self, path, size, debug=True):
-        return self._call_local_vhd_util_or_fail(vhdutil.setSizePhys, path, size, debug)
+        return self._call_local_method_or_fail(vhdutil.setSizePhys, path, size, debug)
 
     @linstormodifier()
     def set_parent(self, path, parentPath, parentRaw=False):
-        return self._call_local_vhd_util_or_fail(vhdutil.setParent, path, parentPath, parentRaw)
+        return self._call_local_method_or_fail(vhdutil.setParent, path, parentPath, parentRaw)
 
     @linstormodifier()
     def set_hidden(self, path, hidden=True):
-        return self._call_local_vhd_util_or_fail(vhdutil.setHidden, path, hidden)
+        return self._call_local_method_or_fail(vhdutil.setHidden, path, hidden)
 
     @linstormodifier()
     def set_key(self, path, key_hash):
-        return self._call_local_vhd_util_or_fail(vhdutil.setKey, path, key_hash)
+        return self._call_local_method_or_fail(vhdutil.setKey, path, key_hash)
 
     @linstormodifier()
     def kill_data(self, path):
-        return self._call_local_vhd_util_or_fail(vhdutil.killData, path)
+        return self._call_local_method_or_fail(vhdutil.killData, path)
 
     @linstormodifier()
     def snapshot(self, path, parent, parentRaw, msize=0, checkEmpty=True):
-        return self._call_local_vhd_util_or_fail(vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
+        return self._call_local_method_or_fail(vhdutil.snapshot, path, parent, parentRaw, msize, checkEmpty)
 
     def inflate(self, journaler, vdi_uuid, vdi_path, new_size, old_size):
         # Only inflate if the LINSTOR volume capacity is not enough.
@@ -269,7 +269,7 @@ class LinstorVhdUtil:
 
         util.SMlog(
             'Inflate {} (size={}, previous={})'
-            .format(vdi_uuid, new_size, old_size)
+            .format(vdi_path, new_size, old_size)
         )
 
         journaler.create(
@@ -284,26 +284,22 @@ class LinstorVhdUtil:
                 .format(new_size, result_size)
             )
 
-        if not util.zeroOut(
-            vdi_path, result_size - vhdutil.VHD_FOOTER_SIZE,
-            vhdutil.VHD_FOOTER_SIZE
-        ):
-            raise xs_errors.XenError(
-                'EIO',
-                opterr='Failed to zero out VHD footer {}'.format(vdi_path)
-            )
-
+        self._zeroize(vdi_path, result_size - vhdutil.VHD_FOOTER_SIZE)
         self.set_size_phys(vdi_path, result_size, False)
         journaler.remove(LinstorJournaler.INFLATE, vdi_uuid)
 
-    def deflate(self, vdi_uuid, vdi_path, new_size, old_size):
+    def deflate(self, vdi_path, new_size, old_size, zeroize=False):
+        if zeroize:
+            assert old_size > vhdutil.VHD_FOOTER_SIZE
+            self._zeroize(vdi_path, old_size - vhdutil.VHD_FOOTER_SIZE)
+
         new_size = LinstorVolumeManager.round_up_volume_size(new_size)
         if new_size >= old_size:
             return
 
         util.SMlog(
             'Deflate {} (new size={}, previous={})'
-            .format(vdi_uuid, new_size, old_size)
+            .format(vdi_path, new_size, old_size)
         )
 
         self.set_size_phys(vdi_path, new_size)
@@ -319,15 +315,27 @@ class LinstorVhdUtil:
             'parentPath': str(parentPath),
             'parentRaw': parentRaw
         }
-        return self._call_vhd_util(vhdutil.setParent, 'setParent', path, use_parent=False, **kwargs)
+        return self._call_method(vhdutil.setParent, 'setParent', path, use_parent=False, **kwargs)
 
     @linstormodifier()
     def force_coalesce(self, path):
-        return self._call_vhd_util(vhdutil.coalesce, 'coalesce', path, use_parent=True)
+        return self._call_method(vhdutil.coalesce, 'coalesce', path, use_parent=True)
 
     @linstormodifier()
     def force_repair(self, path):
-        return self._call_vhd_util(vhdutil.repair, 'repair', path, use_parent=False)
+        return self._call_method(vhdutil.repair, 'repair', path, use_parent=False)
+
+    @linstormodifier()
+    def force_deflate(self, path, newSize, oldSize, zeroize):
+        kwargs = {
+            'newSize': newSize,
+            'oldSize': oldSize,
+            'zeroize': zeroize
+        }
+        return self._call_method('_force_deflate', 'deflate', path, use_parent=False, **kwargs)
+
+    def _force_deflate(self, path, newSize, oldSize, zeroize):
+        self.deflate(path, newSize, oldSize, zeroize)
 
     # --------------------------------------------------------------------------
     # Static helpers.
@@ -407,7 +415,7 @@ class LinstorVhdUtil:
         util.SMlog('raise opener exception: {}'.format(e_wrapper))
         raise e_wrapper  # pylint: disable = E0702
 
-    def _call_local_vhd_util(self, local_method, device_path, *args, **kwargs):
+    def _call_local_method(self, local_method, device_path, *args, **kwargs):
         if isinstance(local_method, str):
             local_method = getattr(self, local_method)
 
@@ -427,14 +435,14 @@ class LinstorVhdUtil:
             util.SMlog('failed to execute locally vhd-util (sys {})'.format(e.code))
             raise e
 
-    def _call_local_vhd_util_or_fail(self, local_method, device_path, *args, **kwargs):
+    def _call_local_method_or_fail(self, local_method, device_path, *args, **kwargs):
         try:
-            return self._call_local_vhd_util(local_method, device_path, *args, **kwargs)
+            return self._call_local_method(local_method, device_path, *args, **kwargs)
         except ErofsLinstorCallException as e:
             # Volume is locked on a host, find openers.
             self._raise_openers_exception(device_path, e.cmd_err)
 
-    def _call_vhd_util(self, local_method, remote_method, device_path, use_parent, *args, **kwargs):
+    def _call_method(self, local_method, remote_method, device_path, use_parent, *args, **kwargs):
         # Note: `use_parent` exists to know if the VHD parent is used by the local/remote method.
         # Normally in case of failure, if the parent is unused we try to execute the method on
         # another host using the DRBD opener list. In the other case, if the parent is required,
@@ -445,7 +453,7 @@ class LinstorVhdUtil:
 
         # A. Try to write locally...
         try:
-            return self._call_local_vhd_util(local_method, device_path, *args, **kwargs)
+            return self._call_local_method(local_method, device_path, *args, **kwargs)
         except Exception:
             pass
 
@@ -502,7 +510,7 @@ class LinstorVhdUtil:
 
                 no_host_found = False
                 try:
-                    return call_vhd_util_on_host(self._session, host_ref, remote_method, device_path, remote_args)
+                    return call_remote_method(self._session, host_ref, remote_method, device_path, remote_args)
                 except Exception:
                     pass
 
@@ -518,3 +526,11 @@ class LinstorVhdUtil:
                 .format(remote_method, device_path, openers)
             )
         return util.retry(remote_call, 5, 2)
+
+    @staticmethod
+    def _zeroize(path, size):
+        if not util.zeroOut(path, size, vhdutil.VHD_FOOTER_SIZE):
+            raise xs_errors.XenError(
+                'EIO',
+                opterr='Failed to zero out VHD footer {}'.format(path)
+            )

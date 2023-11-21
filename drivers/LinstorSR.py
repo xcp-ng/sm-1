@@ -197,7 +197,7 @@ def detach_thin_impl(session, linstor, sr_uuid, vdi_uuid):
 
     volume_info = linstor.get_volume_info(vdi_uuid)
     old_volume_size = volume_info.virtual_size
-    vhdutil.deflate(vdi_uuid, device_path, new_volume_size, old_volume_size)
+    vhdutil.deflate(device_path, new_volume_size, old_volume_size)
 
 
 def detach_thin(session, linstor, sr_uuid, vdi_uuid):
@@ -1313,13 +1313,7 @@ class LinstorSR(SR.SR):
 
         current_size = volume_info.virtual_size
         assert current_size > 0
-
-        util.zeroOut(
-            vdi.path,
-            current_size - vhdutil.VHD_FOOTER_SIZE,
-            vhdutil.VHD_FOOTER_SIZE
-        )
-        self._vhdutil.deflate(vdi_uuid, vdi.path, old_size, current_size)
+        self._vhdutil.force_deflate(vdi.path, old_size, current_size, zeroize=True)
 
     def _handle_interrupted_clone(
         self, vdi_uuid, clone_info, force_undo=False
