@@ -13,6 +13,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
+import sys
+sys.path[0] = '/opt/xensource/sm/'
+
+from linstorvolumemanager import get_controller_uri
 
 import argparse
 import json
@@ -56,7 +60,7 @@ def remove_all_volumes(controller_uri, group_name):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-u', '--uri', required=True)
+    parser.add_argument('-u', '--uri', required=False)
     parser.add_argument('-g', '--group-name', required=True)
     parser.add_argument('-n', '--namespace', default='/')
 
@@ -66,12 +70,14 @@ def main():
     action.add_argument('--remove-all-volumes', action='store_true')
 
     args = parser.parse_args()
+    controller_uri = get_controller_uri() if args.uri is None else args.uri
+
     if args.dump_volumes:
-        dump_kv(args.uri, args.group_name, args.namespace)
+        dump_kv(controller_uri, args.group_name, args.namespace)
     elif args.remove_volume:
-        remove_volume(args.uri, args.group_name, args.remove_volume)
+        remove_volume(controller_uri, args.group_name, args.remove_volume)
     elif args.remove_all_volumes:
-        remove_all_volumes(args.uri, args.group_name)
+        remove_all_volumes(controller_uri, args.group_name)
 
 
 if __name__ == '__main__':
