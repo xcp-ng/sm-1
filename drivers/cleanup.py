@@ -1405,38 +1405,49 @@ class LinstorVDI(VDI):
 
         self.parentUuid = info.parentUuid
         self.sizeVirt = info.sizeVirt
-        self._sizeVHD = info.sizePhys
-        self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
+        self._sizeVHD = -1
+        self.drbd_size = -1
         self.hidden = info.hidden
         self.scanError = False
         self.vdi_type = vhdutil.VDI_TYPE_VHD
 
-    def getDriverName(self):
-        if self.raw:
-            return self.DRIVER_NAME_RAW
-        return self.DRIVER_NAME_VHD
+    def getSizeVHD(self, fetch=False):
+        if self._sizeVHD < 0 or fetch:
+            self._sizeVHD = self.sr._vhdutil.get_size_phys(self.uuid)
+        return self._sizeVHD
+
+    def getDrbdSize(self, fetch=False):
+        if self.drbd_size < 0 or fetch:
+            self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
+        return self.drbd_size
 
     def inflate(self, size):
         if self.raw:
             return
         self.sr.lock()
         try:
+            # Ensure we use the real DRBD size and not the cached one.
+            # Why? Because this attribute can be changed if volume is resized by user.
+            self.drbd_size = self.getDrbdSize(fetch=True)
             self.sr._vhdutil.inflate(self.sr.journaler, self.uuid, self.path, size, self.drbd_size)
         finally:
             self.sr.unlock()
-        self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
-        self._sizeVHD = self.sr._vhdutil.get_size_phys(self.uuid)
+        self.drbd_size = -1
+        self._sizeVHD = -1
 
     def deflate(self):
         if self.raw:
             return
         self.sr.lock()
         try:
+            # Ensure we use the real sizes and not the cached info.
+            self.drbd_size = self.getDrbdSize(fetch=True)
+            self._sizeVHD = self.getSizeVHD(fetch=True)
             self.sr._vhdutil.force_deflate(self.path, self._sizeVHD, self.drbd_size, zeroize=False)
         finally:
             self.sr.unlock()
-        self.drbd_size = self.sr._vhdutil.get_drbd_size(self.uuid)
-        self._sizeVHD = self.sr._vhdutil.get_size_phys(self.uuid)
+        self.drbd_size = -1
+        self._sizeVHD = -1
 
     def inflateFully(self):
         if not self.raw:
@@ -1512,6 +1523,7 @@ class LinstorVDI(VDI):
         self.children = []
 
     def _setParent(self, parent):
+        self.sr._linstor.get_device_path(self.uuid)
         self.sr._vhdutil.force_parent(self.path, parent.path)
         self.parent = parent
         self.parentUuid = parent.uuid
@@ -1531,7 +1543,6 @@ class LinstorVDI(VDI):
             self._inflateParentForCoalesce()
             VDI._doCoalesce(self)
         finally:
-            self.parent._sizeVHD = self.sr._vhdutil.get_size_phys(self.parent.uuid)
             self.parent.deflate()
 
     def _activateChain(self):
@@ -1574,7 +1585,7 @@ class LinstorVDI(VDI):
             return
         inc = self._calcExtraSpaceForCoalescing()
         if inc > 0:
-            self.parent.inflate(self.parent.drbd_size + inc)
+            self.parent.inflate(self.parent.getDrbdSize() + inc)
 
     def _calcExtraSpaceForCoalescing(self):
         if self.parent.raw:
@@ -1583,19 +1594,19 @@ class LinstorVDI(VDI):
             self._getCoalescedSizeData(), self.vdi_type
         )
         Util.log("Coalesced size = %s" % Util.num2str(size_coalesced))
-        return size_coalesced - self.parent.drbd_size
+        return size_coalesced - self.parent.getDrbdSize()
 
     def _calcExtraSpaceForLeafCoalescing(self):
-        assert self.drbd_size > 0
-        assert self._sizeVHD > 0
-        deflate_diff = self.drbd_size - LinstorVolumeManager.round_up_volume_size(self._sizeVHD)
+        assert self.getDrbdSize() > 0
+        assert self.getSizeVHD() > 0
+        deflate_diff = self.getDrbdSize() - LinstorVolumeManager.round_up_volume_size(self.getSizeVHD())
         assert deflate_diff >= 0
         return self._calcExtraSpaceForCoalescing() - deflate_diff
 
     def _calcExtraSpaceForSnapshotCoalescing(self):
-        assert self._sizeVHD > 0
+        assert self.getSizeVHD() > 0
         return self._calcExtraSpaceForCoalescing() + \
-            LinstorVolumeManager.round_up_volume_size(self._sizeVHD)
+            LinstorVolumeManager.round_up_volume_size(self.getSizeVHD())
 
 ################################################################################
 #
@@ -3147,7 +3158,7 @@ class LinstorSR(SR):
             parent.deflate()
 
     def _calcExtraSpaceNeeded(self, child, parent):
-        return self._linstor.compute_volume_size(parent.sizeVirt, parent.vdi_type) - parent.drbd_size
+        return LinstorVhdUtil.compute_volume_size(parent.sizeVirt, parent.vdi_type) - parent.getDrbdSize()
 
     def _hasValidDevicePath(self, uuid):
         try:
@@ -3166,11 +3177,6 @@ class LinstorSR(SR):
             return super(LinstorSR, self)._liveLeafCoalesce(vdi)
         finally:
             self.unlock()
-
-    def _prepareCoalesceLeaf(self, vdi):
-        # Move diskless path if necessary. We must have an access
-        # to modify locally the volume.
-        self._linstor.get_device_path(vdi.uuid)
 
     def _handleInterruptedCoalesceLeaf(self):
         entries = self.journaler.get_all(VDI.JRN_LEAF)
