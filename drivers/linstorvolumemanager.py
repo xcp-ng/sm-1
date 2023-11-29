@@ -1529,6 +1529,22 @@ class LinstorVolumeManager(object):
                 'Failed to destroy node `{}`: {}'.format(node_name, error_str)
             )
 
+    def create_node_interface(self, hostname, name, ip_addr):
+        result = self._linstor.netinterface_create(hostname, name, ip_addr)
+        if not linstor.Linstor.all_api_responses_no_error(result):
+            raise LinstorVolumeManagerError(
+                'Unable to create interface on `{}`: {}'.format(hostname, ', '.join(
+                    [str(x) for x in result]))
+                )
+
+    def set_node_preferred_interface(self, hostname, name):
+        result = self._linstor.node_modify(hostname, property_dict={'PrefNic': name})
+        if not linstor.Linstor.all_api_responses_no_error(result):
+            raise LinstorVolumeManagerError(
+                'Unable to set preferred interface on `{}`: {}'.format(hostname, ', '.join(
+                    [str(x) for x in result]))
+                )
+
     def get_nodes_info(self):
         """
         Get all nodes + statuses, used or not by the pool.
