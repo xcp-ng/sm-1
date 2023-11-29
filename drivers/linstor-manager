@@ -977,6 +977,51 @@ def health_check(session, args):
     return format_result()
 
 
+def create_node_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+    name = args['name']
+    pif_uuid = args['pifUuid']
+
+    pif_ref = session.xenapi.PIF.get_by_uuid(pif_uuid)
+    pif = session.xenapi.PIF.get_record(pif_ref)
+
+    if not pif['currently_attached']:
+        raise XenAPIPlugin.Failure('-1', ['PIF is not plugged'])
+
+    ip_addr = pif['IP'] if pif['primary_address_type'].lower() == 'ipv4' else pif['IPv6'].split('/')[0]
+    if ip_addr == '':
+        raise XenAPIPlugin.Failure('-1', ['PIF has no IP'])
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        linstor.create_node_interface(hostname, name, ip_addr)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(True)
+
+
+def set_node_preferred_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+    name = args['name']
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        linstor.set_node_preferred_interface(hostname, name)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(True)
+
+
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
         'prepareSr': prepare_sr,
@@ -1024,5 +1069,8 @@ if __name__ == '__main__':
         'destroyDrbdVolume': destroy_drbd_volume,
         'destroyDrbdVolumes': destroy_drbd_volumes,
         'getDrbdOpeners': get_drbd_openers,
-        'healthCheck': health_check
+        'healthCheck': health_check,
+
+        'createNodeInterface': create_node_interface,
+        'setNodePreferredInterface': set_node_preferred_interface
     })
