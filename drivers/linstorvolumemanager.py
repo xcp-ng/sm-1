@@ -1372,35 +1372,63 @@ class LinstorVolumeManager(object):
         :param bool force: Try to destroy volumes before if true.
         """
 
+        # 1. Ensure volume list is empty. No cost.
         if self._volumes:
             raise LinstorVolumeManagerError(
                 'Cannot destroy LINSTOR volume manager: '
                 'It exists remaining volumes'
             )
 
+        # 2. Fetch ALL resource names.
+        # This list may therefore contain volumes created outside
+        # the scope of the driver.
+        resource_names = self._fetch_resource_names(ignore_deleted=False)
+        try:
+            resource_names.remove(DATABASE_VOLUME_NAME)
+        except KeyError:
+            # Really strange to reach that point.
+            # Normally we always have the database volume in the list.
+            pass
+
+        # 3. Ensure the resource name list is entirely empty...
+        if resource_names:
+            raise LinstorVolumeManagerError(
+                'Cannot destroy LINSTOR volume manager: '
+                'It exists remaining volumes (created externally or being deleted)'
+            )
+
+        # 4. Destroying...
         controller_is_running = self._controller_is_running()
         uri = 'linstor://localhost'
         try:
             if controller_is_running:
                 self._start_controller(start=False)
 
-            # 1. Umount LINSTOR database.
+            # 4.1. Umount LINSTOR database.
             self._mount_database_volume(
                 self.build_device_path(DATABASE_VOLUME_NAME),
                 mount=False,
                 force=True
             )
 
-            # 2. Refresh instance.
+            # 4.2. Refresh instance.
             self._start_controller(start=True)
             self._linstor = self._create_linstor_instance(
                 uri, keep_uri_unmodified=True
             )
 
-            # 3. Destroy database volume.
+            # 4.3. Destroy database volume.
             self._destroy_resource(DATABASE_VOLUME_NAME)
 
-            # 4. Destroy group and storage pools.
+            # 4.4. Refresh linstor connection.
+            # Without we get this error:
+            #   "Cannot delete resource group 'xcp-sr-linstor_group_thin_device' because it has existing resource definitions.."
+            # Because the deletion of the databse was not seen by Linstor for some reason.
+            # It seems a simple refresh of the Linstor connection make it aware of the deletion.
+            self._linstor.disconnect()
+            self._linstor.connect()
+
+            # 4.5. Destroy group and storage pools.
             self._destroy_resource_group(self._linstor, self._group_name)
             for pool in self._get_storage_pools(force=True):
                 self._destroy_storage_pool(
@@ -1711,10 +1739,18 @@ class LinstorVolumeManager(object):
         if lin.resource_group_list_raise(
             [group_name]
         ).resource_groups:
-            raise LinstorVolumeManagerError(
-                'Unable to create SR `{}`: The group name already exists'
-                .format(group_name)
-            )
+            if not lin.resource_dfn_list_raise().resource_definitions:
+                backup_path = cls._create_database_backup_path()
+                logger(
+                    'Group name already exists `{}` without LVs. '
+                    'Ignoring and moving the config files in {}'.format(group_name, backup_path)
+                )
+                cls._move_files(DATABASE_PATH, backup_path)
+            else:
+                raise LinstorVolumeManagerError(
+                    'Unable to create SR `{}`: The group name already exists'
+                    .format(group_name)
+                )
 
         if thin_provisioning:
             driver_pool_parts = driver_pool_name.split('/')
@@ -1773,18 +1809,31 @@ class LinstorVolumeManager(object):
                 )
 
             # 2.b. Create resource group.
-            result = lin.resource_group_create(
-                name=group_name,
-                place_count=redundancy,
-                storage_pool=group_name,
-                diskless_on_remaining=False
-            )
-            error_str = cls._get_error_str(result)
-            if error_str:
+            rg_creation_attempt = 0
+            while True:
+                result = lin.resource_group_create(
+                    name=group_name,
+                    place_count=redundancy,
+                    storage_pool=group_name,
+                    diskless_on_remaining=False
+                )
+                error_str = cls._get_error_str(result)
+                if not error_str:
+                    break
+
+                errors = cls._filter_errors(result)
+                if cls._check_errors(errors, [linstor.consts.FAIL_EXISTS_RSC_GRP]):
+                    rg_creation_attempt += 1
+                    if rg_creation_attempt < 2:
+                        try:
+                            cls._destroy_resource_group(lin, group_name)
+                        except Exception as e:
+                            error_str = 'Failed to destroy old and empty RG: {}'.format(e)
+                        else:
+                            continue
+
                 raise LinstorVolumeManagerError(
-                    'Could not create RG `{}`: {}'.format(
-                        group_name, error_str
-                    )
+                    'Could not create RG `{}`: {}'.format(group_name, error_str)
                 )
 
             # 2.c. Create volume group.
@@ -1961,12 +2010,14 @@ class LinstorVolumeManager(object):
             )
         return result[0].candidates
 
-    def _fetch_resource_names(self):
+    def _fetch_resource_names(self, ignore_deleted=True):
         resource_names = set()
         dfns = self._linstor.resource_dfn_list_raise().resource_definitions
         for dfn in dfns:
-            if dfn.resource_group_name == self._group_name and \
-                    linstor.consts.FLAG_DELETE not in dfn.flags:
+            if dfn.resource_group_name == self._group_name and (
+                ignore_deleted or
+                linstor.consts.FLAG_DELETE not in dfn.flags
+            ):
                 resource_names.add(dfn.name)
         return resource_names
 
@@ -2680,19 +2731,10 @@ class LinstorVolumeManager(object):
 
     @classmethod
     def _mount_database_volume(cls, volume_path, mount=True, force=False):
-        backup_path = DATABASE_PATH + '-' + str(uuid.uuid4())
-
         try:
             # 1. Create a backup config folder.
             database_not_empty = bool(os.listdir(DATABASE_PATH))
-            if database_not_empty:
-                try:
-                    os.mkdir(backup_path)
-                except Exception as e:
-                    raise LinstorVolumeManagerError(
-                        'Failed to create backup path {} of LINSTOR config: {}'
-                        .format(backup_path, e)
-                    )
+            backup_path = cls._create_database_backup_path()
 
             # 2. Move the config in the mounted volume.
             if database_not_empty:
@@ -2859,6 +2901,18 @@ class LinstorVolumeManager(object):
                 'Failed to move files from {} to {}: {}'.format(
                     src_dir, dest_dir, e
                 )
+            )
+
+    @staticmethod
+    def _create_database_backup_path():
+        path = DATABASE_PATH + '-' + str(uuid.uuid4())
+        try:
+            os.mkdir(path)
+            return path
+        except Exception as e:
+            raise LinstorVolumeManagerError(
+                'Failed to create backup path {} of LINSTOR config: {}'
+                .format(path, e)
             )
 
     @staticmethod
