@@ -1939,11 +1939,14 @@ class LinstorVDI(VDI.VDI):
 
         if self.vdi_type == vhdutil.VDI_TYPE_RAW:
             old_volume_size = self.size
+            new_volume_size = LinstorVolumeManager.round_up_volume_size(size)
         else:
             old_volume_size = self.utilisation
             if self.sr._provisioning == 'thin':
                 # VDI is currently deflated, so keep it deflated.
                 new_volume_size = old_volume_size
+            else:
+                new_volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
         assert new_volume_size >= old_volume_size
 
         space_needed = new_volume_size - old_volume_size
