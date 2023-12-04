@@ -1548,7 +1548,12 @@ class LinstorVDI(VDI):
     def _activateChain(self):
         vdi = self
         while vdi:
-            p = self.sr._linstor.get_device_path(vdi.uuid)
+            try:
+                p = self.sr._linstor.get_device_path(vdi.uuid)
+            except Exception as e:
+                # Use SMException to skip coalesce.
+                # Otherwise the GC is stopped...
+                raise util.SMException(str(e))
             vdi = vdi.parent
 
     def _setHidden(self, hidden=True):
