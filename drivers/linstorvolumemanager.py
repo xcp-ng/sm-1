@@ -2764,9 +2764,9 @@ class LinstorVolumeManager(object):
                 # 3. Remove useless backup directory.
                 try:
                     os.rmdir(backup_path)
-                except Exception:
+                except Exception as e:
                     raise LinstorVolumeManagerError(
-                        'Failed to remove backup path {} of LINSTOR config {}'
+                        'Failed to remove backup path {} of LINSTOR config: {}'
                         .format(backup_path, e)
                     )
         except Exception as e:
