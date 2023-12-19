@@ -872,7 +872,6 @@ class LinstorVolumeManager(object):
             )
         return size * 1024
 
-
     def set_auto_promote_timeout(self, volume_uuid, timeout):
         """
         Define the blocking time of open calls when a DRBD
@@ -1119,7 +1118,6 @@ class LinstorVolumeManager(object):
         :rtype: dict(str, obj)
         """
         return get_all_volume_openers(self.get_volume_name(volume_uuid), '0')
-
 
     def get_volumes_with_name(self):
         """
@@ -1529,21 +1527,93 @@ class LinstorVolumeManager(object):
                 'Failed to destroy node `{}`: {}'.format(node_name, error_str)
             )
 
-    def create_node_interface(self, hostname, name, ip_addr):
-        result = self._linstor.netinterface_create(hostname, name, ip_addr)
-        if not linstor.Linstor.all_api_responses_no_error(result):
+    def create_node_interface(self, node_name, name, ip):
+        """
+        Create a new node interface in the LINSTOR database.
+        :param str node_name: Node name of the interface to use.
+        :param str name: Interface to create.
+        :param str ip: IP of the interface.
+        """
+        result = self._linstor.netinterface_create(node_name, name, ip)
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
             raise LinstorVolumeManagerError(
-                'Unable to create interface on `{}`: {}'.format(hostname, ', '.join(
-                    [str(x) for x in result]))
-                )
+                'Failed to create node interface on `{}`: {}'.format(node_name, error_str)
+            )
 
-    def set_node_preferred_interface(self, hostname, name):
-        result = self._linstor.node_modify(hostname, property_dict={'PrefNic': name})
-        if not linstor.Linstor.all_api_responses_no_error(result):
+    def destroy_node_interface(self, node_name, name):
+        """
+        Destroy a node interface in the LINSTOR database.
+        :param str node_name: Node name of the interface to remove.
+        :param str name: Interface to remove.
+        """
+        result = self._linstor.netinterface_delete(node_name, name)
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
             raise LinstorVolumeManagerError(
-                'Unable to set preferred interface on `{}`: {}'.format(hostname, ', '.join(
-                    [str(x) for x in result]))
-                )
+                'Failed to destroy node interface on `{}`: {}'.format(node_name, error_str)
+            )
+
+    def modify_node_interface(self, node_name, name, ip):
+        """
+        Modify a node interface in the LINSTOR database. Create it if necessary.
+        :param str node_name: Node name of the interface to use.
+        :param str name: Interface to modify or create.
+        :param str ip: IP of the interface.
+        """
+        result = self._linstor.netinterface_create(node_name, name, ip)
+        errors = self._filter_errors(result)
+        if not errors:
+            return
+
+        if self._check_errors(errors, [linstor.consts.FAIL_EXISTS_NET_IF]):
+            result = self._linstor.netinterface_modify(node_name, name, ip)
+            errors = self._filter_errors(result)
+            if not errors:
+                return
+
+        error_str = self._get_error_str(errors)
+        raise LinstorVolumeManagerError(
+            'Unable to modify interface on `{}`: {}'.format(node_name, error_str)
+        )
+
+    def list_node_interfaces(self, node_name):
+        """
+        List all node interfaces.
+        :param str node_name: Node name to use to list interfaces.
+        :rtype: list
+        :
+        """
+        result = self._linstor.net_interface_list(node_name)
+        if not result:
+            raise LinstorVolumeManagerError(
+                'Unable to list interfaces on `{}`: no list received'.format(node_name)
+            )
+
+        interfaces = {}
+        for interface in result:
+            interface = interface._rest_data
+            interfaces[interface['name']] = {
+                'address': interface['address'],
+                'active': interface['is_active']
+            }
+        return interfaces
+
+    def set_node_preferred_interface(self, node_name, name):
+        """
+        Set the preferred interface to use on a node.
+        :param str node_name: Node name of the interface.
+        :param str name: Preferred interface to use.
+        """
+        result = self._linstor.node_modify(node_name, property_dict={'PrefNic': name})
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
+            raise LinstorVolumeManagerError(
+                'Failed to set preferred node interface on `{}`: {}'.format(node_name, error_str)
+            )
 
     def get_nodes_info(self):
         """
