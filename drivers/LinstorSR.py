@@ -27,6 +27,8 @@ try:
 
     LINSTOR_AVAILABLE = True
 except ImportError:
+    PERSISTENT_PREFIX = 'unknown'
+
     LINSTOR_AVAILABLE = False
 
 from lock import Lock
