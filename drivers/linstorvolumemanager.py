@@ -272,7 +272,8 @@ def demote_drbd_resource(node_name, resource_name):
 class LinstorVolumeManagerError(Exception):
     ERR_GENERIC = 0,
     ERR_VOLUME_EXISTS = 1,
-    ERR_VOLUME_NOT_EXISTS = 2
+    ERR_VOLUME_NOT_EXISTS = 2,
+    ERR_VOLUME_DESTROY = 3
 
     def __init__(self, message, code=ERR_GENERIC):
         super(LinstorVolumeManagerError, self).__init__(message)
@@ -681,8 +682,14 @@ class LinstorVolumeManager(object):
         volume_properties = self._get_volume_properties(volume_uuid)
         volume_properties[self.PROP_NOT_EXISTS] = self.STATE_NOT_EXISTS
 
-        self._volumes.remove(volume_uuid)
-        self._destroy_volume(volume_uuid)
+        try:
+            self._volumes.remove(volume_uuid)
+            self._destroy_volume(volume_uuid)
+        except Exception as e:
+            raise LinstorVolumeManagerError(
+                str(e),
+                LinstorVolumeManagerError.ERR_VOLUME_DESTROY
+            )
 
     def lock_volume(self, volume_uuid, locked=True):
         """
