@@ -1760,7 +1760,14 @@ class LinstorVDI(VDI.VDI):
                 'Failed to remove the volume (maybe is leaf coalescing) '
                 'for {} err: {}'.format(self.uuid, e)
             )
-            raise xs_errors.XenError('VDIDelete', opterr=str(e))
+
+            try:
+                raise xs_errors.XenError('VDIDelete', opterr=str(e))
+            except LinstorVolumeManagerError as e:
+                if e.code != LinstorVolumeManagerError.ERR_VOLUME_DESTROY:
+                    raise xs_errors.XenError('VDIDelete', opterr=str(e))
+
+            return
 
         if self.uuid in self.sr.vdis:
             del self.sr.vdis[self.uuid]
