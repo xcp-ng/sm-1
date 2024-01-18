@@ -569,7 +569,9 @@ class LinstorSR(SR.SR):
                 if group_name and group_name == self._group_name:
                     raise xs_errors.XenError(
                         'LinstorSRCreate',
-                        opterr='group name must be unique'
+                        opterr='group name must be unique, already used by PBD {}'.format(
+                            xenapi.PBD.get_uuid(pbd)
+                        )
                     )
 
         if srs:
