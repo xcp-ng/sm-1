@@ -1245,8 +1245,7 @@ class LinstorVolumeManager(object):
     def shallow_clone_volume(self, volume_uuid, clone_uuid, persistent=True):
         """
         Clone a volume. Do not copy the data, this method creates a new volume
-        with the same size. It tries to create the volume on the same host
-        than volume source.
+        with the same size.
         :param str volume_uuid: The volume to clone.
         :param str clone_uuid: The cloned volume.
         :param bool persistent: If false the volume will be unavailable
@@ -1267,95 +1266,8 @@ class LinstorVolumeManager(object):
                 'Invalid size of {} for volume `{}`'.format(size, volume_name)
             )
 
-        # 2. Find the node(s) with the maximum space.
-        candidates = self._find_best_size_candidates()
-        if not candidates:
-            raise LinstorVolumeManagerError(
-                'Unable to shallow clone volume `{}`, no free space found.'
-            )
-
-        # 3. Compute node names and search if we can try to clone
-        # on the same nodes than volume.
-        def find_best_nodes():
-            for candidate in candidates:
-                for node_name in candidate.node_names:
-                    if node_name in ideal_node_names:
-                        return candidate.node_names
-
-        node_names = find_best_nodes()
-        if not node_names:
-            node_names = candidates[0].node_names
-
-        if len(node_names) < self._redundancy:
-            raise LinstorVolumeManagerError(
-                'Unable to shallow clone volume `{}`, '.format(volume_uuid) +
-                '{} are required to clone, found: {}'.format(
-                    self._redundancy, len(node_names)
-                )
-            )
-
-        # 4. Compute resources to create.
-        clone_volume_name = self.build_volume_name(util.gen_uuid())
-        diskless_node_names = self._get_node_names()
-        resources = []
-        for node_name in node_names:
-            diskless_node_names.remove(node_name)
-            resources.append(linstor.ResourceData(
-                node_name=node_name,
-                rsc_name=clone_volume_name,
-                storage_pool=self._group_name
-            ))
-
-        # 5. Create resources!
-        def clean():
-            try:
-                self._destroy_volume(clone_uuid, force=True)
-            except Exception as e:
-                self._logger(
-                    'Unable to destroy volume {} after shallow clone fail: {}'
-                    .format(clone_uuid, e)
-                )
-
-        def create():
-            # Note: placed outside try/except block because we create only definition first.
-            # There is no reason to call `clean` before the real resource creation.
-            volume_properties = self._create_volume_with_properties(
-                clone_uuid, clone_volume_name, size, place_resources=False
-            )
-
-            # After this point, `clean` can be called for any fail because the clone UUID
-            # is really unique. No risk to remove existing data.
-            try:
-                result = self._linstor.resource_create(resources)
-                error_str = self._get_error_str(result)
-                if error_str:
-                    raise LinstorVolumeManagerError(
-                        'Could not create cloned volume `{}` of `{}` from '
-                        'SR `{}`: {}'.format(
-                            clone_uuid, volume_uuid, self._group_name,
-                            error_str
-                        )
-                    )
-                return volume_properties
-            except Exception:
-                clean()
-                raise
-
-        # Retry because we can get errors like this:
-        # "Resource disappeared while waiting for it to be ready" or
-        # "Resource did not became ready on node 'XXX' within reasonable time, check Satellite for errors."
-        # in the LINSTOR server.
-        volume_properties = util.retry(create, maxretry=5)
-
-        try:
-            device_path = self._find_device_path(clone_uuid, clone_volume_name)
-            if persistent:
-                volume_properties[self.PROP_NOT_EXISTS] = self.STATE_EXISTS
-            self._volumes.add(clone_uuid)
-            return device_path
-        except Exception as e:
-            clean()
-            raise
+        # 2. Create clone!
+        return self.create_volume(clone_uuid, size, persistent)
 
     def remove_resourceless_volumes(self):
         """
