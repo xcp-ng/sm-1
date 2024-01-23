@@ -23,9 +23,9 @@ class Test_on_slave_is_open(unittest.TestCase):
         'blktap2'
     ]
 
-    def fake_import(self, name, *args):
-        print('Asked to import {}'.format(name))
-        return self.mocks.get(name, self.real_import(name))
+    def fake_import(self, *args, **kwargs):
+        print('Asked to import {}'.format(args[0]))
+        return self.mocks.get(args[0], self.real_import(*args, **kwargs))
 
     def setUp(self):
         self.addCleanup(mock.patch.stopall)
