@@ -309,8 +309,8 @@ class LinstorVolumeManager(object):
 
     DEV_ROOT_PATH = DRBD_BY_RES_PATH
 
-    # Default LVM extent size.
-    BLOCK_SIZE = 4 * 1024 * 1024
+    # Default sector size.
+    BLOCK_SIZE = 512
 
     # List of volume properties.
     PROP_METADATA = 'metadata'
