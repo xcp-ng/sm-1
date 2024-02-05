@@ -1827,32 +1827,7 @@ class LinstorVDI(VDI.VDI):
             return self._attach_using_http_nbd()
 
         # Ensure we have a path...
-        while vdi_uuid:
-            path = self._linstor.get_device_path(vdi_uuid)
-            if not util.pathexists(path):
-                raise xs_errors.XenError(
-                    'VDIUnavailable', opterr='Could not find: {}'.format(path)
-                )
-
-            # Diskless path can be created on the fly, ensure we can open it.
-            def check_volume_usable():
-                while True:
-                    try:
-                        with open(path, 'r+'):
-                            pass
-                    except IOError as e:
-                        if e.errno == errno.ENODATA:
-                            time.sleep(2)
-                            continue
-                        if e.errno == errno.EROFS:
-                            util.SMlog('Volume not attachable because RO. Openers: {}'.format(
-                                self.sr._linstor.get_volume_openers(vdi_uuid)
-                            ))
-                        raise
-                    break
-            util.retry(check_volume_usable, 15, 2)
-
-            vdi_uuid = self.sr._vhdutil.get_vhd_info(vdi_uuid).parentUuid
+        self._create_chain_paths(self.uuid)
 
         self.attached = True
         return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
@@ -2379,7 +2354,7 @@ class LinstorVDI(VDI.VDI):
             raise xs_errors.XenError('SnapshotChainTooLong')
 
         # Ensure we have a valid path if we don't have a local diskful.
-        self.sr._linstor.get_device_path(self.uuid)
+        self._create_chain_paths(self.uuid)
 
         volume_path = self.path
         if not util.pathexists(volume_path):
@@ -2841,6 +2816,37 @@ class LinstorVDI(VDI.VDI):
         volume_name = self._check_http_nbd_volume_name()
         self._kill_persistent_nbd_server(volume_name)
         self._kill_persistent_http_server(volume_name)
+
+    def _create_chain_paths(self, vdi_uuid):
+        # OPTIMIZE: Add a limit_to_first_allocated_block param to limit vhdutil calls.
+        # Useful for the snapshot code algorithm.
+
+        while vdi_uuid:
+            path = self._linstor.get_device_path(vdi_uuid)
+            if not util.pathexists(path):
+                raise xs_errors.XenError(
+                    'VDIUnavailable', opterr='Could not find: {}'.format(path)
+                )
+
+            # Diskless path can be created on the fly, ensure we can open it.
+            def check_volume_usable():
+                while True:
+                    try:
+                        with open(path, 'r+'):
+                            pass
+                    except IOError as e:
+                        if e.errno == errno.ENODATA:
+                            time.sleep(2)
+                            continue
+                        if e.errno == errno.EROFS:
+                            util.SMlog('Volume not attachable because RO. Openers: {}'.format(
+                                self.sr._linstor.get_volume_openers(vdi_uuid)
+                            ))
+                        raise
+                    break
+            util.retry(check_volume_usable, 15, 2)
+
+            vdi_uuid = self.sr._vhdutil.get_vhd_info(vdi_uuid).parentUuid
 
 # ------------------------------------------------------------------------------
 
