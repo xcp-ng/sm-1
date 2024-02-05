@@ -972,12 +972,12 @@ class LinstorVolumeManager(object):
         deleted VDI.
         """
 
-        assert volume_uuid != new_volume_uuid
-
         self._logger(
             'Trying to update volume UUID {} to {}...'
             .format(volume_uuid, new_volume_uuid)
         )
+        assert volume_uuid != new_volume_uuid, 'can\'t update volume UUID, same value'
+
         if not force:
             self._ensure_volume_exists(volume_uuid)
         self.ensure_volume_is_not_locked(volume_uuid)
