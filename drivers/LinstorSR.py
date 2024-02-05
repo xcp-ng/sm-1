@@ -1944,7 +1944,7 @@ class LinstorVDI(VDI.VDI):
         else:
             if new_volume_size != old_volume_size:
                 self.sr._vhdutil.inflate(
-                    self.sr._journaler, self._linstor, self.uuid, self.path,
+                    self.sr._journaler, self.uuid, self.path,
                     new_volume_size, old_volume_size
                 )
             self.sr._vhdutil.set_size_virt_fast(self.path, size)
@@ -2497,7 +2497,7 @@ class LinstorVDI(VDI.VDI):
             self.session.xenapi.VDI.set_sm_config(
                 vdi_ref, active_vdi.sm_config
             )
-        except Exception as e:
+        except Exception:
             util.logException('Failed to snapshot!')
             try:
                 self.sr._handle_interrupted_clone(
