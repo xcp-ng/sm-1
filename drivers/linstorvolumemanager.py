@@ -824,18 +824,30 @@ class LinstorVolumeManager(object):
 
         volume_name = self.get_volume_name(volume_uuid)
         self.ensure_volume_is_not_locked(volume_uuid)
-        new_size = self.round_up_volume_size(new_size)
+        new_size = self.round_up_volume_size(new_size) / 1024
 
-        result = self._linstor.volume_dfn_modify(
-            rsc_name=volume_name,
-            volume_nr=0,
-            size=new_size / 1024
-        )
+        retry_count = 30
+        while True:
+            result = self._linstor.volume_dfn_modify(
+                rsc_name=volume_name,
+                volume_nr=0,
+                size=new_size
+            )
 
-        self._mark_resource_cache_as_dirty()
+            self._mark_resource_cache_as_dirty()
 
-        error_str = self._get_error_str(result)
-        if error_str:
+            error_str = self._get_error_str(result)
+            if not error_str:
+                break
+
+            # After volume creation, DRBD volume can be unusable during many seconds.
+            # So we must retry the definition change if the device is not up to date.
+            # Often the case for thick provisioning.
+            if retry_count and error_str.find('non-UpToDate DRBD device') >= 0:
+                time.sleep(2)
+                retry_count -= 1
+                continue
+
             raise LinstorVolumeManagerError(
                 'Could not resize volume `{}` from SR `{}`: {}'
                 .format(volume_uuid, self._group_name, error_str)
