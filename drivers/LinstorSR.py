@@ -382,7 +382,7 @@ class LinstorSR(SR.SR):
 
         def load(self, *args, **kwargs):
             # Activate all LVMs to make drbd-reactor happy.
-            if self.srcmd.cmd == 'sr_attach':
+            if self.srcmd.cmd in ('sr_attach', 'vdi_attach_from_config'):
                 activate_lvm_group(self._group_name)
 
             if not self._has_session:
