@@ -953,4 +953,26 @@
             <description>LINSTOR SR delete error</description>
             <value>5007</value>
         </code>
+
+        <code>
+            <name>LargeBlockSymlinkExist</name>
+            <description>Symlink already exists</description>
+            <value>5008</value>
+        </code>
+
+        <code>
+            <name>LargeBlockNoLosetup</name>
+            <description>Couldn't find loop device</description>
+            <value>5009</value>
+        </code>
+        <code>
+            <name>LargeBlockIncorrectBlocksize</name>
+            <description>Blocksize isn't compatible with the driver</description>
+            <value>5010</value>
+        </code>
+        <code>
+            <name>LargeBlockVGReconnectFailed</name>
+            <description>Failed to reconnect the VolumeGroup</description>
+            <value>5011</value>
+        </code>
 </SM-errorcodes>
