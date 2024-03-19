@@ -1662,8 +1662,11 @@ class LinstorVDI(VDI.VDI):
                 volume_name = REDO_LOG_VOLUME_NAME
 
             self._linstor.create_volume(
-                self.uuid, volume_size, persistent=False,
-                volume_name=volume_name
+                self.uuid,
+                volume_size,
+                persistent=False,
+                volume_name=volume_name,
+                high_availability=volume_name is not None
             )
             volume_info = self._linstor.get_volume_info(self.uuid)
 
