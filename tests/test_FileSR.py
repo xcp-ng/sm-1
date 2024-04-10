@@ -478,6 +478,13 @@ class TestShareFileSR(unittest.TestCase):
                         'sr_ref': TestShareFileSR.TEST_SR_REF}
         return FakeSharedFileSR(srcmd, self.sr_uuid)
 
+    def create_sessionless_test_sr(self):
+        srcmd = mock.Mock()
+        srcmd.dconf = {}
+        srcmd.params = {'command': "some_command",
+                        'sr_ref': TestShareFileSR.TEST_SR_REF}
+        return FakeSharedFileSR(srcmd, self.sr_uuid)
+
     def test_attach_success(self):
         """
         Attach SR on FS with expected features
@@ -528,6 +535,24 @@ class TestShareFileSR(unittest.TestCase):
         # Assert
         self.mock_session.xenapi.SR.add_to_sm_config.assert_called_with(
             TestShareFileSR.TEST_SR_REF, TestShareFileSR.NO_HARDLINKS, 'True')
+
+    def test_attach_success_no_session(self):
+        test_sr = self.create_sessionless_test_sr()
+
+        with mock.patch('FileSR.open'):
+            test_sr.attach(self.sr_uuid)
+
+        self.mock_session.xenapi.SR.remove_from_sm_config.assert_not_called()
+
+    def test_attach_link_fail_no_session(self):
+        test_sr = self.create_sessionless_test_sr()
+        self.mock_link.side_effect = OSError(524, TestShareFileSR.ERROR_524)
+
+        with mock.patch('FileSR.open'):
+            test_sr.attach(self.sr_uuid)
+
+        self.mock_session.xenapi.SR.add_to_sm_config.assert_not_called()
+        self.mock_session.xenapi.message.create.assert_not_called()
 
     def test_attach_fist_active(self):
         """
