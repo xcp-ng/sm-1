@@ -76,6 +76,7 @@ def _is_open(session, args):
     import SR
     import CephFSSR
     import EXTSR
+    import LargeBlockSR
     import GlusterFSSR
     import LVHDSR
     import MooseFSSR
