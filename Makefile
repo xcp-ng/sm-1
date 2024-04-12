@@ -20,6 +20,7 @@ SM_DRIVERS += GlusterFS
 SM_DRIVERS += XFS
 SM_DRIVERS += ZFS
 SM_DRIVERS += MooseFS
+SM_DRIVERS += LargeBlock
 
 SM_LIBS := SR
 SM_LIBS += SRCommand

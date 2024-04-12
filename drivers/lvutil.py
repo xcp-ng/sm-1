@@ -569,12 +569,16 @@ def resizePV(dev):
         util.SMlog("Failed to grow the PV, non-fatal")
 
 
-def setActiveVG(path, active):
+def setActiveVG(path, active, config=None):
     "activate or deactivate VG 'path'"
     val = "n"
     if active:
         val = "y"
-    text = cmd_lvm([CMD_VGCHANGE, "-a" + val, path])
+    cmd = [CMD_VGCHANGE, "-a" + val, path]
+    if config:
+        cmd.append("--config")
+        cmd.append(config)
+    cmd_lvm(cmd)
 
 
 @lvmretry
