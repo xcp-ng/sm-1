@@ -1544,6 +1544,23 @@ class LinstorVolumeManager(object):
             }
         return interfaces
 
+    def get_node_preferred_interface(self, node_name):
+        """
+        Get the preferred interface used by a node.
+        :param str node_name: Node name of the interface to get.
+        :rtype: str
+        """
+        try:
+            nodes = self._linstor.node_list_raise([node_name]).nodes
+            if nodes:
+                properties = nodes[0].props
+                return properties.get('PrefNic', 'default')
+            return nodes
+        except Exception as e:
+            raise LinstorVolumeManagerError(
+                'Failed to get preferred interface: `{}`'.format(e)
+            )
+
     def set_node_preferred_interface(self, node_name, name):
         """
         Set the preferred interface to use on a node.
