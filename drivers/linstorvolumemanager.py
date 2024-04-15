@@ -1491,6 +1491,12 @@ class LinstorVolumeManager(object):
         :param str node_name: Node name of the interface to remove.
         :param str name: Interface to remove.
         """
+
+        if name == 'default':
+            raise LinstorVolumeManagerError(
+                'Unable to delete the default interface of a node!'
+            )
+
         result = self._linstor.netinterface_delete(node_name, name)
         errors = self._filter_errors(result)
         if errors:
