@@ -884,6 +884,7 @@ def health_check(session, args):
        'controller-uri': '',
        'nodes': {},
        'storage-pools': {},
+       'resources': {},
        'warnings': [],
        'errors': []
     }
