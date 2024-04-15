@@ -1062,6 +1062,21 @@ def list_node_interfaces(session, args):
         raise XenAPIPlugin.Failure('-1', [str(e)])
 
 
+def get_node_preferred_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        return linstor.get_node_preferred_interface(hostname)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+
+
 def set_node_preferred_interface(session, args):
     group_name = args['groupName']
     hostname = args['hostname']
@@ -1132,5 +1147,6 @@ if __name__ == '__main__':
         'destroyNodeInterface': destroy_node_interface,
         'modifyNodeInterface': modify_node_interface,
         'listNodeInterfaces': list_node_interfaces,
+        'getNodePreferredInterface': get_node_preferred_interface,
         'setNodePreferredInterface': set_node_preferred_interface
     })
