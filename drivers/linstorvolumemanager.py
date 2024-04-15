@@ -1624,7 +1624,7 @@ class LinstorVolumeManager(object):
 
             storage_pools[pool.node_name].append({
                 'storage-pool-name': pool.name,
-                'uuid': pool.uuid,
+                'linstor-uuid': pool.uuid,
                 'free-size': size,
                 'capacity': capacity
             })
@@ -1637,16 +1637,19 @@ class LinstorVolumeManager(object):
         :rtype: dict(str, list)
         """
         resources = {}
-        resource_list = self._linstor.resource_list_raise()
+        resource_list = self._get_resource_cache()
+        volume_names = self.get_volumes_with_name()
         for resource in resource_list.resources:
             if resource.name not in resources:
-                resources[resource.name] = {}
+                resources[resource.name] = { 'nodes': {}, 'uuid': '' }
+            resource_nodes = resources[resource.name]['nodes']
 
-            resources[resource.name][resource.node_name] = {
+            resource_nodes[resource.node_name] = {
                 'volumes': [],
                 'diskful': linstor.consts.FLAG_DISKLESS not in resource.flags,
                 'tie-breaker': linstor.consts.FLAG_TIE_BREAKER in resource.flags
             }
+            resource_volumes = resource_nodes[resource.node_name]['volumes']
 
             for volume in resource.volumes:
                 # We ignore diskless pools of the form "DfltDisklessStorPool".
@@ -1665,17 +1668,17 @@ class LinstorVolumeManager(object):
                 else:
                     allocated_size *= 1024
 
-            resources[resource.name][resource.node_name]['volumes'].append({
-                'storage-pool-name': volume.storage_pool_name,
-                'uuid': volume.uuid,
-                'number': volume.number,
-                'device-path': volume.device_path,
-                'usable-size': usable_size,
-                'allocated-size': allocated_size
-            })
+                resource_volumes.append({
+                    'storage-pool-name': volume.storage_pool_name,
+                    'linstor-uuid': volume.uuid,
+                    'number': volume.number,
+                    'device-path': volume.device_path,
+                    'usable-size': usable_size,
+                    'allocated-size': allocated_size
+                })
 
         for resource_state in resource_list.resource_states:
-            resource = resources[resource_state.rsc_name][resource_state.node_name]
+            resource = resources[resource_state.rsc_name]['nodes'][resource_state.node_name]
             resource['in-use'] = resource_state.in_use
 
             volumes = resource['volumes']
@@ -1683,6 +1686,11 @@ class LinstorVolumeManager(object):
                 volume = next((x for x in volumes if x['number'] == volume_state.number), None)
                 if volume:
                     volume['disk-state'] = volume_state.disk_state
+
+        for volume_uuid, volume_name in volume_names.items():
+            resource = resources.get(volume_name)
+            if resource:
+                resource['uuid'] = volume_uuid
 
         return resources
 
