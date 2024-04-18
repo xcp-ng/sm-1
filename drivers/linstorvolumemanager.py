@@ -1623,7 +1623,7 @@ class LinstorVolumeManager(object):
                     capacity *= 1024
 
             storage_pools[pool.node_name].append({
-                'storage-pool-name': pool.name,
+                'name': pool.name,
                 'linstor-uuid': pool.uuid,
                 'free-size': size,
                 'capacity': capacity
