@@ -33,18 +33,21 @@ EMEDIUMTYPE = 124
 
 
 def call_remote_method(session, host_ref, method, device_path, args):
+    host_rec = session.xenapi.host.get_record(host_ref)
+    host_uuid = host_rec['uuid']
+
     try:
         response = session.xenapi.host.call_plugin(
             host_ref, MANAGER_PLUGIN, method, args
         )
     except Exception as e:
-        util.SMlog('call-plugin ({} with {}) exception: {}'.format(
-            method, args, e
+        util.SMlog('call-plugin on {} ({} with {}) exception: {}'.format(
+            host_uuid, method, args, e
         ))
         raise util.SMException(str(e))
 
-    util.SMlog('call-plugin ({} with {}) returned: {}'.format(
-        method, args, response
+    util.SMlog('call-plugin on {} ({} with {}) returned: {}'.format(
+        host_uuid, method, args, response
     ))
 
     return response
@@ -86,33 +89,6 @@ def linstorhostcall(local_method, remote_method):
                 self._linstor.get_volume_name(vdi_uuid)
             )
 
-            # A. Try a call using directly the DRBD device to avoid
-            # remote request.
-
-            # Try to read locally if the device is not in use or if the device
-            # is up to date and not diskless.
-            (node_names, in_use_by) = \
-                self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
-
-            local_e = None
-            try:
-                if not in_use_by or socket.gethostname() in node_names:
-                    return self._call_local_method(local_method, device_path, *args[2:], **kwargs)
-            except ErofsLinstorCallException as e:
-                local_e = e.cmd_err
-            except Exception as e:
-                local_e = e
-
-            util.SMlog(
-                'unable to execute `{}` locally, retry using a readable host... (cause: {})'.format(
-                    remote_method, local_e if local_e else 'local diskless + in use or not up to date'
-                )
-            )
-
-            if in_use_by:
-                node_names = {in_use_by}
-
-            # B. Execute the plugin on master or slave.
             remote_args = {
                 'devicePath': device_path,
                 'groupName': self._linstor.group_name
@@ -121,14 +97,48 @@ def linstorhostcall(local_method, remote_method):
             remote_args = {str(key): str(value) for key, value in remote_args.iteritems()}
 
             try:
-                def remote_call():
-                    host_ref = self._get_readonly_host(vdi_uuid, device_path, node_names)
-                    return call_remote_method(self._session, host_ref, remote_method, device_path, remote_args)
-                response = util.retry(remote_call, 5, 2)
-            except Exception as remote_e:
-                self._raise_openers_exception(device_path, local_e or remote_e)
+                host_ref_attached = util.get_hosts_attached_on(self._session, [vdi_uuid])[0]
+                if host_ref_attached:
+                    response = call_remote_method(
+                        self._session, host_ref_attached, remote_method, device_path, remote_args
+                    )
+                    return response_parser(self, vdi_uuid, response)
+            except Exception as e:
+                util.SMlog(
+                    'Failed to call method on attached host. Trying local access... (cause: {})'.format(e),
+                    priority=util.LOG_DEBUG
+                )
 
-            return response_parser(self, vdi_uuid, response)
+            try:
+                master_ref = self._session.xenapi.pool.get_all_records().values()[0]['master']
+                response = call_remote_method(self._session, master_ref, remote_method, device_path, remote_args)
+                return response_parser(self, vdi_uuid, response)
+            except Exception as e:
+                util.SMlog(
+                    'Failed to call method on master host. Finding primary node... (cause: {})'.format(e),
+                    priority=util.LOG_DEBUG
+                )
+
+            nodes, primary_hostname = self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
+            if primary_hostname:
+                try:
+                    host_ref = self._get_readonly_host(vdi_uuid, device_path, {primary_hostname})
+                    response = call_remote_method(self._session, host_ref, remote_method, device_path, remote_args)
+                    return response_parser(self, vdi_uuid, response)
+                except Exception as remote_e:
+                    self._raise_openers_exception(device_path, remote_e)
+            else:
+                util.SMlog(
+                    'Couldn\'t get primary for {}. Trying with another node...'.format(vdi_uuid),
+                    priority=util.LOG_DEBUG
+                )
+                try:
+                    host = self._get_readonly_host(vdi_uuid, device_path, nodes)
+                    response = call_remote_method(self._session, host, remote_method, device_path, remote_args)
+                    return response_parser(self, vdi_uuid, response)
+                except Exception as remote_e:
+                    self._raise_openers_exception(device_path, remote_e)
+
         return wrapper
     return decorated
 
