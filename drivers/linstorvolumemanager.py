@@ -1438,6 +1438,24 @@ class LinstorVolumeManager(object):
 
         return (node_names, in_use_by)
 
+    def get_primary(self, volume_uuid):
+        """
+        Find the node that opened a volume, i.e. the primary.
+        :rtype: str
+        """
+        volume_name = self.get_volume_name(volume_uuid)
+
+        resource_states = filter(
+            lambda resource_state: resource_state.name == volume_name,
+            self._get_resource_cache().resource_states
+        )
+
+        for resource_state in resource_states:
+            if resource_state.in_use:
+                return resource_state.node_name
+
+        return None
+
     def invalidate_resource_cache(self):
         """
         If resources are impacted by external commands like vhdutil,
