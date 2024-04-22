@@ -82,6 +82,9 @@ class LargeBlockSR(EXTSR.EXTSR):
     @deviceCheck
     def create(self, sr_uuid, size):
         base_devices = self.dconf["device"].split(",")
+        if len(base_devices) > 1:
+            raise xs_errors.XenError("ConfigDeviceInvalid", opterr="Multiple devices configuration is not supported")
+
         for dev in base_devices:
             logical_blocksize = util.pread2(["blockdev", "--getss", dev]).strip()
             if logical_blocksize == "512":
