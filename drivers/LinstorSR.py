@@ -2500,17 +2500,17 @@ class LinstorVDI(VDI.VDI):
             self.session.xenapi.VDI.set_sm_config(
                 vdi_ref, active_vdi.sm_config
             )
-        except Exception:
+        except Exception as e:
             util.logException('Failed to snapshot!')
             try:
                 self.sr._handle_interrupted_clone(
                     active_uuid, clone_info, force_undo=True
                 )
                 self.sr._journaler.remove(LinstorJournaler.CLONE, active_uuid)
-            except Exception as e:
+            except Exception as clean_error:
                 util.SMlog(
                     'WARNING: Failed to clean up failed snapshot: {}'
-                    .format(e)
+                    .format(clean_error)
                 )
             raise xs_errors.XenError('VDIClone', opterr=str(e))
 
