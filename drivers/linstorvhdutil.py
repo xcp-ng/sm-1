@@ -21,6 +21,7 @@ import distutils.util
 import errno
 import json
 import socket
+import time
 import util
 import vhdutil
 import xs_errors
@@ -140,6 +141,43 @@ class LinstorVhdUtil:
     def __init__(self, session, linstor):
         self._session = session
         self._linstor = linstor
+
+    def create_chain_paths(self, vdi_uuid):
+        # OPTIMIZE: Add a limit_to_first_allocated_block param to limit vhdutil calls.
+        # Useful for the snapshot code algorithm.
+
+        leaf_vdi_path = self._linstor.get_device_path(vdi_uuid)
+        path = leaf_vdi_path
+        while True:
+            if not util.pathexists(path):
+                raise xs_errors.XenError(
+                    'VDIUnavailable', opterr='Could not find: {}'.format(path)
+                )
+
+            # Diskless path can be created on the fly, ensure we can open it.
+            def check_volume_usable():
+                while True:
+                    try:
+                        with open(path, 'r+'):
+                            pass
+                    except IOError as e:
+                        if e.errno == errno.ENODATA:
+                            time.sleep(2)
+                            continue
+                        if e.errno == errno.EROFS:
+                            util.SMlog('Volume not attachable because RO. Openers: {}'.format(
+                                self._linstor.get_volume_openers(vdi_uuid)
+                            ))
+                        raise
+                    break
+            util.retry(check_volume_usable, 15, 2)
+
+            vdi_uuid = self.get_vhd_info(vdi_uuid).parentUuid
+            if not vdi_uuid:
+                break
+            path = self._linstor.get_device_path(vdi_uuid)
+
+        return leaf_vdi_path
 
     # --------------------------------------------------------------------------
     # Getters: read locally and try on another host in case of failure.
