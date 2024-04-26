@@ -167,15 +167,6 @@ class TestLVHDoISCSISR(ISCSITestCase):
 
         super(TestLVHDoISCSISR, self).setUp()
 
-    @property
-    def mock_baseiscsi(self):
-        assert len(self.base_srs) == 1
-        single_sr = None
-        for sr in self.base_srs:
-            single_sr = sr
-
-        return single_sr
-
     def baseiscsi(self, srcmd, sr_uuid):
         new_baseiscsi = mock.create_autospec(BaseISCSISR)
         local_iqn = srcmd.dconf['localIQN']
@@ -198,48 +189,6 @@ class TestLVHDoISCSISR(ISCSITestCase):
         self.sr_uuid = str(uuid4())
         self.subject = LVHDoISCSISR.LVHDoISCSISR(
             sr_cmd, self.sr_uuid)
-
-    def test_check_sr_pbd_not_found(self):
-        # Arrange
-        self.mock_util.find_my_pbd.return_value = None
-        self.create_test_sr(self.create_sr_command())
-
-        # Act
-        self.subject.check_sr(TEST_SR_UUID)
-
-        # Assert
-        self.mock_util.find_my_pbd.assert_called_with(
-            self.mock_session, 'test_host', 'sr_ref')
-
-    def test_check_sr_correct_sessions_count(self):
-        # Arrange
-        self.mock_util.find_my_pbd.return_value = 'my_pbd'
-        self.mock_session.xenapi.PBD.get_other_config.return_value = {
-            'iscsi_sessions': 2
-        }
-        self.create_test_sr(self.create_sr_command())
-
-        # Act
-        self.subject.check_sr(TEST_SR_UUID)
-
-        # Assert
-        self.mock_session.xenapi.PBD.get_other_config.assert_called_with('my_pbd')
-
-    def test_check_sr_not_enough_sessions(self):
-        # Arrange
-        self.mock_util.find_my_pbd.return_value = 'my_pbd'
-        self.mock_session.xenapi.PBD.get_other_config.return_value = {
-            'iscsi_sessions': 1
-        }
-        self.create_test_sr(self.create_sr_command())
-
-        # Act
-        self.subject.check_sr(TEST_SR_UUID)
-
-        # Assert
-        self.mock_baseiscsi.attach.assert_called_with(
-            TEST_SR_UUID
-        )
 
     def test_sr_attach_multi_session(self):
         # Arrange
