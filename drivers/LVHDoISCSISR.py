@@ -553,6 +553,8 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         return out
 
     def check_sr(self, sr_uuid):
+        # Disable to prevent daemon restart.
+        return
         """Hook to check SR health"""
         pbdref = util.find_my_pbd(self.session, self.host_ref, self.sr_ref)
         if pbdref:
