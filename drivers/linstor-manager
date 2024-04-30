@@ -241,6 +241,9 @@ def get_drbd_volumes(volume_group=None):
     config = json.loads(stdout)
     for resource in config:
         for volume in resource['_this_host']['volumes']:
+            if 'backing-disk' not in volume:
+                continue
+
             backing_disk = volume['backing-disk']
             match = BACKING_DISK_RE.match(backing_disk)
             if not match:
