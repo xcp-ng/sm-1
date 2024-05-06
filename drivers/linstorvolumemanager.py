@@ -2648,7 +2648,7 @@ class LinstorVolumeManager(object):
             )
         except Exception as e:
             raise LinstorVolumeManagerError(
-                'Unable to get resources during database creation: {}'
+                'Unable to fetch database resource: {}'
                 .format(e)
             )
 
