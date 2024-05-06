@@ -29,7 +29,7 @@ import XenAPIPlugin
 
 from json import JSONEncoder
 from linstorjournaler import LinstorJournaler
-from linstorvhdutil import LinstorVhdUtil
+from linstorvhdutil import LinstorVhdUtil, check_ex
 from linstorvolumemanager import get_controller_uri, get_local_volume_openers, LinstorVolumeManager
 from lock import Lock
 import json
@@ -390,7 +390,8 @@ def check(session, args):
             args['ignoreMissingFooter']
         )
         fast = distutils.util.strtobool(args['fast'])
-        return str(vhdutil.check(device_path, ignore_missing_footer, fast))
+        check_ex(device_path, ignore_missing_footer, fast)
+        return str(True)
     except Exception as e:
         util.SMlog('linstor-manager:check error: {}'.format(e))
         raise
