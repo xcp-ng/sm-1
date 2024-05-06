@@ -50,6 +50,16 @@ def call_remote_method(session, host_ref, method, device_path, args):
     return response
 
 
+def check_ex(path, ignoreMissingFooter = False, fast = False):
+    cmd = [vhdutil.VHD_UTIL, "check", vhdutil.OPT_LOG_ERR, "-n", path]
+    if ignoreMissingFooter:
+        cmd.append("-i")
+    if fast:
+        cmd.append("-B")
+
+    vhdutil.ioretry(cmd)
+
+
 class LinstorCallException(util.SMException):
     def __init__(self, cmd_err):
         self.cmd_err = cmd_err
@@ -188,9 +198,14 @@ class LinstorVhdUtil:
             'ignoreMissingFooter': ignore_missing_footer,
             'fast': fast
         }
-        return self._check(vdi_uuid, **kwargs)  # pylint: disable = E1123
+        try:
+            self._check(vdi_uuid, **kwargs)  # pylint: disable = E1123
+            return True
+        except Exception as e:
+            util.SMlog('Call to `check` failed: {}'.format(e))
+            return False
 
-    @linstorhostcall(vhdutil.check, 'check')
+    @linstorhostcall(check_ex, 'check')
     def _check(self, vdi_uuid, response):
         return distutils.util.strtobool(response)
 
