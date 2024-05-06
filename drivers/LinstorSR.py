@@ -766,7 +766,7 @@ class LinstorSR(SR.SR):
         # is started without a shared and mounted /var/lib/linstor path.
         try:
             self._linstor.get_database_path()
-        except Exception:
+        except Exception as e:
             # Failed to get database path, ensure we don't have
             # VDIs in the XAPI database...
             if self.session.xenapi.SR.get_VDIs(
@@ -774,7 +774,7 @@ class LinstorSR(SR.SR):
             ):
                 raise xs_errors.XenError(
                     'SRUnavailable',
-                    opterr='Database is not mounted'
+                    opterr='Database is not mounted or node name is invalid ({})'.format(e)
                 )
 
         # Update the database before the restart of the GC to avoid
