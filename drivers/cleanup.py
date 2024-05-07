@@ -3123,7 +3123,7 @@ def normalizeType(type):
         type = SR.TYPE_LVHD
     if type in [
         "ext", "nfs", "ocfsoiscsi", "ocfsohba", "smb", "cephfs", "glusterfs",
-        "moosefs", "xfs", "zfs", "ext4"
+        "moosefs", "xfs", "zfs", "ext4", "largeblock"
     ]:
         type = SR.TYPE_FILE
     if type in ["linstor"]:
