@@ -650,17 +650,17 @@ class LinstorSR(SR.SR):
                 opterr='Cannot get controller node name'
             )
 
-        host = None
+        host_ref = None
         if node_name == 'localhost':
-            host = util.get_this_host_ref(self.session)
+            host_ref = util.get_this_host_ref(self.session)
         else:
             for slave in util.get_all_slaves(self.session):
                 r_name = self.session.xenapi.host.get_record(slave)['hostname']
                 if r_name == node_name:
-                    host = slave
+                    host_ref = slave
                     break
 
-        if not host:
+        if not host_ref:
             raise xs_errors.XenError(
                 'LinstorSRDelete',
                 opterr='Failed to find host with hostname: {}'.format(
@@ -677,7 +677,7 @@ class LinstorSR(SR.SR):
                 'groupName': self._group_name,
             }
             self._exec_manager_command(
-                host, 'destroy', args, 'LinstorSRDelete'
+                host_ref, 'destroy', args, 'LinstorSRDelete'
             )
         except Exception as e:
             try:
