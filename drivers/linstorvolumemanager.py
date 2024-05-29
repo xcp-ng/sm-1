@@ -1368,7 +1368,21 @@ class LinstorVolumeManager(object):
             self._linstor.disconnect()
             self._linstor.connect()
 
-            # 4.5. Destroy group and storage pools.
+            # 4.5 Destroy remaining drbd nodes on hosts
+            # We check if there is drbd node on hosts that could mean blocking when destroying resource groups
+            # It needs to be done locally by each host so we go through the linstor-manager plugin
+            # If we don't do this sometimes, the destroy will fail when trying to destroy the resource groups with:
+            # "linstor-manager:destroy error: Failed to destroy SP `xcp-sr-linstor_group_thin_device` on node `r620-s2`: The specified storage pool 'xcp-sr-linstor_group_thin_device' on node 'r620-s2' can not be deleted as volumes / snapshot-volumes are still using it."
+            session = util.timeout_call(5, util.get_localAPI_session)
+            for host_ref, host_record in session.xenapi.host.get_all_records().items():
+                try:
+                    response = session.xenapi.host.call_plugin(
+                        host_ref, "linstor-manager", "destroyDrbdVolumes", {'volume_group': self._group_name}
+                        )
+                except Exception as e:
+                    util.SMlog("Calling destroyDrbdVolumes on host {} failed with error {}".format(host_ref, e))
+
+            # 4.6. Destroy group and storage pools.
             self._destroy_resource_group(self._linstor, self._group_name)
             self._destroy_resource_group(self._linstor, self._ha_group_name)
             for pool in self._get_storage_pools(force=True):
