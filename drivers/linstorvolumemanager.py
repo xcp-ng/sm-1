@@ -1394,9 +1394,9 @@ class LinstorVolumeManager(object):
 
         try:
             self._start_controller(start=False)
-            ignored = ('lost+found')
-            for file in filter(lambda file: file not in ignored, os.listdir(DATABASE_PATH)):
-                os.remove(DATABASE_PATH + '/' + file)
+            for file in os.listdir(DATABASE_PATH):
+                if file != 'lost+found':
+                    os.remove(DATABASE_PATH + '/' + file)
         except Exception as e:
             util.SMlog(
                 'Ignoring failure after LINSTOR SR destruction: {}'
