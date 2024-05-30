@@ -1395,7 +1395,7 @@ class LinstorVolumeManager(object):
 
         try:
             self._start_controller(start=False)
-            for file in glob.glob(DATABASE_PATH + '/'):
+            for file in glob.glob(DATABASE_PATH + '/*'):
                 os.remove(file)
         except Exception as e:
             util.SMlog(
