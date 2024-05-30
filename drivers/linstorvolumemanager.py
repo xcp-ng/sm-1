@@ -18,7 +18,6 @@
 
 import distutils.util
 import errno
-import glob
 import json
 import linstor
 import os.path
@@ -1395,8 +1394,9 @@ class LinstorVolumeManager(object):
 
         try:
             self._start_controller(start=False)
-            for file in glob.glob(DATABASE_PATH + '/*'):
-                os.remove(file)
+            ignored = ('lost+found')
+            for file in filter(lambda file: file not in ignored, os.listdir(DATABASE_PATH)):
+                os.remove(DATABASE_PATH + '/' + file)
         except Exception as e:
             util.SMlog(
                 'Ignoring failure after LINSTOR SR destruction: {}'
