@@ -152,7 +152,7 @@ class LinstorVhdUtil:
         self._session = session
         self._linstor = linstor
 
-    def create_chain_paths(self, vdi_uuid):
+    def create_chain_paths(self, vdi_uuid, readonly=False):
         # OPTIMIZE: Add a limit_to_first_allocated_block param to limit vhdutil calls.
         # Useful for the snapshot code algorithm.
 
@@ -168,7 +168,7 @@ class LinstorVhdUtil:
             def check_volume_usable():
                 while True:
                     try:
-                        with open(path, 'r+'):
+                        with open(path, 'r' if readonly else 'r+'):
                             pass
                     except IOError as e:
                         if e.errno == errno.ENODATA:
@@ -186,6 +186,7 @@ class LinstorVhdUtil:
             if not vdi_uuid:
                 break
             path = self._linstor.get_device_path(vdi_uuid)
+            readonly = True  # Non-leaf is always readonly.
 
         return leaf_vdi_path
 
