@@ -1793,10 +1793,10 @@ class LinstorVDI(VDI.VDI):
                 'scan SR first to trigger auto-repair'
             )
 
-        if not attach_from_config or self.sr._is_master:
-            writable = 'args' not in self.sr.srcmd.params or \
-                self.sr.srcmd.params['args'][0] == 'true'
+        writable = 'args' not in self.sr.srcmd.params or \
+            self.sr.srcmd.params['args'][0] == 'true'
 
+        if not attach_from_config or self.sr._is_master:
             # We need to inflate the volume if we don't have enough place
             # to mount the VHD image. I.e. the volume capacity must be greater
             # than the VHD size + bitmap size.
@@ -1830,7 +1830,7 @@ class LinstorVDI(VDI.VDI):
             return self._attach_using_http_nbd()
 
         # Ensure we have a path...
-        self.sr._vhdutil.create_chain_paths(self.uuid)
+        self.sr._vhdutil.create_chain_paths(self.uuid, readonly=not writable)
 
         self.attached = True
         return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
@@ -2357,7 +2357,7 @@ class LinstorVDI(VDI.VDI):
             raise xs_errors.XenError('SnapshotChainTooLong')
 
         # Ensure we have a valid path if we don't have a local diskful.
-        self.sr._vhdutil.create_chain_paths(self.uuid)
+        self.sr._vhdutil.create_chain_paths(self.uuid, readonly=True)
 
         volume_path = self.path
         if not util.pathexists(volume_path):
