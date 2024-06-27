@@ -1,8 +1,0 @@
-[Unit]
-Description=Healthy Check service for Storage Repositories
-Wants=xapi-init-complete.target
-
-[Service]
-Type=oneshot
-ExecStart=/opt/xensource/sm/sr_health_check.py
-
