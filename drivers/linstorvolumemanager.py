@@ -812,6 +812,13 @@ class LinstorVolumeManager(object):
         volume_name = volume_properties.get(self.PROP_VOLUME_NAME)
 
         node_name = socket.gethostname()
+
+        for resource in self._get_resource_cache().resources:
+            if resource.name == volume_name and resource.node_name == node_name:
+                if linstor.consts.FLAG_TIE_BREAKER in resource.flags:
+                    return
+                break
+
         result = self._linstor.resource_delete_if_diskless(
             node_name=node_name, rsc_name=volume_name
         )
