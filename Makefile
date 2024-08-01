@@ -69,7 +69,6 @@ SM_LIBS += pluginutil
 SM_LIBS += fcoelib
 SM_LIBS += constants
 SM_LIBS += cbtutil
-SM_LIBS += sr_health_check
 
 UDEV_RULES = 65-multipath 55-xs-mpath-scsidev 57-usb 58-xapi
 MPATH_DAEMON = sm-multipath
@@ -183,10 +182,6 @@ install: precheck
 	install -m 644 systemd/mpathcount.* \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	install -m 644 systemd/storage-init.service \
-	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
-	install -m 644 systemd/sr_health_check.service \
-	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
-	install -m 644 systemd/sr_health_check.timer \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
 	install -m 644 systemd/linstor-monitor.service \
 	  $(SM_STAGING)/$(SYSTEMD_SERVICE_DIR)
