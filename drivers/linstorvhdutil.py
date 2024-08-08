@@ -119,10 +119,10 @@ def linstorhostcall(local_method, remote_method):
                     priority=util.LOG_DEBUG
                 )
 
-            nodes, primary_hostname = self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
-            if primary_hostname:
+            nodes, primary_node_name = self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
+            if primary_node_name:
                 try:
-                    host_ref = self._get_readonly_host(vdi_uuid, device_path, {primary_hostname})
+                    host_ref = self._get_readonly_host(vdi_uuid, device_path, {primary_node_name})
                     response = call_remote_method(self._session, host_ref, remote_method, device_path, remote_args)
                     return response_parser(self, vdi_uuid, response)
                 except Exception as remote_e:
@@ -448,8 +448,11 @@ class LinstorVhdUtil:
 
         hosts = self._session.xenapi.host.get_all_records()
         for host_ref, host_record in hosts.items():
-            if host_record['hostname'] in node_names:
-                return host_ref
+            try:
+                if self._linstor.get_node_name_from_host(host_record['hostname']) in node_names:
+                    return host_ref
+            except Exception:
+                pass
 
         raise xs_errors.XenError(
             'VDIUnavailable',

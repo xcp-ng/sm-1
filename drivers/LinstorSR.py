@@ -653,7 +653,7 @@ class LinstorSR(SR.SR):
         else:
             for slave in util.get_all_slaves(self.session):
                 r_name = self.session.xenapi.host.get_record(slave)['hostname']
-                if r_name == node_name:
+                if self._linstor.get_node_name_from_host(r_name) == node_name:
                     host_ref = slave
                     break
 
@@ -887,19 +887,21 @@ class LinstorSR(SR.SR):
         self, enabled, controller_node_name=None
     ):
         if controller_node_name == 'localhost':
-            controller_node_name = self.session.xenapi.host.get_record(
+            hostname = self.session.xenapi.host.get_record(
                 util.get_this_host_ref(self.session)
             )['hostname']
-            assert controller_node_name
-            assert controller_node_name != 'localhost'
+            assert hostname
+            assert hostname != 'localhost'
+            controller_node_name = self._linstor.get_node_name_from_host(hostname)
 
         controller_host = None
         secondary_hosts = []
 
+        controller_hostname = controller_node_name.lower()
         hosts = self.session.xenapi.host.get_all_records()
         for host_ref, host_rec in hosts.iteritems():
             hostname = host_rec['hostname']
-            if controller_node_name == hostname:
+            if controller_hostname == hostname.lower():
                 controller_host = host_ref
             else:
                 secondary_hosts.append((host_ref, hostname))
@@ -2764,8 +2766,7 @@ class LinstorVDI(VDI.VDI):
                     .format(self.uuid, e)
                 )
 
-            hostname = socket.gethostname()
-            must_get_device_path = hostname in volume_info.diskful
+            must_get_device_path = self._linstor.get_current_node_name() in volume_info.diskful
 
         drbd_path = None
         if must_get_device_path or self.sr.is_master():

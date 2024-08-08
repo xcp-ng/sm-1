@@ -90,7 +90,7 @@ def get_all_volume_openers(resource_name, volume):
 
     hosts = session.xenapi.host.get_all_records()
     for host_ref, host_record in hosts.items():
-        node_name = host_record['hostname']
+        hostname = host_record['hostname']
         try:
             if not session.xenapi.host_metrics.get_record(
                 host_record['metrics']
@@ -98,7 +98,7 @@ def get_all_volume_openers(resource_name, volume):
                 # Ensure we call plugin on online hosts only.
                 continue
 
-            openers[node_name] = json.loads(
+            openers[hostname] = json.loads(
                 session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {
                     'resourceName': resource_name,
                     'volume': volume
@@ -106,7 +106,7 @@ def get_all_volume_openers(resource_name, volume):
             )
         except Exception as e:
             util.SMlog('Failed to get openers of `{}` on `{}`: {}'.format(
-                resource_name, node_name, e
+                resource_name, hostname, e
             ))
 
     return openers
@@ -237,20 +237,20 @@ def get_controller_node_name():
             if distutils.util.strtobool(session.xenapi.host.call_plugin(
                 host_ref, PLUGIN, PLUGIN_CMD, {}
             )):
-                return node_name
+                return node_name # fix
         except Exception as e:
             util.SMlog('Failed to call plugin to get controller on `{}`: {}'.format(
                 node_name, e
             ))
 
 
-def demote_drbd_resource(node_name, resource_name):
+def demote_drbd_resource(linstor, node_name, resource_name):
     PLUGIN_CMD = 'demoteDrbdResource'
 
     session = util.timeout_call(5, util.get_localAPI_session)
 
     for host_ref, host_record in session.xenapi.host.get_all_records().items():
-        if host_record['hostname'] != node_name:
+        if linstor.get_node_name_from_host(host_record['hostname']) != node_name:
             continue
 
         try:
@@ -261,10 +261,6 @@ def demote_drbd_resource(node_name, resource_name):
             util.SMlog('Failed to demote resource `{}` on `{}`: {}'.format(
                 resource_name, node_name, e
             ))
-    raise Exception(
-        'Can\'t demote resource `{}`, unable to find node `{}`'
-        .format(resource_name, node_name)
-    )
 
 # ==============================================================================
 
@@ -811,7 +807,7 @@ class LinstorVolumeManager(object):
         volume_properties = self._get_volume_properties(volume_uuid)
         volume_name = volume_properties.get(self.PROP_VOLUME_NAME)
 
-        node_name = socket.gethostname()
+        node_name = self.get_current_node_name()
 
         for resource in self._get_resource_cache().resources:
             if resource.name == volume_name and resource.node_name == node_name:
@@ -1464,6 +1460,7 @@ class LinstorVolumeManager(object):
         """
         self._mark_resource_cache_as_dirty()
 
+    # TODO: Remove?
     def has_node(self, node_name):
         """
         Check if a node exists in the LINSTOR database.
@@ -1477,6 +1474,42 @@ class LinstorVolumeManager(object):
                 .format(node_name, error_str)
             )
         return bool(result[0].node(node_name))
+
+    def get_node_name_from_host(self, hostname):
+        """
+        Try to return the node name attached to a host.
+        :param str hostname: Hostname to find.
+        :rtype: str
+        """
+        return self._get_node_name_from_host(self._linstor, hostname)
+
+    def get_current_node_name(self):
+        """
+        Try to return the node name attached to the current host.
+        :rtype: str
+        """
+        return self._get_current_node_name(self._linstor)
+
+    @classmethod
+    def _get_node_name_from_host(cls, lin, hostname):
+        try:
+            node_name = hostname.lower()
+
+            for node in lin.node_list_raise().nodes:
+                if node_name == node.name.lower():
+                    return node.name
+        except Exception as e:
+            raise LinstorVolumeManagerError(
+                'Failed to get node name: `{}`'.format(e)
+            )
+
+        raise LinstorVolumeManagerError(
+            'Failed to get node name: `{}` missing from list'.format(hostname)
+        )
+
+    @classmethod
+    def _get_current_node_name(cls, lin):
+        return cls._get_node_name_from_host(lin, socket.gethostname())
 
     def create_node(self, node_name, ip):
         """
@@ -2377,7 +2410,7 @@ class LinstorVolumeManager(object):
         return expected_device_path
 
     def _request_device_path(self, volume_uuid, volume_name, activate=False):
-        node_name = socket.gethostname()
+        node_name = self.get_current_node_name()
 
         resources = filter(
             lambda resource: resource.node_name == node_name and
@@ -2435,7 +2468,7 @@ class LinstorVolumeManager(object):
         for resource_state in resource_states:
             volume_state = resource_state.volume_states[0]
             if resource_state.in_use:
-                demote_drbd_resource(resource_state.node_name, resource_name)
+                demote_drbd_resource(self._linstor, resource_state.node_name, resource_name)
                 break
         self._destroy_resource(resource_name)
 
@@ -2677,7 +2710,7 @@ class LinstorVolumeManager(object):
 
     @classmethod
     def _request_database_path(cls, lin, activate=False):
-        node_name = socket.gethostname()
+        node_name = cls._get_current_node_name(lin)
 
         try:
             resources = filter(

@@ -645,8 +645,15 @@ def add_host(session, args):
         logger=util.SMlog
     )
 
-    node_name = socket.gethostname()
-    has_node = linstor.has_node(node_name)
+    hostname = socket.gethostname()
+    has_node = True
+    try:
+        node_name = linstor.get_node_name_from_host(hostname)
+    except LinstorVolumeManagerError as e:
+        if 'missing from list' not in str(e):
+            raise
+        has_node = False
+        node_name = hostname
 
     new_pbd_ref = None
 
@@ -748,8 +755,17 @@ def remove_host(session, args):
         logger=util.SMlog
     )
 
-    node_name = socket.gethostname()
-    if linstor.has_node(node_name):
+    hostname = socket.gethostname()
+    has_node = True
+    try:
+        node_name = linstor.get_node_name_from_host(hostname)
+    except LinstorVolumeManagerError as e:
+        if 'missing from list' not in str(e):
+            raise
+        has_node = False
+        node_name = hostname
+
+    if has_node:
         linstor.destroy_node(node_name)
         if linstor.has_node(node_name):
             raise Exception('Failed to remove node! Unknown error.')
@@ -1094,7 +1110,9 @@ def create_node_interface(session, args):
         logger=util.SMlog
     )
     try:
-        linstor.create_node_interface(hostname, name, ip_addr)
+        linstor.create_node_interface(
+            linstor.get_node_name_from_host(hostname), name, ip_addr
+        )
     except Exception as e:
         raise XenAPIPlugin.Failure('-1', [str(e)])
     return str(True)
@@ -1111,7 +1129,9 @@ def destroy_node_interface(session, args):
         logger=util.SMlog
     )
     try:
-        linstor.destroy_node_interface(hostname, name)
+        linstor.destroy_node_interface(
+            linstor.get_node_name_from_host(hostname), name
+        )
     except Exception as e:
         raise XenAPIPlugin.Failure('-1', [str(e)])
     return str(True)
@@ -1131,7 +1151,9 @@ def modify_node_interface(session, args):
         logger=util.SMlog
     )
     try:
-        linstor.modify_node_interface(hostname, name, ip_addr)
+        linstor.modify_node_interface(
+            linstor.get_node_name_from_host(hostname), name, ip_addr
+        )
     except Exception as e:
         raise XenAPIPlugin.Failure('-1', [str(e)])
     return str(True)
@@ -1147,7 +1169,9 @@ def list_node_interfaces(session, args):
         logger=util.SMlog
     )
     try:
-        return json.dumps(linstor.list_node_interfaces(hostname))
+        return json.dumps(linstor.list_node_interfaces(
+            linstor.get_node_name_from_host(hostname)
+        ))
     except Exception as e:
         raise XenAPIPlugin.Failure('-1', [str(e)])
 
@@ -1162,7 +1186,9 @@ def get_node_preferred_interface(session, args):
         logger=util.SMlog
     )
     try:
-        return linstor.get_node_preferred_interface(hostname)
+        return linstor.get_node_preferred_interface(
+            linstor.get_node_name_from_host(hostname)
+        )
     except Exception as e:
         raise XenAPIPlugin.Failure('-1', [str(e)])
 
@@ -1178,7 +1204,9 @@ def set_node_preferred_interface(session, args):
         logger=util.SMlog
     )
     try:
-        linstor.set_node_preferred_interface(hostname, name)
+        linstor.set_node_preferred_interface(
+            linstor.get_node_name_from_host(hostname), name
+        )
     except Exception as e:
         raise XenAPIPlugin.Failure('-1', [str(e)])
     return str(True)
