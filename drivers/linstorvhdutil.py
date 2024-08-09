@@ -78,6 +78,17 @@ class ErofsLinstorCallException(LinstorCallException):
 class NoPathLinstorCallException(LinstorCallException):
     pass
 
+def log_successful_call(target_host, device_path, vdi_uuid, remote_method, response):
+    util.SMlog(
+        'Successful access on {} for device {} ({}): `{}` => {}'.format(target_host, device_path, vdi_uuid, remote_method, str(response)),
+        priority=util.LOG_DEBUG
+    )
+
+def log_failed_call(target_host, next_target, device_path, vdi_uuid, remote_method, e):
+    util.SMlog(
+        'Failed to call method on {} for device {} ({}): {}. Trying accessing on {}... (cause: {})'.format(target_host, device_path, vdi_uuid, remote_method, next_target, e),
+        priority=util.LOG_DEBUG
+    )
 
 def linstorhostcall(local_method, remote_method):
     def decorated(response_parser):
@@ -102,39 +113,36 @@ def linstorhostcall(local_method, remote_method):
                     response = call_remote_method(
                         self._session, host_ref_attached, remote_method, device_path, remote_args
                     )
+                    log_successful_call('attached node', device_path, vdi_uuid, remote_method, response)
                     return response_parser(self, vdi_uuid, response)
             except Exception as e:
-                util.SMlog(
-                    'Failed to call method on attached host. Trying local access... (cause: {})'.format(e),
-                    priority=util.LOG_DEBUG
-                )
+                log_failed_call('attached node', 'master', device_path, vdi_uuid, remote_method, e)
 
             try:
                 master_ref = self._session.xenapi.pool.get_all_records().values()[0]['master']
                 response = call_remote_method(self._session, master_ref, remote_method, device_path, remote_args)
+                log_successful_call('master', device_path, vdi_uuid, remote_method, response)
                 return response_parser(self, vdi_uuid, response)
             except Exception as e:
-                util.SMlog(
-                    'Failed to call method on master host. Finding primary node... (cause: {})'.format(e),
-                    priority=util.LOG_DEBUG
-                )
+                log_failed_call('master', 'primary', device_path, vdi_uuid, remote_method, e)
+
 
             nodes, primary_hostname = self._linstor.find_up_to_date_diskful_nodes(vdi_uuid)
             if primary_hostname:
                 try:
                     host_ref = self._get_readonly_host(vdi_uuid, device_path, {primary_hostname})
                     response = call_remote_method(self._session, host_ref, remote_method, device_path, remote_args)
+                    log_successful_call('primary', device_path, vdi_uuid, remote_method, response)
                     return response_parser(self, vdi_uuid, response)
                 except Exception as remote_e:
                     self._raise_openers_exception(device_path, remote_e)
             else:
-                util.SMlog(
-                    'Couldn\'t get primary for {}. Trying with another node...'.format(vdi_uuid),
-                    priority=util.LOG_DEBUG
-                )
+                log_failed_call('primary', 'another node', device_path, vdi_uuid, remote_method, e)
+
                 try:
                     host = self._get_readonly_host(vdi_uuid, device_path, nodes)
                     response = call_remote_method(self._session, host, remote_method, device_path, remote_args)
+                    log_successful_call('another node', device_path, vdi_uuid, remote_method, response)
                     return response_parser(self, vdi_uuid, response)
                 except Exception as remote_e:
                     self._raise_openers_exception(device_path, remote_e)
