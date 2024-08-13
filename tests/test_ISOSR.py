@@ -68,17 +68,14 @@ class TestISOSR_overLocal(unittest.TestCase):
         isosr.detach(None)
         self.assertFalse(pread.called)
 
-    @testlib.with_context
     @mock.patch('os.path.exists')
     @mock.patch('util.pread')
-    def test_attach_local_with_bad_path(self, context, pread, exists):
-        context.setup_error_codes()
-
+    def test_attach_local_with_bad_path(self, pread, exists):
         # Local path doesn't exist, but error list yes.
         exists.side_effect = [False, True]
 
         isosr = self.create_isosr()
-        with self.assertRaises(SR.SROSError) as ose:
+        with self.assertRaises(xs_errors.SROSError) as ose:
             isosr.attach(None)
         self.assertEqual(ose.exception.errno, 226)
         self.assertFalse(pread.called)

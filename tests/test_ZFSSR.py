@@ -6,6 +6,7 @@ import FileSR
 import os
 import SR
 import ZFSSR
+import xs_errors
 
 
 XML_DEFS = os.path.dirname(os.path.abspath(__file__)) + \
@@ -51,7 +52,7 @@ class TestZFSSR(unittest.TestCase):
         failed = False
         try:
             self.create_zfs_sr()
-        except SR.SROSError as e:
+        except xs_errors.SROSError as e:
             # Check SRUnavailable error.
             failed = e.errno == 47
         self.assertTrue(failed)
@@ -76,7 +77,7 @@ class TestZFSSR(unittest.TestCase):
         sr = self.create_zfs_sr()
         try:
             sr.create(sr.uuid, 42)
-        except SR.SROSError as e:
+        except xs_errors.SROSError as e:
             # Check ZFSSRCreate error.
             failed = e.errno == 5000
         self.assertTrue(failed)
@@ -109,7 +110,7 @@ class TestZFSSR(unittest.TestCase):
         sr = self.create_zfs_sr()
         try:
             sr.scan(sr.uuid)
-        except SR.SROSError as e:
+        except xs_errors.SROSError as e:
             # Check SRUnavailable error.
             failed = e.errno == 47
         self.assertTrue(failed)
