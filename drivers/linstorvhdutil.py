@@ -21,6 +21,7 @@ import distutils.util
 import errno
 import json
 import socket
+import time
 import util
 import vhdutil
 import xs_errors
@@ -44,6 +45,16 @@ def call_remote_method(session, host_ref, method, device_path, args):
     ))
 
     return response
+
+
+def check_ex(path, ignoreMissingFooter = False, fast = False):
+    cmd = [vhdutil.VHD_UTIL, "check", vhdutil.OPT_LOG_ERR, "-n", path]
+    if ignoreMissingFooter:
+        cmd.append("-i")
+    if fast:
+        cmd.append("-B")
+
+    vhdutil.ioretry(cmd)
 
 
 class LinstorCallException(util.SMException):
@@ -138,6 +149,44 @@ class LinstorVhdUtil:
         self._session = session
         self._linstor = linstor
 
+    def create_chain_paths(self, vdi_uuid, readonly=False):
+        # OPTIMIZE: Add a limit_to_first_allocated_block param to limit vhdutil calls.
+        # Useful for the snapshot code algorithm.
+
+        leaf_vdi_path = self._linstor.get_device_path(vdi_uuid)
+        path = leaf_vdi_path
+        while True:
+            if not util.pathexists(path):
+                raise xs_errors.XenError(
+                    'VDIUnavailable', opterr='Could not find: {}'.format(path)
+                )
+
+            # Diskless path can be created on the fly, ensure we can open it.
+            def check_volume_usable():
+                while True:
+                    try:
+                        with open(path, 'r' if readonly else 'r+'):
+                            pass
+                    except IOError as e:
+                        if e.errno == errno.ENODATA:
+                            time.sleep(2)
+                            continue
+                        if e.errno == errno.EROFS:
+                            util.SMlog('Volume not attachable because RO. Openers: {}'.format(
+                                self._linstor.get_volume_openers(vdi_uuid)
+                            ))
+                        raise
+                    break
+            util.retry(check_volume_usable, 15, 2)
+
+            vdi_uuid = self.get_vhd_info(vdi_uuid).parentUuid
+            if not vdi_uuid:
+                break
+            path = self._linstor.get_device_path(vdi_uuid)
+            readonly = True  # Non-leaf is always readonly.
+
+        return leaf_vdi_path
+
     # --------------------------------------------------------------------------
     # Getters: read locally and try on another host in case of failure.
     # --------------------------------------------------------------------------
@@ -147,9 +196,14 @@ class LinstorVhdUtil:
             'ignoreMissingFooter': ignore_missing_footer,
             'fast': fast
         }
-        return self._check(vdi_uuid, **kwargs)  # pylint: disable = E1123
+        try:
+            self._check(vdi_uuid, **kwargs)  # pylint: disable = E1123
+            return True
+        except Exception as e:
+            util.SMlog('Call to `check` failed: {}'.format(e))
+            return False
 
-    @linstorhostcall(vhdutil.check, 'check')
+    @linstorhostcall(check_ex, 'check')
     def _check(self, vdi_uuid, response):
         return distutils.util.strtobool(response)
 
@@ -322,7 +376,7 @@ class LinstorVhdUtil:
 
     @linstormodifier()
     def force_coalesce(self, path):
-        return int(self._call_method(vhdutil.coalesce, 'coalesce', path, use_parent=True))
+        return self._call_method(vhdutil.coalesce, 'coalesce', path, use_parent=True)
 
     @linstormodifier()
     def force_repair(self, path):
