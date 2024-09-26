@@ -27,8 +27,9 @@ import socket
 import XenAPI
 import XenAPIPlugin
 
+from json import JSONEncoder
 from linstorjournaler import LinstorJournaler
-from linstorvhdutil import LinstorVhdUtil
+from linstorvhdutil import LinstorVhdUtil, check_ex
 from linstorvolumemanager import get_controller_uri, get_local_volume_openers, LinstorVolumeManager
 from lock import Lock
 import json
@@ -240,7 +241,10 @@ def get_drbd_volumes(volume_group=None):
     config = json.loads(stdout)
     for resource in config:
         for volume in resource['_this_host']['volumes']:
-            backing_disk = volume['backing-disk']
+            backing_disk = volume.get('backing-disk')
+            if not backing_disk:
+                continue
+
             match = BACKING_DISK_RE.match(backing_disk)
             if not match:
                 continue
@@ -389,7 +393,8 @@ def check(session, args):
             args['ignoreMissingFooter']
         )
         fast = distutils.util.strtobool(args['fast'])
-        return str(vhdutil.check(device_path, ignore_missing_footer, fast))
+        check_ex(device_path, ignore_missing_footer, fast)
+        return str(True)
     except Exception as e:
         util.SMlog('linstor-manager:check error: {}'.format(e))
         raise
@@ -534,7 +539,8 @@ def set_parent(session, args):
 def coalesce(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.coalesce(device_path))
+        vhdutil.coalesce(device_path)
+        return ''
     except Exception as e:
         util.SMlog('linstor-manager:coalesce error: {}'.format(e))
         raise
@@ -885,6 +891,64 @@ def get_drbd_openers(session, args):
         raise
 
 
+class HealthCheckError(object):
+    __slots__ = ('data')
+
+    MASK_REPORT_LEVEL = 0x7000000
+    MASK_TYPE         = 0xFF0000
+    MASK_VALUE        = 0XFFFF
+
+    # 24-26 bits
+    REPORT_LEVEL_WARN = 0x1000000
+    REPORT_LEVEL_ERR  = 0x2000000
+
+    # 16-23 bits
+    TYPE_GENERIC      = 0x10000
+    TYPE_NODE         = 0x20000
+    TYPE_STORAGE_POOL = 0x30000
+    TYPE_VOLUME       = 0x40000
+    TYPE_RESOURCE     = 0x50000
+
+    # 1-15 bits
+    GENERIC_UNEXPECTED          = REPORT_LEVEL_ERR | TYPE_GENERIC | 0
+    GENERIC_LINSTOR_UNREACHABLE = REPORT_LEVEL_ERR | TYPE_GENERIC | 1
+
+    NODE_NOT_ONLINE = REPORT_LEVEL_WARN | TYPE_NODE | 0
+
+    STORAGE_POOL_UNKNOWN_FREE_SIZE = REPORT_LEVEL_ERR  | TYPE_STORAGE_POOL | 0
+    STORAGE_POOL_UNKNOWN_CAPACITY  = REPORT_LEVEL_ERR  | TYPE_STORAGE_POOL | 1
+    STORAGE_POOL_LOW_FREE_SIZE     = REPORT_LEVEL_WARN | TYPE_STORAGE_POOL | 2
+
+    VOLUME_UNKNOWN_STATE             = REPORT_LEVEL_WARN | TYPE_VOLUME | 0
+    VOLUME_INVALID_STATE             = REPORT_LEVEL_ERR  | TYPE_VOLUME | 1
+    VOLUME_WRONG_DISKLESS_STATE      = REPORT_LEVEL_WARN | TYPE_VOLUME | 2
+    VOLUME_INTERNAL_UNVERIFIED_STATE = REPORT_LEVEL_WARN | TYPE_VOLUME | 3
+
+    MAP_CODE_TO_PARAMS = {
+        GENERIC_UNEXPECTED: { 'message' },
+        GENERIC_LINSTOR_UNREACHABLE: { 'message' },
+        NODE_NOT_ONLINE: { 'name', 'status' },
+        STORAGE_POOL_UNKNOWN_FREE_SIZE: { 'name' },
+        STORAGE_POOL_UNKNOWN_CAPACITY: { 'name' },
+        STORAGE_POOL_LOW_FREE_SIZE: { 'name', 'threshold' },
+        VOLUME_UNKNOWN_STATE: { 'node', 'resource', 'number' },
+        VOLUME_INVALID_STATE: { 'node', 'resource', 'number', 'state' },
+        VOLUME_WRONG_DISKLESS_STATE: { 'node', 'resource', 'number', 'state' },
+        VOLUME_INTERNAL_UNVERIFIED_STATE: { 'node', 'resource', 'number', 'state' }
+    }
+
+    def __init__(self, code, **kwargs):
+        attributes = self.MAP_CODE_TO_PARAMS[code]
+        data = { 'code': code }
+        for attr_name, attr_value in kwargs.items():
+            assert attr_name in attributes
+            data[attr_name] = attr_value
+        self.data = data
+
+    def to_json(self):
+        return self.data
+
+
 def health_check(session, args):
     group_name = args['groupName']
 
@@ -892,11 +956,16 @@ def health_check(session, args):
        'controller-uri': '',
        'nodes': {},
        'storage-pools': {},
-       'warnings': [],
+       'resources': {},
        'errors': []
     }
 
     def format_result():
+        # See: https://stackoverflow.com/questions/18478287/making-object-json-serializable-with-regular-encoder/18561055#18561055
+        def _default(self, obj):
+            return getattr(obj.__class__, 'to_json', _default.default)(obj)
+        _default.default = JSONEncoder().default
+        JSONEncoder.default = _default
         return json.dumps(result)
 
     # 1. Get controller.
@@ -919,7 +988,10 @@ def health_check(session, args):
         )
     except Exception as e:
         # Probably a network issue, or offline controller.
-        result['errors'].append('Cannot join SR: `{}`.'.format(e))
+        result['errors'].append(HealthCheckError(
+            code=HealthCheckError.GENERIC_LINSTOR_UNREACHABLE,
+            message=str(e)
+        ))
         return format_result()
 
     try:
@@ -928,7 +1000,11 @@ def health_check(session, args):
         result['nodes'] = nodes
         for node_name, status in nodes.items():
             if status != 'ONLINE':
-                result['warnings'].append('Node `{}` is {}.'.format(node_name, status))
+                result['errors'].append(HealthCheckError(
+                    code=HealthCheckError.NODE_NOT_ONLINE,
+                    name=node_name,
+                    status=status
+                ))
 
         # 3. Check storage pool statuses.
         storage_pools_per_node = linstor.get_storage_pools_info()
@@ -938,23 +1014,25 @@ def health_check(session, args):
                 free_size = storage_pool['free-size']
                 capacity = storage_pool['capacity']
                 if free_size < 0 or capacity <= 0:
-                    result['errors'].append(
-                        'Cannot get free size and/or capacity of storage pool `{}`.'
-                        .format(storage_pool['uuid'])
-                    )
-                elif free_size > capacity:
-                    result['errors'].append(
-                        'Free size of storage pool `{}` is greater than capacity.'
-                        .format(storage_pool['uuid'])
-                    )
+                    if free_size < 0:
+                        result['errors'].append(HealthCheckError(
+                            code=HealthCheckError.STORAGE_POOL_UNKNOWN_FREE_SIZE,
+                            name=storage_pool['name']
+                        ))
+                    elif capacity < 0:
+                        result['errors'].append(HealthCheckError(
+                            code=HealthCheckError.STORAGE_POOL_UNKNOWN_CAPACITY,
+                            name=storage_pool['name']
+                        ))
                 else:
                     remaining_percent = free_size / float(capacity) * 100.0
                     threshold = 10.0
                     if remaining_percent < threshold:
-                        result['warnings'].append(
-                            'Remaining size of storage pool `{}` is below {}% of its capacity.'
-                            .format(storage_pool['uuid'], threshold)
-                        )
+                        result['errors'].append(HealthCheckError(
+                            code=HealthCheckError.STORAGE_POOL_LOW_FREE_SIZE,
+                            name=storage_pool['name'],
+                            threshold=threshold
+                        ))
 
         # 4. Check resource statuses.
         all_resources = linstor.get_resources_info()
@@ -967,33 +1045,46 @@ def health_check(session, args):
                     if disk_state in ['UpToDate', 'Created', 'Attached']:
                         continue
                     if disk_state == 'DUnknown':
-                        result['warnings'].append(
-                            'Unknown state for volume `{}` at index {} for resource `{}` on node `{}`'
-                            .format(volume['device-path'], volume_index, resource_name, node_name)
-                        )
+                        result['errors'].append(HealthCheckError(
+                            code=HealthCheckError.VOLUME_UNKNOWN_STATE,
+                            node=node_name,
+                            resource=resource_name,
+                            number=volume_index
+                        ))
                         continue
                     if disk_state in ['Inconsistent', 'Failed', 'To: Creating', 'To: Attachable', 'To: Attaching']:
-                        result['errors'].append(
-                            'Invalid state `{}` for volume `{}` at index {} for resource `{}` on node `{}`'
-                            .format(disk_state, volume['device-path'], volume_index, resource_name, node_name)
-                        )
+                        result['errors'].append(HealthCheckError(
+                            code=HealthCheckError.VOLUME_INVALID_STATE,
+                            node=node_name,
+                            resource=resource_name,
+                            number=volume_index,
+                            state=disk_state
+                        ))
                         continue
                     if disk_state == 'Diskless':
                         if resource['diskful']:
-                            result['errors'].append(
-                                'Unintentional diskless state detected for volume `{}` at index {} for resource `{}` on node `{}`'
-                                .format(volume['device-path'], volume_index, resource_name, node_name)
-                            )
+                            result['errors'].append(HealthCheckError(
+                                code=HealthCheckError.VOLUME_WRONG_DISKLESS_STATE,
+                                node=node_name,
+                                resource=resource_name,
+                                number=volume_index,
+                                state=disk_state
+                            ))
                         elif resource['tie-breaker']:
                             volume['disk-state'] = 'TieBreaker'
                         continue
-                    result['warnings'].append(
-                        'Unhandled state `{}` for volume `{}` at index {} for resource `{}` on node `{}`'
-                        .format(disk_state, volume['device-path'], volume_index, resource_name, node_name)
-                    )
-
+                    result['errors'].append(HealthCheckError(
+                        code=HealthCheckError.VOLUME_INTERNAL_UNVERIFIED_STATE,
+                        node=node_name,
+                        resource=resource_name,
+                        number=volume_index,
+                        state=disk_state
+                    ))
     except Exception as e:
-        result['errors'].append('Unexpected error: `{}`'.format(e))
+        result['errors'].append(HealthCheckError(
+            code=HealthCheckError.GENERIC_UNEXPECTED,
+            message=str(e)
+        ))
 
     return format_result()
 
@@ -1070,6 +1161,21 @@ def list_node_interfaces(session, args):
         raise XenAPIPlugin.Failure('-1', [str(e)])
 
 
+def get_node_preferred_interface(session, args):
+    group_name = args['groupName']
+    hostname = args['hostname']
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        return linstor.get_node_preferred_interface(hostname)
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+
+
 def set_node_preferred_interface(session, args):
     group_name = args['groupName']
     hostname = args['hostname']
@@ -1141,5 +1247,6 @@ if __name__ == '__main__':
         'destroyNodeInterface': destroy_node_interface,
         'modifyNodeInterface': modify_node_interface,
         'listNodeInterfaces': list_node_interfaces,
+        'getNodePreferredInterface': get_node_preferred_interface,
         'setNodePreferredInterface': set_node_preferred_interface
     })
