@@ -612,7 +612,7 @@ class TestUtil(unittest.TestCase):
         # Arrange
         self._add_process(
             [DD_CMD, "if=/dev/zero", "of=/test/path/foo", "bs=4096",
-             "seek=0", "count=2"],
+             "seek=0", "count=2", "conv=fsync"],
             0, b"", b"")
         # Act
         result = util.zeroOut('/test/path/foo', 0, 8192)
@@ -624,11 +624,11 @@ class TestUtil(unittest.TestCase):
         # Arrange
         self._add_process(
             [DD_CMD, "if=/dev/zero", "of=/test/path/foo", "bs=1",
-             "seek=1024", "count=3072"],
+             "seek=1024", "count=3072", "conv=fsync"],
             0, b"", b"")
         self._add_process(
             [DD_CMD, "if=/dev/zero", "of=/test/path/foo", "bs=1",
-             "seek=4096", "count=100"],
+             "seek=4096", "count=100", "conv=fsync"],
             0, b"", b"")
 
         # Act
@@ -641,7 +641,7 @@ class TestUtil(unittest.TestCase):
         # Arrange
         self._add_process(
             [DD_CMD, "if=/dev/zero", "of=/test/path/foo", "bs=1",
-             "seek=1024", "count=2048"],
+             "seek=1024", "count=2048", "conv=fsync"],
             0, b"", b"")
 
         # Act
