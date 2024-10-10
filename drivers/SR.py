@@ -153,7 +153,7 @@ class SR(object):
 
     @staticmethod
     def from_uuid(session, sr_uuid):
-        import imp
+        import importlib.util
 
         _SR = session.xenapi.SR
         sr_ref = _SR.get_by_uuid(sr_uuid)
@@ -169,7 +169,10 @@ class SR(object):
         driver_real = os.path.realpath(driver_path)
         module_name = os.path.basename(driver_path)
 
-        module = imp.load_source(module_name, driver_real)
+        spec = importlib.util.spec_from_file_location(module_name, driver_real)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
         target = driver(sm_type)
         # NB. get the host pbd's device_config
 
