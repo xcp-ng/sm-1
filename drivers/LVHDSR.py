@@ -18,6 +18,8 @@
 # LVHDSR: VHD on LVM storage repository
 #
 
+from sm_typing import Dict, List
+
 import SR
 from SR import deviceCheck
 import VDI
@@ -54,7 +56,7 @@ from constants import CBTLOG_TAG
 from fairlock import Fairlock
 DEV_MAPPER_ROOT = os.path.join('/dev/mapper', lvhdutil.VG_PREFIX)
 
-geneology = {}
+geneology: Dict[str, List[str]] = {}
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_TRIM",
         "VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETACH", "VDI_MIRROR",
         "VDI_CLONE", "VDI_SNAPSHOT", "VDI_RESIZE", "ATOMIC_PAUSE",

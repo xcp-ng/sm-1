@@ -17,6 +17,8 @@
 #
 # FileSR: local-file storage repository
 
+from sm_typing import Dict, List
+
 import SR
 import VDI
 import SRCommand
@@ -36,7 +38,7 @@ import xmlrpc.client
 import XenAPI # pylint: disable=import-error
 from constants import CBTLOG_TAG
 
-geneology = {}
+geneology: Dict[str, List[str]] = {}
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", \
                 "VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETACH", \
                 "VDI_CLONE", "VDI_SNAPSHOT", "VDI_RESIZE", "VDI_MIRROR",

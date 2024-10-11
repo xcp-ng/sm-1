@@ -23,6 +23,8 @@ testing and trying of locks isn't well supported. Looks as if we've
 got to grow our own.
 """
 
+from sm_typing import ClassVar
+
 import os
 import fcntl
 import struct
@@ -73,7 +75,7 @@ class FcntlLockBase:
     definition of LOCK_TYPE (fcntl.{F_RDLCK|F_WRLCK}) determines the
     type."""
 
-    LOCK_TYPE = None
+    LOCK_TYPE: ClassVar[int]
 
     if __debug__:
         ERROR_ISLOCKED = "Attempt to acquire lock held."
