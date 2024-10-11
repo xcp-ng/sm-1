@@ -60,7 +60,7 @@ def splitDomainAndUsername(uname):
         username = dom_username[1]
     else:
         raise CIFSException("A maximum of 2 tokens are expected "
-                            "(<domain>\<username>). {} were given."
+                            "(<domain>\\<username>). {} were given."
                             .format(len(dom_username)))
     return username, domain
 
