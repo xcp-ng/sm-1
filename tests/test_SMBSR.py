@@ -135,7 +135,7 @@ class Test_SMBSR(unittest.TestCase):
     def test_attach_with_cifs_password_and_domain(
             self, symlink, mock_lock, makeMountPoint,
             mock_checkmount, mock_checklinks, mock_checkwritable):
-        smbsr = self.create_smbsr(username="citrix\jsmith", dconf_update={"password": "winter2019"})
+        smbsr = self.create_smbsr(username="citrix\\jsmith", dconf_update={"password": "winter2019"})
         mock_checkmount.return_value = False
         makeMountPoint.return_value = "/var/mount"
         smbsr.attach('asr_uuid')
