@@ -355,7 +355,7 @@ sys.exit(resp.get("returncode", 0))
         combined_args = " ".join(sorted(args[1:]))
 
         if subcmd == "sm-list":
-            m = re.match("--minimal params=uuid type=(\S+)$", combined_args)
+            m = re.match(r"--minimal params=uuid type=(\S+)$", combined_args)
             if m:
                 sm_uuid = "uuid-for-sr-type-" + m.group(1)
                 return CmdResult(stdout=f"{sm_uuid}\n")
@@ -365,7 +365,7 @@ sys.exit(resp.get("returncode", 0))
                 if not self.created_srs:
                     return CmdResult()
 
-            m = re.match("--minimal params=uuid type=(\S+)$", combined_args)
+            m = re.match(r"--minimal params=uuid type=(\S+)$", combined_args)
             if m:
                 sr_type = m.group(1)
                 num_srs = len(self.created_srs[sr_type])
