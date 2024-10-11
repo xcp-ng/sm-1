@@ -244,8 +244,7 @@ class GlusterFSSR(FileSR.FileSR):
 
     @staticmethod
     def _is_glusterfs_available():
-        import distutils.spawn
-        return distutils.spawn.find_executable('glusterfs')
+        return util.find_executable('glusterfs')
 
 
 class GlusterFSFileVDI(FileSR.FileVDI):

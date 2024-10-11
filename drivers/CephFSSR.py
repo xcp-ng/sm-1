@@ -264,8 +264,7 @@ class CephFSSR(FileSR.FileSR):
 
     @staticmethod
     def _is_ceph_available():
-        import distutils.spawn
-        return distutils.spawn.find_executable('ceph')
+        return util.find_executable('ceph')
 
 class CephFSFileVDI(FileSR.FileVDI):
     def attach(self, sr_uuid, vdi_uuid):

@@ -276,8 +276,7 @@ class MooseFSSR(FileSR.FileSR):
 
     @staticmethod
     def _is_moosefs_available():
-        import distutils.spawn
-        return distutils.spawn.find_executable('mfsmount')
+        return util.find_executable('mfsmount')
 
 class MooseFSFileVDI(FileSR.FileVDI):
     def attach(self, sr_uuid, vdi_uuid):
