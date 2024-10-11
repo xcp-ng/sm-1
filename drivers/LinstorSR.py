@@ -34,7 +34,6 @@ except ImportError:
 from lock import Lock, LOCK_TYPE_GC_RUNNING
 import blktap2
 import cleanup
-import distutils
 import errno
 import functools
 import lvutil
@@ -337,7 +336,7 @@ class LinstorSR(SR.SR):
 
         monitor_db_quorum = self.dconf.get('monitor-db-quorum')
         self._monitor_db_quorum = (monitor_db_quorum is None) or \
-            distutils.util.strtobool(monitor_db_quorum)
+            util.strtobool(monitor_db_quorum)
 
         # Note: We don't have access to the session field if the
         # 'vdi_attach_from_config' command is executed.
