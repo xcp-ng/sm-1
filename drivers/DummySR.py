@@ -17,6 +17,8 @@
 #
 # DummySR: an example dummy SR for the SDK
 
+from sm_typing import List, Tuple
+
 import SR
 import VDI
 import SRCommand
@@ -28,7 +30,7 @@ CAPABILITIES = ["SR_PROBE", "VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETAC
                 "VDI_ACTIVATE", "VDI_DEACTIVATE", "VDI_CLONE", "VDI_SNAPSHOT", "VDI_RESIZE",
                 "VDI_INTRODUCE", "VDI_MIRROR"]
 
-CONFIGURATION = []
+CONFIGURATION: List[Tuple[str, str]] = []
 
 DRIVER_INFO = {
     'name': 'dummy',

@@ -15,6 +15,8 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
+from sm_typing import Dict
+
 import util
 import os
 import sys
@@ -238,7 +240,7 @@ if __name__ == '__main__':
         mpc_exit(session, -1)
 
     try:
-        mpath_status = {}
+        mpath_status: Dict[str, str] = {}
         for pbd in pbds:
             def remove(key):
                 session.xenapi.PBD.remove_from_other_config(pbd, key)
@@ -258,7 +260,7 @@ if __name__ == '__main__':
         util.atomicFileWrite(MPATH_FILE_NAME, MPATHS_DIR, json.dumps(mpath_status))
         os.chmod(MPATH_FILE_NAME, 0o0644)
     except:
-        util.SMlog("MPATH: Failure updating db. %s" % sys.exc_info())
+        util.SMlog("MPATH: Failure updating db. %s" % str(sys.exc_info()))
         mpc_exit(session, -1)
 
     util.SMlog("MPATH: Update done")

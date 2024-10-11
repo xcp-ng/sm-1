@@ -1,3 +1,5 @@
+from sm_typing import Any, Callable, Dict, Optional
+
 import os
 import socket
 import inspect
@@ -7,8 +9,8 @@ SOCKDIR = "/run/fairlock"
 START_SERVICE_TIMEOUT_SECS = 2
 
 class SingletonWithArgs(type):
-    _instances = {}
-    _init = {}
+    _instances: Dict[Any, Any] = {}
+    _init: Dict[type, Optional[Callable[..., None]]] = {}
 
     def __init__(cls, name, bases, dct):
         cls._init[cls] = dct.get('__init__', None)

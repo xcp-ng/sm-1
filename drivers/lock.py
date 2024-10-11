@@ -16,6 +16,8 @@
 
 """Serialization for concurrent operations"""
 
+from sm_typing import Dict
+
 import os
 import errno
 import flock
@@ -37,8 +39,8 @@ class Lock(object):
 
     BASE_DIR = "/var/lock/sm"
 
-    INSTANCES = {}
-    BASE_INSTANCES = {}
+    INSTANCES: Dict[str, 'LockImplementation'] = {}
+    BASE_INSTANCES: Dict[str, 'LockImplementation'] = {}
 
     def __new__(cls, name, ns=None, *args, **kwargs):
         if ns:

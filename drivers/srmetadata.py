@@ -15,6 +15,9 @@
 #
 # Functions to read and write SR metadata
 #
+
+from sm_typing import ClassVar
+
 from io import SEEK_SET
 
 import util
@@ -254,7 +257,7 @@ def getMetadataLength(fd):
 # ----------------- # General helper functions - end # -----------------
 class MetadataHandler:
 
-    VDI_INFO_SIZE_IN_SECTORS = None
+    VDI_INFO_SIZE_IN_SECTORS: ClassVar[int]
 
     # constructor
     def __init__(self, path=None, write=True):
