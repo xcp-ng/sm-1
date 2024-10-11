@@ -45,6 +45,7 @@ import socket
 import SR
 import SRCommand
 import subprocess
+import sys
 import time
 import traceback
 import util
@@ -371,6 +372,9 @@ class LinstorSR(SR.SR):
         self._all_volume_info_cache = None
         self._all_volume_metadata_cache = None
 
+    # To remove in python 3.10.
+    # Use directly @staticmethod instead.
+    @util.conditional_decorator(staticmethod, sys.version_info >= (3, 10, 0))
     def _locked_load(method):
         def wrapped_method(self, *args, **kwargs):
             self._init_status = self.INIT_STATUS_OK
@@ -792,6 +796,8 @@ class LinstorSR(SR.SR):
     def vdi(self, uuid):
         return LinstorVDI(self, uuid)
 
+    # To remove in python 3.10
+    # See: https://stackoverflow.com/questions/12718187/python-version-3-9-calling-class-staticmethod-within-the-class-body
     _locked_load = staticmethod(_locked_load)
 
     # --------------------------------------------------------------------------
