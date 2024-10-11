@@ -1080,7 +1080,7 @@ def diskFromPartition(partition):
         return m.group(2)
 
     numlen = 0  # number of digit characters
-    m = re.match("\D+(\d+)", partition)
+    m = re.match(r"\D+(\d+)", partition)
     if m is not None:
         numlen = len(m.group(1))
 
@@ -1091,7 +1091,7 @@ def diskFromPartition(partition):
     # is it a mapper path?
     if partition.startswith("mapper"):
         if re.search("p[0-9]*$", partition):
-            numlen = len(re.match("\d+", partition[::-1]).group(0)) + 1
+            numlen = len(re.match(r"\d+", partition[::-1]).group(0)) + 1
             SMlog("Found mapper part, len %d" % numlen)
         else:
             numlen = 0
