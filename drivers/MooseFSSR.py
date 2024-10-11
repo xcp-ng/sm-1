@@ -18,7 +18,6 @@
 #
 # MooseFSSR: Based on CEPHFSSR and FileSR, mounts MooseFS share
 
-import distutils.util
 import errno
 import os
 import syslog as _syslog
@@ -113,9 +112,7 @@ class MooseFSSR(FileSR.FileSR):
             self.sm_config = self.srcmd.params.get('sr_sm_config') or {}
 
         if self.srcmd.cmd != 'sr_create':
-            self.subdir = distutils.util.strtobool(
-                self.sm_config.get('subdir') or '0'
-            )
+            self.subdir = util.strtobool(self.sm_config.get('subdir'))
             if self.subdir:
                 self.remotepath = os.path.join(self.remotepath, sr_uuid)
 
@@ -228,7 +225,7 @@ class MooseFSSR(FileSR.FileSR):
             if self.subdir is None:
                 self.subdir = True
             else:
-                self.subdir = distutils.util.strtobool(self.subdir)
+                self.subdir = util.strtobool(self.subdir)
 
             self.sm_config['subdir'] = str(self.subdir)
             self.session.xenapi.SR.set_sm_config(self.sr_ref, self.sm_config)

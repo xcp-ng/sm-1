@@ -17,7 +17,6 @@
 from linstorjournaler import LinstorJournaler
 from linstorvolumemanager import LinstorVolumeManager
 import base64
-import distutils.util
 import errno
 import json
 import socket
@@ -205,7 +204,7 @@ class LinstorVhdUtil:
 
     @linstorhostcall(check_ex, 'check')
     def _check(self, vdi_uuid, response):
-        return distutils.util.strtobool(response)
+        return util.strtobool(response)
 
     def get_vhd_info(self, vdi_uuid, include_parent=True):
         kwargs = {
@@ -233,7 +232,7 @@ class LinstorVhdUtil:
 
     @linstorhostcall(vhdutil.hasParent, 'hasParent')
     def has_parent(self, vdi_uuid, response):
-        return distutils.util.strtobool(response)
+        return util.strtobool(response)
 
     def get_parent(self, vdi_uuid):
         return self._get_parent(vdi_uuid, self._extract_uuid)

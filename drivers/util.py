@@ -2093,5 +2093,22 @@ def make_profile(name, function):
         SMlog('* End profiling of {} ({}) *'.format(name, filename))
 
 
+def strtobool(str):
+    # Note: `distutils` package is deprecated and slated for removal in Python 3.12.
+    # There is not alternative for strtobool.
+    # See: https://peps.python.org/pep-0632/#migration-advice
+    # So this is a custom implementation with differences:
+    # - A boolean is returned instead of integer
+    # - Empty string and None are supported (False is returned in this case)
+    if not str:
+        return False
+    str = str.lower()
+    if str in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+    if str in ('n', 'no', 'f', 'false', 'off', '0'):
+        return False
+    raise ValueError("invalid truth value '{}'".format(str))
+
+
 def find_executable(name):
     return shutil.which(name)

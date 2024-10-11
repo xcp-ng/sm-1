@@ -16,7 +16,6 @@
 #
 
 
-import distutils.util
 import errno
 import json
 import linstor
@@ -183,7 +182,7 @@ def _get_controller_uri():
         for host_ref, host_record in session.xenapi.host.get_all_records().items():
             node_name = host_record['hostname']
             try:
-                if distutils.util.strtobool(
+                if util.strtobool(
                     session.xenapi.host.call_plugin(host_ref, PLUGIN, PLUGIN_CMD, {})
                 ):
                     return 'linstor://' + host_record['address']
@@ -234,7 +233,7 @@ def get_controller_node_name():
             )['live']:
                 continue
 
-            if distutils.util.strtobool(session.xenapi.host.call_plugin(
+            if util.strtobool(session.xenapi.host.call_plugin(
                 host_ref, PLUGIN, PLUGIN_CMD, {}
             )):
                 return node_name
