@@ -229,8 +229,7 @@ class XFSSR(FileSR.FileSR):
 
     @staticmethod
     def _is_xfs_available():
-        import distutils.spawn
-        return distutils.spawn.find_executable('mkfs.xfs')
+        return util.find_executable('mkfs.xfs')
 
 
 class XFSFileVDI(FileSR.FileVDI):

@@ -58,8 +58,7 @@ DRIVER_INFO = {
 
 
 def is_zfs_available():
-    import distutils.spawn
-    return distutils.spawn.find_executable('zfs') and \
+    return util.find_executable('zfs') and \
         util.pathexists('/sys/module/zfs/initstate')
 
 

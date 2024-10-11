@@ -2091,3 +2091,7 @@ def make_profile(name, function):
         cProfile.runctx('function()', None, locals(), profile_path)
     finally:
         SMlog('* End profiling of {} ({}) *'.format(name, filename))
+
+
+def find_executable(name):
+    return shutil.which(name)
