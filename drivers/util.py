@@ -2112,3 +2112,11 @@ def strtobool(str):
 
 def find_executable(name):
     return shutil.which(name)
+
+
+def conditional_decorator(decorator, condition):
+    def wrapper(func):
+        if not condition:
+            return func
+        return decorator(func)
+    return wrapper
