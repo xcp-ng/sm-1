@@ -682,7 +682,7 @@ class TestFileSR(unittest.TestCase):
 
         sr.path = mount_dst
         sr.remotepath = mount_src
-        sr.attach(None, bind=False)
+        sr.attach_and_bind(None, bind=False)
 
         self.assertTrue(sr.attached)
 

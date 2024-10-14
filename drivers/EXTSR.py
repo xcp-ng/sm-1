@@ -123,7 +123,7 @@ class EXTSR(FileSR.FileSR):
                         'LVMMount',
                         opterr='FSCK failed on %s. Errno is %d' % (self.remotepath, inst.code))
 
-            super(EXTSR, self).attach(sr_uuid, bind=False)
+            self.attach_and_bind(sr_uuid, bind=False)
 
         self.attached = True
 
