@@ -156,7 +156,10 @@ class FileSR(SR.SR):
             raise xs_errors.XenError('FileSRDelete', \
                   opterr='error %d' % inst.code)
 
-    def attach(self, sr_uuid, bind=True):
+    def attach(self, sr_uuid):
+        self.attach_and_bind(sr_uuid)
+
+    def attach_and_bind(self, sr_uuid, bind=True):
         if not self._checkmount():
             try:
                 util.ioretry(lambda: util.makedirs(self.path, mode=0o700))
