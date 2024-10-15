@@ -112,10 +112,11 @@ class Util:
 
     PREFIX = {"G": 1024 * 1024 * 1024, "M": 1024 * 1024, "K": 1024}
 
+    @staticmethod
     def log(text):
         util.SMlog(text, ident="SMGC")
-    log = staticmethod(log)
 
+    @staticmethod
     def logException(tag):
         info = sys.exc_info()
         if info[0] == SystemExit:
@@ -129,8 +130,8 @@ class Util:
         Util.log("%s: EXCEPTION %s, %s" % (tag, info[0], info[1]))
         Util.log(tb)
         Util.log("*~*~*~*~*~*~*~*~*~*~*~*~*~*~*~*~*~*~*~*~*")
-    logException = staticmethod(logException)
 
+    @staticmethod
     def doexec(args, expectedRC, inputtext=None, ret=None, log=True):
         "Execute a subprocess, then return its return code, stdout, stderr"
         proc = subprocess.Popen(args,
@@ -159,8 +160,8 @@ class Util:
         if ret == Util.RET_STDERR:
             return stderr
         return stdout
-    doexec = staticmethod(doexec)
 
+    @staticmethod
     def runAbortable(func, ret, ns, abortTest, pollInterval, timeOut):
         """execute func in a separate thread and kill it if abortTest signals
         so"""
@@ -211,23 +212,23 @@ class Util:
                 resultFlag.set("failure")
                 Util.logException("This exception has occured")
             os._exit(0)
-    runAbortable = staticmethod(runAbortable)
 
+    @staticmethod
     def num2str(number):
         for prefix in ("G", "M", "K"):
             if number >= Util.PREFIX[prefix]:
                 return "%.3f%s" % (float(number) / Util.PREFIX[prefix], prefix)
         return "%s" % number
-    num2str = staticmethod(num2str)
 
+    @staticmethod
     def numBits(val):
         count = 0
         while val:
             count += val & 1
             val = val >> 1
         return count
-    numBits = staticmethod(numBits)
 
+    @staticmethod
     def countBits(bitmap1, bitmap2):
         """return bit count in the bitmap produced by ORing the two bitmaps"""
         len1 = len(bitmap1)
@@ -249,14 +250,13 @@ class Util:
             val = bitmapLong[i]
             count += Util.numBits(val)
         return count
-    countBits = staticmethod(countBits)
 
+    @staticmethod
     def getThisScript():
         thisScript = util.get_real_path(__file__)
         if thisScript.endswith(".pyc"):
             thisScript = thisScript[:-1]
         return thisScript
-    getThisScript = staticmethod(getThisScript)
 
 
 ################################################################################
@@ -282,11 +282,11 @@ class XAPI:
     class LookupError(util.SMException):
         pass
 
+    @staticmethod
     def getSession():
         session = XenAPI.xapi_local()
         session.xenapi.login_with_password(XAPI.USER, '', '', 'SM')
         return session
-    getSession = staticmethod(getSession)
 
     def __init__(self, session, srUuid):
         self.sessionPrivate = False
@@ -836,6 +836,7 @@ class VDI(object):
         Util.doexec(cmd, 0)
         return True
 
+    @staticmethod
     def _reportCoalesceError(vdi, ce):
         """Reports a coalesce error to XenCenter.
 
@@ -888,12 +889,12 @@ class VDI(object):
                         str(now.strftime('%s')))
         if xcmsg:
             xapi.message.create(msg_name, "3", "SR", vdi.sr.uuid, msg_body)
-    _reportCoalesceError = staticmethod(_reportCoalesceError)
 
     def coalesce(self):
         # size is returned in sectors
         return vhdutil.coalesce(self.path) * 512
 
+    @staticmethod
     def _doCoalesceVHD(vdi):
         try:
             startTime = time.time()
@@ -913,7 +914,6 @@ class VDI(object):
             raise ce
         except:
             raise
-    _doCoalesceVHD = staticmethod(_doCoalesceVHD)
 
     def _vdi_is_raw(self, vdi_path):
         """
@@ -1811,6 +1811,7 @@ class SR(object):
     KEY_OFFLINE_COALESCE_NEEDED = "leaf_coalesce_need_offline"
     KEY_OFFLINE_COALESCE_OVERRIDE = "leaf_coalesce_offline_override"
 
+    @staticmethod
     def getInstance(uuid, xapiSession, createLock=True, force=False):
         xapi = XAPI(xapiSession, uuid)
         type = normalizeType(xapi.srRecord["type"])
@@ -1821,7 +1822,6 @@ class SR(object):
         elif type == SR.TYPE_LINSTOR:
             return LinstorSR(uuid, xapi, createLock, force)
         raise util.SMException("SR type %s not recognized" % type)
-    getInstance = staticmethod(getInstance)
 
     def __init__(self, uuid, xapi, createLock, force):
         self.logFilter = self.LogFilter(self)
