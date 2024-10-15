@@ -429,7 +429,10 @@ class BaseISCSISR(SR.SR):
                 realdev = os.path.realpath(os.path.join(dev_path, dev))
                 util.set_scheduler(os.path.basename(realdev))
 
-    def detach(self, sr_uuid, delete=False):
+    def detach(self, sr_uuid):
+        self.detach_and_delete(sr_uuid, delete=False)
+
+    def detach_and_delete(self, sr_uuid, delete=True):
         keys = []
         pbdref = None
         try:

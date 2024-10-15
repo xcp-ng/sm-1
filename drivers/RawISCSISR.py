@@ -64,7 +64,7 @@ class RawISCSISR(BaseISCSI.BaseISCSISR):
         self.managed = True
 
     def detach(self, sr_uuid):
-        super(RawISCSISR, self).detach(sr_uuid, True)
+        super(RawISCSISR, self).detach_and_delete(sr_uuid)
 
     def vdi(self, uuid):
         return ISCSIVDI(self, uuid)
