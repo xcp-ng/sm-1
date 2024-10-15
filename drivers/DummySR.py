@@ -159,7 +159,7 @@ class DummyVDI(VDI.VDI):
         self.run_corner_cases_tests()
         return self.get_params()
 
-    def delete(self, sr_uuid, vdi_uuid):
+    def delete(self, sr_uuid, vdi_uuid, data_only=False):
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_ref', 'vdi_location', 'vdi_uuid'])
         assert(len(self.sr.srcmd.params['args']) == 0)
 
