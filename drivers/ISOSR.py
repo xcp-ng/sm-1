@@ -757,7 +757,7 @@ class ISOVDI(VDI.VDI):
             raise xs_errors.XenError('VDICreate', \
                      opterr='could not create file: "%s"' % self.path)
 
-    def delete(self, sr_uuid, vdi_uuid):
+    def delete(self, sr_uuid, vdi_uuid, data_only=False):
         util.SMlog("Deleting...")
 
         self.uuid = vdi_uuid

@@ -98,7 +98,7 @@ class RAWVDI(VDI.VDI):
             return super(RAWVDI, self.sr.vdis[v['uuid']]).get_params()
         raise xs_errors.XenError('SRNoSpace')
 
-    def delete(self, sr_uuid, vdi_uuid):
+    def delete(self, sr_uuid, vdi_uuid, data_only=False):
         try:
             vdi = util._getVDI(self.sr, vdi_uuid)
             if not vdi['managed']:
