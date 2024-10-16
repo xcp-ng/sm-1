@@ -613,16 +613,16 @@ class LinstorSR(SR.SR):
                 logger=util.SMlog
             )
             self._vhdutil = LinstorVhdUtil(self.session, self._linstor)
-        except Exception as e:
-            util.SMlog('Failed to create LINSTOR SR: {}'.format(e))
-            raise xs_errors.XenError('LinstorSRCreate', opterr=str(e))
 
-        try:
             util.SMlog(
                 "Finishing SR creation, enable drbd-reactor on all hosts..."
             )
             self._update_drbd_reactor_on_all_hosts(enabled=True)
         except Exception as e:
+            if not self._linstor:
+                util.SMlog('Failed to create LINSTOR SR: {}'.format(e))
+                raise xs_errors.XenError('LinstorSRCreate', opterr=str(e))
+
             try:
                 self._linstor.destroy()
             except Exception as e2:
@@ -637,6 +637,7 @@ class LinstorSR(SR.SR):
         util.SMlog('LinstorSR.delete for {}'.format(self.uuid))
         cleanup.gc_force(self.session, self.uuid)
 
+        assert self._linstor
         if self.vdis or self._linstor._volumes:
             raise xs_errors.XenError('SRNotEmpty')
 
