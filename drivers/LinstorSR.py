@@ -2316,9 +2316,8 @@ class LinstorVDI(VDI.VDI):
         volume_uuid = self._linstor.get_volume_uuid_from_device_path(oldpath)
         self._linstor.update_volume_name(volume_uuid, newpath)
 
-    def _do_snapshot(
-        self, sr_uuid, vdi_uuid, snap_type, secondary=None, cbtlog=None
-    ):
+    def _do_snapshot(self, sr_uuid, vdi_uuid, snapType,
+                     cloneOp=False, secondary=None, cbtlog=None):
         # If cbt enabled, save file consistency state.
         if cbtlog is not None:
             if blktap2.VDI.tap_status(self.session, vdi_uuid):
@@ -2338,7 +2337,7 @@ class LinstorVDI(VDI.VDI):
         if not blktap2.VDI.tap_pause(self.session, sr_uuid, vdi_uuid):
             raise util.SMException('Failed to pause VDI {}'.format(vdi_uuid))
         try:
-            return self._snapshot(snap_type, cbtlog, consistency_state)
+            return self._snapshot(snapType, cbtlog, consistency_state)
         finally:
             blktap2.VDI.tap_unpause(self.session, sr_uuid, vdi_uuid, secondary)
 
