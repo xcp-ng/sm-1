@@ -197,8 +197,7 @@ class CephFSSR(FileSR.FileSR):
         except (util.CommandException, xs_errors.XenError):
             raise
         # Create a dictionary from the SR uuids to feed SRtoXML()
-        sr_dict = {sr_uuid: {} for sr_uuid in sr_list}
-        return util.SRtoXML(sr_dict)
+        return util.SRtoXML({sr_uuid: {} for sr_uuid in sr_list})
 
     def detach(self, sr_uuid):
         if not self.checkmount():

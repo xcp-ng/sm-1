@@ -220,11 +220,8 @@ class SMBSR(FileSR.SharedFileSR):
             raise xs_errors.XenError(err, opterr=inst.errstr)
         except (util.CommandException, xs_errors.XenError):
             raise
-
         # Create a dictionary from the SR uuids to feed SRtoXML()
-        sr_dict = {sr_uuid: {} for sr_uuid in sr_list}
-
-        return util.SRtoXML(sr_dict)
+        return util.SRtoXML({sr_uuid: {} for sr_uuid in sr_list})
 
     def detach(self, sr_uuid):
         """Detach the SR: Unmounts and removes the mountpoint"""
