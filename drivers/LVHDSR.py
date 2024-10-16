@@ -691,28 +691,28 @@ class LVHDSR(SR.SR):
                 for vdi in vdis:
                     vdi_uuids.add(self.session.xenapi.VDI.get_uuid(vdi))
 
-                Dict = LVMMetadataHandler(self.mdpath, False).getMetadata()[1]
+                info = LVMMetadataHandler(self.mdpath, False).getMetadata()[1]
 
-                for vdi in list(Dict.keys()):
-                    vdi_uuid = Dict[vdi][UUID_TAG]
-                    if bool(int(Dict[vdi][IS_A_SNAPSHOT_TAG])):
-                        if Dict[vdi][SNAPSHOT_OF_TAG] in vdiToSnaps:
-                            vdiToSnaps[Dict[vdi][SNAPSHOT_OF_TAG]].append(vdi_uuid)
+                for vdi in list(info.keys()):
+                    vdi_uuid = info[vdi][UUID_TAG]
+                    if bool(int(info[vdi][IS_A_SNAPSHOT_TAG])):
+                        if info[vdi][SNAPSHOT_OF_TAG] in vdiToSnaps:
+                            vdiToSnaps[info[vdi][SNAPSHOT_OF_TAG]].append(vdi_uuid)
                         else:
-                            vdiToSnaps[Dict[vdi][SNAPSHOT_OF_TAG]] = [vdi_uuid]
+                            vdiToSnaps[info[vdi][SNAPSHOT_OF_TAG]] = [vdi_uuid]
 
                     if vdi_uuid not in vdi_uuids:
                         util.SMlog("Introduce VDI %s as it is present in " \
                                    "metadata and not in XAPI." % vdi_uuid)
                         sm_config = {}
-                        sm_config['vdi_type'] = Dict[vdi][VDI_TYPE_TAG]
+                        sm_config['vdi_type'] = info[vdi][VDI_TYPE_TAG]
                         lvname = "%s%s" % \
                             (lvhdutil.LV_PREFIX[sm_config['vdi_type']], vdi_uuid)
                         self.lvmCache.activateNoRefcount(lvname)
                         activated = True
                         lvPath = os.path.join(self.path, lvname)
 
-                        if Dict[vdi][VDI_TYPE_TAG] == vhdutil.VDI_TYPE_RAW:
+                        if info[vdi][VDI_TYPE_TAG] == vhdutil.VDI_TYPE_RAW:
                             size = self.lvmCache.getSize( \
                                 lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_RAW] + \
                                     vdi_uuid)
@@ -736,31 +736,31 @@ class LVHDSR(SR.SR):
 
                         vdi_ref = self.session.xenapi.VDI.db_introduce(
                                         vdi_uuid,
-                                        Dict[vdi][NAME_LABEL_TAG],
-                                        Dict[vdi][NAME_DESCRIPTION_TAG],
+                                        info[vdi][NAME_LABEL_TAG],
+                                        info[vdi][NAME_DESCRIPTION_TAG],
                                         self.sr_ref,
-                                        Dict[vdi][TYPE_TAG],
+                                        info[vdi][TYPE_TAG],
                                         False,
-                                        bool(int(Dict[vdi][READ_ONLY_TAG])),
+                                        bool(int(info[vdi][READ_ONLY_TAG])),
                                         {},
                                         vdi_uuid,
                                         {},
                                         sm_config)
 
                         self.session.xenapi.VDI.set_managed(vdi_ref,
-                                                    bool(int(Dict[vdi][MANAGED_TAG])))
+                                                    bool(int(info[vdi][MANAGED_TAG])))
                         self.session.xenapi.VDI.set_virtual_size(vdi_ref,
                                                                  str(size))
                         self.session.xenapi.VDI.set_physical_utilisation( \
                             vdi_ref, str(utilisation))
                         self.session.xenapi.VDI.set_is_a_snapshot( \
-                            vdi_ref, bool(int(Dict[vdi][IS_A_SNAPSHOT_TAG])))
-                        if bool(int(Dict[vdi][IS_A_SNAPSHOT_TAG])):
+                            vdi_ref, bool(int(info[vdi][IS_A_SNAPSHOT_TAG])))
+                        if bool(int(info[vdi][IS_A_SNAPSHOT_TAG])):
                             self.session.xenapi.VDI.set_snapshot_time( \
-                                vdi_ref, DateTime(Dict[vdi][SNAPSHOT_TIME_TAG]))
-                        if Dict[vdi][TYPE_TAG] == 'metadata':
+                                vdi_ref, DateTime(info[vdi][SNAPSHOT_TIME_TAG]))
+                        if info[vdi][TYPE_TAG] == 'metadata':
                             self.session.xenapi.VDI.set_metadata_of_pool( \
-                                vdi_ref, Dict[vdi][METADATA_OF_POOL_TAG])
+                                vdi_ref, info[vdi][METADATA_OF_POOL_TAG])
 
                     # Update CBT status of disks either just added
                     # or already in XAPI
