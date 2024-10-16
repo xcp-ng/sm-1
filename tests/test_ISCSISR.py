@@ -129,7 +129,7 @@ class TestMultiLUNISCSISR(unittest.TestCase):
             'tpgt': 'TPGT'
         }
         self.node_records = [(
-            "%s:%d" % (self.node2['ip'], self.node2['port']),
+            f"{self.node2['ip']}:{self.node2['port']}",
             self.node2['tpgt'],
             self.node2['iqn']
         )]
