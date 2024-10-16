@@ -335,14 +335,15 @@ class ISOSR(SR.SR):
             util.makedirs(self.mountpoint)
 
         mountcmd = []
-        options = ''
+        options = []
+        nfs_options = ''
 
         if 'options' in self.dconf:
             options = self.dconf['options'].split(' ')
             if protocol == 'cifs':
                 options = [x for x in options if x != ""]
             else:
-                options = self.getNFSOptions(options)
+                nfs_options = self.getNFSOptions(options)
 
         # SMB options are passed differently for create via
         # XC/xe sr-create and create via xe-mount-iso-sr
@@ -392,7 +393,7 @@ class ISOSR(SR.SR):
                 io_timeout = nfs.get_nfs_timeout(self.other_config)
                 io_retrans = nfs.get_nfs_retrans(self.other_config)
                 nfs.soft_mount(self.mountpoint, server, path,
-                               transport, useroptions=options, nfsversion=self.nfsversion,
+                               transport, useroptions=nfs_options, nfsversion=self.nfsversion,
                                timeout=io_timeout, retrans=io_retrans)
             else:
                 if self.smbversion in SMB_VERSION_3:
