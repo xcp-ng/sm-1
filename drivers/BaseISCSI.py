@@ -175,11 +175,11 @@ class BaseISCSISR(SR.SR):
                 and ('chappassword' in self.dconf or 'chappassword_secret' in self.dconf):
             self.chapuser = self.dconf['chapuser'].encode('utf-8')
             if 'chappassword_secret' in self.dconf:
-                self.chappassword = util.get_secret(self.session, self.dconf['chappassword_secret'])
+                chappassword = util.get_secret(self.session, self.dconf['chappassword_secret'])
             else:
-                self.chappassword = self.dconf['chappassword']
+                chappassword = self.dconf['chappassword']
 
-            self.chappassword = self.chappassword.encode('utf-8')
+            self.chappassword = chappassword.encode('utf-8')
 
         self.incoming_chapuser = ""
         self.incoming_chappassword = ""
@@ -187,11 +187,11 @@ class BaseISCSISR(SR.SR):
                 and ('incoming_chappassword' in self.dconf or 'incoming_chappassword_secret' in self.dconf):
             self.incoming_chapuser = self.dconf['incoming_chapuser'].encode('utf-8')
             if 'incoming_chappassword_secret' in self.dconf:
-                self.incoming_chappassword = util.get_secret(self.session, self.dconf['incoming_chappassword_secret'])
+                incoming_chappassword = util.get_secret(self.session, self.dconf['incoming_chappassword_secret'])
             else:
-                self.incoming_chappassword = self.dconf['incoming_chappassword']
+                incoming_chappassword = self.dconf['incoming_chappassword']
 
-            self.incoming_chappassword = self.incoming_chappassword.encode('utf-8')
+            self.incoming_chappassword = incoming_chappassword.encode('utf-8')
 
         self.port = DEFAULT_PORT
         if 'port' in self.dconf and self.dconf['port']:
