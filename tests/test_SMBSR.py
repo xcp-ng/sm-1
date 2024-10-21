@@ -12,17 +12,10 @@ import xs_errors
 
 
 class FakeSMBSR(SMBSR.SMBSR):
-    uuid = None
-    sr_ref = None
-    mountpoint = None
-    linkpath = None
-    path = None
-    session = None
-    remoteserver = None
-
     def __init__(self, srcmd, none):
         self.dconf = srcmd.dconf
         self.srcmd = srcmd
+        self.session = None
         self.uuid = 'auuid'
         self.sr_ref = 'asr_ref'
         self.mountpoint = 'aMountpoint'
