@@ -391,10 +391,9 @@ class BaseISCSISR(SR.SR):
         util._incr_iscsiSR_refcount(self.targetIQN, sr_uuid)
         IQNs = []
         if "multiSession" in self.dconf:
-            IQNs = ""
             for iqn in self.dconf['multiSession'].split("|"):
                 if len(iqn):
-                    IQNs += iqn.split(',')[2]
+                    IQNs.append(iqn.split(',')[2])
         else:
             IQNs.append(self.targetIQN)
 
