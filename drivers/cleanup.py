@@ -1205,20 +1205,22 @@ class LVHDVDI(VDI):
     JRN_ZERO = "zero"  # journal entry type for zeroing out end of parent
     DRIVER_NAME_RAW = "aio"
 
-    def load(self, vdiInfo):
+    def load(self, info=None):
+        # `info` is always set. `None` default value is only here to match parent method.
+        assert info, "No info given to LVHDVDI.load"
         self.parent = None
         self.children = []
         self._sizeVHD = -1
         self._sizeAllocated = -1
-        self.scanError = vdiInfo.scanError
-        self.sizeLV = vdiInfo.sizeLV
-        self.sizeVirt = vdiInfo.sizeVirt
-        self.fileName = vdiInfo.lvName
-        self.lvActive = vdiInfo.lvActive
-        self.lvOpen = vdiInfo.lvOpen
-        self.lvReadonly = vdiInfo.lvReadonly
-        self.hidden = vdiInfo.hidden
-        self.parentUuid = vdiInfo.parentUuid
+        self.scanError = info.scanError
+        self.sizeLV = info.sizeLV
+        self.sizeVirt = info.sizeVirt
+        self.fileName = info.lvName
+        self.lvActive = info.lvActive
+        self.lvOpen = info.lvOpen
+        self.lvReadonly = info.lvReadonly
+        self.hidden = info.hidden
+        self.parentUuid = info.parentUuid
         self.path = os.path.join(self.sr.path, self.fileName)
 
     @staticmethod
