@@ -490,7 +490,7 @@ Where command is:
 
 Params:
    - All command takes a qcow file. Only diff takes a backing file and a qcow.
-     """
+"""
     print(help_msg)
     sys.exit(1)
 
