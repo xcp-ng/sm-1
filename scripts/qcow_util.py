@@ -356,5 +356,8 @@ if __name__ == "__main__":
     elif command == "wipe":
         qcow_info = QcowInfo(sys.argv[2])
         qcow_info.wipe_data()
+    elif command == "info":
+        qcow_info = QcowInfo(sys.argv[2])
+        print(f"Virtual size: {qcow_info.header['virtual_disk_size']} bytes")
     else:
         print_help()
