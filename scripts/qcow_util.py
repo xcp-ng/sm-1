@@ -5,8 +5,18 @@ Provides some usefull functions for Qcow2 files.
 
 import struct
 import sys
-from typing import BinaryIO, Dict, List, NoReturn
+from typing import BinaryIO, Dict, List, NoReturn, Any
+from pathlib import Path
 
+import errno
+import util
+from vhdutil import VHDInfo
+
+QEMU_IMG = "/usr/bin/qemu-img"
+
+def ioretry(cmd):
+    return util.ioretry(lambda: util.pread2(cmd),
+            errlist = [errno.EIO, errno.EAGAIN])
 
 class QcowInfo:
     """
@@ -196,7 +206,16 @@ class QcowInfo:
         )
 
     @staticmethod
-    def _read_qcow2_header(file: BinaryIO) -> Dict[str, int]:
+    def _read_qcow2_backingfile(file: BinaryIO, backing_file_offset: int , backing_file_size: int) -> str:
+        if backing_file_offset == 0:
+            return ""
+
+        file.seek(backing_file_offset)
+        parent_name = file.read(backing_file_size)
+        return parent_name.decode("UTF-8")
+
+    @staticmethod
+    def _read_qcow2_header(file: BinaryIO) -> Dict[str, Any]:
         """Returns a dict containing some information from QCow2 header.
 
         Args:
@@ -248,6 +267,8 @@ class QcowInfo:
         if cluster_bits != 16:
             raise ValueError("Only default cluster size of 64K is supported")
 
+        parent_name = QcowInfo._read_qcow2_backingfile(file, backing_file_offset, backing_file_size)
+
         return {
             "version": version,
             "backing_file_offset": backing_file_offset,
@@ -258,6 +279,7 @@ class QcowInfo:
             "l1_table_offset": l1_table_offset,
             "refcount_table_offset": refcount_table_offset,
             "snapshots_offset": snapshots_offset,
+            "parent": parent_name,
         }
 
     def _get_l1_entries(self, file: BinaryIO) -> List[int]:
@@ -475,6 +497,65 @@ class QcowInfo:
             return True
 
 
+def getSizeVirt(path) -> int:
+    qcow_info = QcowInfo(path)
+    return qcow_info.header['virtual_disk_size']
+
+def setSizeVirt(path, new_size) -> None:
+    cmd = [QEMU_IMG, "resize", path, new_size]
+    ioretry(cmd)
+
+def setSizeVirtFast(path, size) -> None:
+    pass
+
+def getSizePhys(path) -> int:
+    cmd = ["du", "-b", path]
+    ret = ioretry(cmd)
+    return ret.split()[0]
+
+def setSizePhys(path, size, debug = True) -> None:
+    pass
+
+def _get_cluster_to_byte(clusters: int, cluster_bits: int) -> int:
+    # (1 << cluster_bits) give cluster size in byte
+    return clusters * (1 << cluster_bits)
+
+def getAllocateSize(path) -> int:
+    """
+    Return allocated blocks in the QCow2 file in byte
+    """
+    qcow_info = QcowInfo(path)
+    clusters = qcow_info.get_number_of_allocated_clusters()
+    cluster_bits =  qcow_info.header["cluster_bits"]
+    return _get_cluster_to_byte(clusters, cluster_bits)
+
+def getMaxResizeSize(path) -> int:
+    return 0
+
+def getVHDInfo(path, extractUuidFunction, includeParent = True) -> VHDInfo:
+    qcow_info = QcowInfo(path)
+    uuid = extractUuidFunction(path)
+    vhdinfo = VHDInfo(uuid)
+    vhdinfo.path = Path(path).name
+    vhdinfo.sizeVirt = qcow_info.header["virtual_disk_size"]
+    vhdinfo.sizePhys = getSizePhys(path)
+    vhdinfo.hidden = qcow_info.get_hidden()
+    vhdinfo.sizeAllocated = _get_cluster_to_byte(qcow_info.get_number_of_allocated_clusters(), qcow_info.header["cluster_bits"])
+    if includeParent:
+        parent_path = qcow_info.header["parent"]
+        if parent_path != "":
+            vhdinfo.parentPath = parent_path
+            vhdinfo.parentUuid = extractUuidFunction(parent_path)
+    vhdinfo.error = 0
+
+    return vhdinfo
+
+def qcow_extractUUID(path: str):
+    return "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+def print_vhdinfo_debug(vhdinfo: VHDInfo) -> None:
+    print(vhdinfo.__dict__)
+
 def print_help() -> NoReturn:
     """Print help."""
     help_msg = """
@@ -490,7 +571,7 @@ Where command is:
 
 Params:
    - All command takes a qcow file. Only diff takes a backing file and a qcow.
-"""
+    """
     print(help_msg)
     sys.exit(1)
 
@@ -532,5 +613,12 @@ if __name__ == "__main__":
             print("Hidden property is set")
         else:
             print("Hidden property is not set")
+    elif command == "info":
+        print(f"Virtual size: {qcow_info.header['virtual_disk_size']} bytes")
+    elif command == "parent":
+        print(f"Parent: {qcow_info.header['parent']}")
+    elif command == "getVHDInfo":
+        vhdinfo = getVHDInfo(sys.argv[2], qcow_extractUUID)
+        print_vhdinfo_debug(vhdinfo)
     else:
         print_help()
