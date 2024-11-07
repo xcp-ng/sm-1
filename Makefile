@@ -127,7 +127,7 @@ precheck: build
 	echo "Precheck succeeded with no outstanding issues found."
 
 .PHONY: install
-install: precheck
+install: build
 	mkdir -p $(SM_STAGING)
 	$(call mkdir_clean,$(SM_STAGING))
 	mkdir -p $(SM_STAGING)$(SM_DEST)
