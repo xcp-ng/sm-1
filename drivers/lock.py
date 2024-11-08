@@ -194,7 +194,7 @@ class LockImplementation(object):
         fd = self.lockfile.fileno()
         self.lock = flock.WriteLock(fd)
 
-    def _open_lockfile(self):
+    def _open_lockfile(self) -> None:
         """Provide a seam, so extreme situations could be tested"""
         util.SMlog("lock: opening lock file %s" % self.lockpath)
         self.lockfile = open(self.lockpath, "w+")

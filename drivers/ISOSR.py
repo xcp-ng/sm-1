@@ -17,6 +17,8 @@
 #
 # ISOSR: remote iso storage repository
 
+from sm_typing import override
+
 import SR
 import VDI
 import SRCommand
@@ -152,7 +154,7 @@ class ISOSR(SR.SR):
     """Local file storage repository"""
 
     # Some helper functions:
-    def _checkmount(self):
+    def _checkmount(self) -> bool:
         """Checks that the mountpoint exists and is mounted"""
         if not util.pathexists(self.mountpoint):
             return False
@@ -221,21 +223,24 @@ class ISOSR(SR.SR):
                     vdi.read_only = False
 
 # Now for the main functions:
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         """Do we handle this type?"""
         if type == TYPE:
             return True
         return False
-    handles = staticmethod(handles)
 
-    def content_type(self, sr_uuid):
+    @override
+    def content_type(self, sr_uuid) -> str:
         """Returns the content_type XML"""
         return super(ISOSR, self).content_type(sr_uuid)
 
     # pylint: disable=no-member
     vdi_path_regex = re.compile(r"[a-z0-9.-]+\.(iso|img)", re.I)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         """Create a VDI class.  If the VDI does not exist, we determine
         here what its filename should be."""
 
@@ -267,7 +272,8 @@ class ISOSR(SR.SR):
 
         return ISOVDI(self, filename)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         """Initialises the SR"""
         # First of all, check we've got the correct keys in dconf
         if 'location' not in self.dconf:
@@ -302,10 +308,12 @@ class ISOSR(SR.SR):
         # Some info we need:
         self.sr_vditype = 'phy'
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         pass
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         """Std. attach"""
         # Very-Legacy mode means the ISOs are in the local fs - so no need to attach.
         if 'legacy_mode' in self.dconf:
@@ -475,8 +483,8 @@ class ISOSR(SR.SR):
         except nfs.NfsException as e:
             raise xs_errors.XenError('NFSTarget', opterr=str(e.errstr))
 
-
-    def after_master_attach(self, uuid):
+    @override
+    def after_master_attach(self, uuid) -> None:
         """Perform actions required after attaching on the pool master
         Return:
           None
@@ -568,7 +576,8 @@ class ISOSR(SR.SR):
         """Pass cache options to mount.cifs"""
         return "cache=none"
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         """Std. detach"""
         if 'legacy_mode' in self.dconf or not self._checkmount():
             return
@@ -579,7 +588,8 @@ class ISOSR(SR.SR):
             raise xs_errors.XenError('NFSUnMount', \
                                          opterr='error is %d' % inst.code)
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         """Scan: see _loadvdis"""
         if not util.isdir(self.path):
             raise xs_errors.XenError('SRUnavailable', \
@@ -660,9 +670,10 @@ class ISOSR(SR.SR):
                 self.session.xenapi.VDI.remove_from_sm_config(vdi, 'xs-tools')
 
         else:
-            return super(ISOSR, self).scan(sr_uuid)
+            super(ISOSR, self).scan(sr_uuid)
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         self.attach(sr_uuid)
         if 'type' in self.dconf:
             smconfig = self.session.xenapi.SR.get_sm_config(self.sr_ref)
@@ -681,9 +692,10 @@ class ISOSR(SR.SR):
 
         self.detach(sr_uuid)
 
-        
+
 class ISOVDI(VDI.VDI):
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         # Nb, in the vdi_create call, the filename is unset, so the following
         # will fail.
         self.vdi_type = "iso"
@@ -725,17 +737,20 @@ class ISOVDI(VDI.VDI):
                 self.sm_config['xs-tools-version'] = product_version
                 self.sm_config['xs-tools-build'] = build_number
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         pass
 
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         try:
             os.stat(self.path)
             return super(ISOVDI, self).attach(sr_uuid, vdi_uuid)
         except:
             raise xs_errors.XenError('VDIMissing')
 
-    def create(self, sr_uuid, vdi_uuid, size):
+    @override
+    def create(self, sr_uuid, vdi_uuid, size) -> str:
         self.uuid = vdi_uuid
         self.path = os.path.join(self.sr.path, self.filename)
         self.size = size
@@ -758,7 +773,8 @@ class ISOVDI(VDI.VDI):
             raise xs_errors.XenError('VDICreate', \
                      opterr='could not create file: "%s"' % self.path)
 
-    def delete(self, sr_uuid, vdi_uuid, data_only=False):
+    @override
+    def delete(self, sr_uuid, vdi_uuid, data_only=False) -> None:
         util.SMlog("Deleting...")
 
         self.uuid = vdi_uuid

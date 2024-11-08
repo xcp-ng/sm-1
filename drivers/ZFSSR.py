@@ -14,8 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from sm_typing import override
+
 import SR
 import SRCommand
+import VDI
 
 import FileSR
 
@@ -71,11 +74,13 @@ def is_zfs_path(path):
 class ZFSSR(FileSR.FileSR):
     DRIVER_TYPE = 'zfs'
 
+    @override
     @staticmethod
-    def handles(type):
+    def handles(type) -> bool:
         return type == ZFSSR.DRIVER_TYPE
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if not is_zfs_available():
             raise xs_errors.XenError(
                 'SRUnavailable',
@@ -83,7 +88,8 @@ class ZFSSR(FileSR.FileSR):
             )
         return super(ZFSSR, self).load(sr_uuid)
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         if not is_zfs_path(self.remotepath):
             raise xs_errors.XenError(
                 'ZFSSRCreate',
@@ -91,7 +97,8 @@ class ZFSSR(FileSR.FileSR):
             )
         return super(ZFSSR, self).create(sr_uuid, size)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         if not self._checkmount():
             raise xs_errors.XenError(
                 'ZFSSRDelete',
@@ -99,28 +106,33 @@ class ZFSSR(FileSR.FileSR):
             )
         return super(ZFSSR, self).delete(sr_uuid)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not is_zfs_path(self.remotepath):
             raise xs_errors.XenError(
                 'SRUnavailable',
                 opterr='Invalid ZFS path'
             )
-        return super(ZFSSR, self).attach(sr_uuid)
+        super(ZFSSR, self).attach(sr_uuid)
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         return super(ZFSSR, self).detach(sr_uuid)
 
-    def vdi(self, uuid, loadLocked=False):
+    @override
+    def vdi(self, uuid, loadLocked=False) -> VDI.VDI:
         return ZFSFileVDI(self, uuid)
 
     # Ensure _checkmount is overridden to prevent bad behaviors in FileSR.
-    def _checkmount(self):
+    @override
+    def _checkmount(self) -> bool:
         return super(ZFSSR, self)._checkmount() and \
             is_zfs_path(self.remotepath)
 
 
 class ZFSFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 

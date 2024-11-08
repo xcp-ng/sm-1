@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import unittest
 import BaseISCSI
 import unittest.mock as mock
@@ -8,17 +10,20 @@ import os
 class TestBase(unittest.TestCase):
     """ Provides errorcodes.xml, so exceptions are sensible """
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self._xmldefs = xs_errors.XML_DEFS
         xs_errors.XML_DEFS = os.path.join(
             os.path.dirname(__file__), 'XE_SR_ERRORCODES.xml')
 
-    def tearDown(self):
+    @override
+    def tearDown(self) -> None:
         xs_errors.XML_DEFS = self._xmldefs
 
 
 class NonLoadingISCSISR(BaseISCSI.BaseISCSISR):
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         pass
 
 
@@ -82,10 +87,12 @@ class NonInitingMultiLUNISCSISR(BaseISCSI.BaseISCSISR):
             extra_adapter: None
         }
 
-    def _synchroniseAddrList(self, *args, **kwargs):
+    @override
+    def _synchroniseAddrList(self, *args, **kwargs) -> None:
         pass
 
-    def _init_adapters(self):
+    @override
+    def _init_adapters(self) -> None:
         pass
 
 
@@ -115,8 +122,8 @@ class TestVdiTypeSetting(TestBase):
 
 
 class TestMultiLUNISCSISR(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.node1 = {
             'ip': '127.0.0.1',
             'port': 3260,

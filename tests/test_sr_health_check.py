@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import unittest
 import unittest.mock as mock
 
@@ -10,8 +12,8 @@ SR_UUID = 'sr uuid'
 
 
 class TestSrHealthCheck(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         util_patcher = mock.patch('sr_health_check.util')
         self.mock_util = util_patcher.start()
         self.mock_session = mock.MagicMock()

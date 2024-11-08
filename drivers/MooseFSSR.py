@@ -18,6 +18,8 @@
 #
 # MooseFSSR: Based on CEPHFSSR and FileSR, mounts MooseFS share
 
+from sm_typing import override
+
 import errno
 import os
 import syslog as _syslog
@@ -32,6 +34,7 @@ import SR
 import SRCommand
 import FileSR
 # end of careful
+import VDI
 import cleanup
 import util
 import vhdutil
@@ -79,13 +82,14 @@ class MooseFSSR(FileSR.FileSR):
 
     DRIVER_TYPE = 'moosefs'
 
-    def handles(sr_type):
+    @override
+    @staticmethod
+    def handles(sr_type) -> bool:
         # fudge, because the parent class (FileSR) checks for smb to alter its behavior
         return sr_type == MooseFSSR.DRIVER_TYPE or sr_type == 'smb'
 
-    handles = staticmethod(handles)
-
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if not self._is_moosefs_available():
             raise xs_errors.XenError(
                 'SRUnavailable',
@@ -176,7 +180,8 @@ class MooseFSSR(FileSR.FileSR):
             except OSError as inst:
                 raise MooseFSException("Command rmdir failed with error '%s'" % inst.strerror)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self.checkmount():
             try:
                 self.mount()
@@ -184,7 +189,8 @@ class MooseFSSR(FileSR.FileSR):
                 raise xs_errors.SROSError(12, exc.errstr)
         self.attached = True
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         try:
             self.mount(PROBE_MOUNTPOINT)
             sr_list = filter(util.match_uuid, util.listdir(PROBE_MOUNTPOINT))
@@ -194,7 +200,8 @@ class MooseFSSR(FileSR.FileSR):
         # Create a dictionary from the SR uuids to feed SRtoXML()
         return util.SRtoXML({sr_uuid: {} for sr_uuid in sr_list})
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         if not self.checkmount():
             return
         util.SMlog("Aborting GC/coalesce")
@@ -204,7 +211,8 @@ class MooseFSSR(FileSR.FileSR):
         self.unmount(self.mountpoint, True)
         self.attached = False
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         if self.checkmount():
             raise xs_errors.SROSError(113, 'MooseFS mount point already attached')
 
@@ -248,7 +256,8 @@ class MooseFSSR(FileSR.FileSR):
         finally:
             self.detach(sr_uuid)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         # try to remove/delete non VDI contents first
         super(MooseFSSR, self).delete(sr_uuid)
         try:
@@ -268,7 +277,8 @@ class MooseFSSR(FileSR.FileSR):
             if inst.code != errno.ENOENT:
                 raise xs_errors.SROSError(114, "Failed to remove MooseFS mount point")
 
-    def vdi(self, uuid, loadLocked=False):
+    @override
+    def vdi(self, uuid, loadLocked=False) -> VDI.VDI:
         return MooseFSFileVDI(self, uuid)
 
     @staticmethod
@@ -276,7 +286,8 @@ class MooseFSSR(FileSR.FileSR):
         return util.find_executable('mfsmount')
 
 class MooseFSFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 
@@ -284,7 +295,8 @@ class MooseFSFileVDI(FileSR.FileVDI):
 
         return super(MooseFSFileVDI, self).attach(sr_uuid, vdi_uuid)
 
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("MooseFSFileVDI.generate_config")
         if not util.pathexists(self.path):
             raise xs_errors.XenError('VDIUnavailable')
@@ -298,15 +310,16 @@ class MooseFSFileVDI(FileSR.FileVDI):
         config = xmlrpc.client.dumps(tuple([resp]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config,), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         try:
             if not util.pathexists(self.sr.path):
-                self.sr.attach(sr_uuid)
+                return self.sr.attach(sr_uuid)
         except:
             util.logException("MooseFSFileVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable',
                                      opterr='Unable to attach from config')
-
+        return ''
 
 if __name__ == '__main__':
     SRCommand.run(MooseFSSR, DRIVER_INFO)

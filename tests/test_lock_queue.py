@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import builtins
 import copy
 import os
@@ -22,7 +24,8 @@ def mock_pickle_load_fn(*args):
 
 
 class Test_LockQueue(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         # Re-initialize queue to empty for each test
         global saved_queue
         saved_queue = []

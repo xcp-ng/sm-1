@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import unittest.mock as mock
 import LVHDoHBASR
 import unittest
@@ -72,8 +74,8 @@ class TestLVHDoHBAVDI(unittest.TestCase):
 
 
 class TestLVHDoHBASR(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.host_ref = str(uuid4())
         self.session_ref = str(uuid4())
         self.sr_ref = str(uuid4())

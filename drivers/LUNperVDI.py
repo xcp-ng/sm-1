@@ -18,6 +18,8 @@
 # LUNperVDI: Generic Raw LUN handler, used by HBASR and ISCSISR
 #
 
+from sm_typing import override
+
 import os
 import VDI
 import util
@@ -28,7 +30,8 @@ MAX_TIMEOUT = 15
 
 
 class RAWVDI(VDI.VDI):
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         if not self.sr.attached:
             raise xs_errors.XenError('SRUnavailable')
 
@@ -60,7 +63,8 @@ class RAWVDI(VDI.VDI):
         sm_config['backend-kind'] = 'vbd'
         self.sm_config = sm_config
 
-    def introduce(self, sr_uuid, vdi_uuid):
+    @override
+    def introduce(self, sr_uuid, vdi_uuid) -> str:
         self.sm_config = self.sr.srcmd.params['vdi_sm_config']
         vdi_path = self.sr._getLUNbySMconfig(self.sm_config)
         self._query(vdi_path, self.sm_config['LUNid'])
@@ -78,7 +82,8 @@ class RAWVDI(VDI.VDI):
             self.sr.vdis[vdi_uuid]._db_introduce()
         return super(RAWVDI, self).get_params()
 
-    def create(self, sr_uuid, vdi_uuid, size):
+    @override
+    def create(self, sr_uuid, vdi_uuid, size) -> str:
         VDIs = util._getVDIs(self.sr)
         self.sr._loadvdis()
         smallest = 0
@@ -98,7 +103,8 @@ class RAWVDI(VDI.VDI):
             return super(RAWVDI, self.sr.vdis[v['uuid']]).get_params()
         raise xs_errors.XenError('SRNoSpace')
 
-    def delete(self, sr_uuid, vdi_uuid, data_only=False):
+    @override
+    def delete(self, sr_uuid, vdi_uuid, data_only=False) -> None:
         try:
             vdi = util._getVDI(self.sr, vdi_uuid)
             if not vdi['managed']:
@@ -108,7 +114,8 @@ class RAWVDI(VDI.VDI):
         except:
             pass
 
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         self.sr._loadvdis()
         if vdi_uuid not in self.sr.vdis:
             raise xs_errors.XenError('VDIUnavailable')
@@ -126,7 +133,8 @@ class RAWVDI(VDI.VDI):
                 raise xs_errors.XenError('VDIUnavailable')
         return super(RAWVDI, self).attach(sr_uuid, vdi_uuid)
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         self.sr._loadvdis()
         if 'SCSIid' in self.sm_config:
             self.sr.mpathmodule.reset(self.sm_config['SCSIid'], True)  # explicitly unmap

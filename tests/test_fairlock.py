@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import unittest
 import unittest.mock as mock
 
@@ -5,7 +7,8 @@ import socket
 from fairlock import Fairlock, FairlockServiceTimeout, FairlockDeadlock
 
 class TestFairlock(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         sock_patcher = mock.patch('fairlock.socket', autospec=True)
         self.mock_socket = sock_patcher.start()
         os_patcher = mock.patch('fairlock.os', autospec=True)

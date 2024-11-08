@@ -31,7 +31,8 @@ class NfsCheckException(Exception):
         except:
             self.exe = None
 
-    def __str__(self):
+    @override
+    def __str__(self) -> str:
         return "File %s in use by pid %d (%s), fd %d" % \
             (self.path, self.pid, self.exe, self.fd)
 

@@ -1,3 +1,5 @@
+from sm_typing import Any, Generator, override
+
 import re
 import unittest.mock as mock
 import os
@@ -49,12 +51,13 @@ class SCSIAdapter(object):
     def add_parameter(self, host_class, values):
         self.parameters.append((host_class, values))
 
-    def adapter_device_paths(self, host_id):
+    def adapter_device_paths(self, host_id) -> Generator[str, None, None]:
         yield '/sys/class/scsi_host/host%s' % host_id
 
 
 class AdapterWithNonBlockDevice(SCSIAdapter):
-    def adapter_device_paths(self, host_id):
+    @override
+    def adapter_device_paths(self, host_id) -> Generator[str, None, None]:
         for adapter_device_path in super(AdapterWithNonBlockDevice,
                                          self).adapter_device_paths(host_id):
             yield adapter_device_path
@@ -115,7 +118,7 @@ class TestContext(object):
         self.patchers.append(patcher)
         patcher.start()
 
-    def start(self):
+    def start(self) -> None:
         self.patch('builtins.open', new=self.fake_open)
         self.patch('fcntl.fcntl', new=self.fake_fcntl)
         self.patch('os.path.exists', new=self.fake_exists)
@@ -190,7 +193,7 @@ class TestContext(object):
             'x86_64'
         )
 
-    def fake_open(self, fname, mode='r'):
+    def fake_open(self, fname, mode='r') -> Any:
         if fname == '/etc/xensource-inventory':
             return io.StringIO(self.generate_inventory_contents())
 
@@ -264,7 +267,7 @@ class TestContext(object):
         for path, value in self._path_content.items():
             yield (path, value)
 
-    def generate_device_paths(self):
+    def generate_device_paths(self) -> Generator[str, None, None]:
         actual_disk_letter = 'a'
         for host_id, adapter in enumerate(self.scsi_adapters):
             for adapter_device_path in adapter.adapter_device_paths(host_id):

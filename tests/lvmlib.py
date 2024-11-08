@@ -1,3 +1,5 @@
+from sm_typing import Never, override
+
 import argparse
 import sys
 
@@ -7,10 +9,12 @@ class TestArgParse(argparse.ArgumentParser):
     to stderr during the tests
     """
 
-    def exit(self, status=0, msg=None):
+    @override
+    def exit(self, status=0, msg=None) -> Never:
         sys.exit(status)
 
-    def error(self, msg):
+    @override
+    def error(self, msg) -> Never:
         """error(msg : string)"""
         self.exit(2, "%s: error: %s\n" % (self.prog, msg))
 

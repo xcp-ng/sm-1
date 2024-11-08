@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from sm_typing import override
+
 import SR
 from SR import deviceCheck
 import SRCommand
@@ -52,17 +54,20 @@ class LargeBlockSR(EXTSR.EXTSR):
     DRIVER_TYPE = "largeblock"
     LOOP_SECTOR_SIZE = 512
 
+    @override
     @staticmethod
-    def handles(srtype):
+    def handles(srtype) -> bool:
         return srtype == LargeBlockSR.DRIVER_TYPE
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         super(LargeBlockSR, self).load(sr_uuid)
         self.is_deleting = False
         self.vgname = LARGEBLOCK_PREFIX + sr_uuid
         self.remotepath = os.path.join("/dev", self.vgname, sr_uuid)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self.is_deleting:
             vg_device = self._get_device()
             self.dconf["device"] = ",".join(vg_device)
@@ -71,7 +76,8 @@ class LargeBlockSR(EXTSR.EXTSR):
                 self._redo_vg_connection() # Call redo VG connection to connect it correctly to the loop device instead of the real 4KiB block device
         super(LargeBlockSR, self).attach(sr_uuid)
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         if not self.is_deleting:
             vg_device = self._get_device()
             self.dconf["device"] = ",".join(vg_device)
@@ -79,8 +85,9 @@ class LargeBlockSR(EXTSR.EXTSR):
         if not self.is_deleting:
             self._destroy_emulated_device()
 
+    @override
     @deviceCheck
-    def create(self, sr_uuid, size):
+    def create(self, sr_uuid, size) -> None:
         base_devices = self.dconf["device"].split(",")
         if len(base_devices) > 1:
             raise xs_errors.XenError("ConfigDeviceInvalid", opterr="Multiple devices configuration is not supported")
@@ -96,7 +103,8 @@ class LargeBlockSR(EXTSR.EXTSR):
         finally:
             self._destroy_emulated_device(base_devices)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         base_devices = self._get_device()
         self.dconf["device"] = ",".join(self._get_loopdev_from_device(base_devices))
 
@@ -112,8 +120,9 @@ class LargeBlockSR(EXTSR.EXTSR):
             self._destroy_emulated_device(base_devices)
             self.is_deleting = False
 
+    @override
     @deviceCheck
-    def probe(self):
+    def probe(self) -> str:
         # We override EXTSR.probe because it uses EXT_PREFIX in this call
         return lvutil.srlist_toxml(
             lvutil.scan_srlist(LARGEBLOCK_PREFIX, self.dconf['device']),

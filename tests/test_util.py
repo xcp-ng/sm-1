@@ -1,3 +1,5 @@
+from sm_typing import Any, Dict, List, Set, override
+
 import copy
 import errno
 import io
@@ -43,7 +45,8 @@ class TestUtil(unittest.TestCase):
     Tests for the util module methods
     """
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         # OS Patchers
         statvfs_patcher = mock.patch("util.os.statvfs", autospec=True)
         self.mock_statvfs = statvfs_patcher.start()
@@ -53,7 +56,7 @@ class TestUtil(unittest.TestCase):
         self.mock_mkdir = mkdir_patcher.start()
         unlink_patcher = mock.patch('util.os.unlink', autospec=True)
         self.mock_unlink = unlink_patcher.start()
-        self.dir_contents = {}
+        self.dir_contents: Dict[str, List[str]] = {}
         listdir_patcher = mock.patch('util.os.listdir', autospec=True)
         self.mock_listdir = listdir_patcher.start()
         self.mock_listdir.side_effect = self.list_dir
@@ -77,12 +80,12 @@ class TestUtil(unittest.TestCase):
         self.mock_session = mock.MagicMock()
         self.mock_xenapi.xapi_local.return_value = self.mock_session
 
-        self.processes = {}
+        self.processes: Dict[str, Any] = {}
         popen_patcher = mock.patch('util.subprocess.Popen', autospec=True)
         self.mock_popen = popen_patcher.start()
         self.mock_popen.side_effect = self.popen
 
-        self.mock_files = {}
+        self.mock_files: Dict[str, Any] = {}
 
         self.addCleanup(mock.patch.stopall)
 
@@ -714,7 +717,8 @@ class TestUtil(unittest.TestCase):
 
 
 class TestFistPoints(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
         sleep_patcher = mock.patch('util.time.sleep', autospec=True)
         self.mock_sleep = sleep_patcher.start()
@@ -725,7 +729,7 @@ class TestFistPoints(unittest.TestCase):
         exists_patcher = mock.patch('util.os.path.exists', autospec=True)
         self.mock_exists = exists_patcher.start()
         self.mock_exists.side_effect = self.exists
-        self.existing_files = set()
+        self.existing_files: Set[str] = set()
 
         xenapi_patcher = mock.patch('util.XenAPI', autospec=True)
         patched_xenapi = xenapi_patcher.start()

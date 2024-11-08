@@ -15,6 +15,8 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
+from sm_typing import override
+
 import SR
 import VDI
 import SRCommand
@@ -54,25 +56,29 @@ class SHMSR(SR.SR):
         except:
             pass
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         """Do we handle this type?"""
         if type == TYPE:
             return True
         return False
-    handles = staticmethod(handles)
 
-    def content_type(self, sr_uuid):
+    @override
+    def content_type(self, sr_uuid) -> str:
         """Returns the content_type XML"""
         return super(SHMSR, self).content_type(sr_uuid)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         """Create a VDI class"""
         if 'vdi_location' in self.srcmd.params:
             return SHMVDI(self, uuid, self.srcmd.params['vdi_location'])
         else:
             return SHMVDI(self, uuid, self.srcmd.params['device_config']['location'])
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         """Initialises the SR"""
         if 'location' not in self.dconf:
             raise xs_errors.XenError('ConfigLocationMissing')
@@ -82,26 +88,31 @@ class SHMSR(SR.SR):
         self.physical_utilisation = 0
         self.virtual_allocation = 0
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         """Std. attach"""
         self._loadvdis()
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         """Std. detach"""
         pass
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         """Scan"""
         self._loadvdis()
-        return super(SHMSR, self).scan(sr_uuid)
+        super(SHMSR, self).scan(sr_uuid)
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         self.attach(sr_uuid)
         self.detach(sr_uuid)
 
 
 class SHMVDI(VDI.VDI):
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         try:
             stat = os.stat(self.path)
             self.utilisation = int(stat.st_size)
@@ -120,13 +131,16 @@ class SHMVDI(VDI.VDI):
         self.shareable = True
         self.sm_config = {}
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         pass
 
-    def clone(self, sr_uuid, vdi_uuid):
+    @override
+    def clone(self, sr_uuid, vdi_uuid) -> str:
         return self.get_params()
 
-    def snapshot(self, sr_uuid, vdi_uuid):
+    @override
+    def snapshot(self, sr_uuid, vdi_uuid) -> str:
         return self.get_params()
 
 if __name__ == '__main__':

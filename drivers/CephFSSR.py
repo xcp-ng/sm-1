@@ -18,6 +18,8 @@
 #
 # CEPHFSSR: Based on FileSR, mounts ceph fs share
 
+from sm_typing import override
+
 import errno
 import os
 import socket
@@ -33,6 +35,7 @@ import SR
 import SRCommand
 import FileSR
 # end of careful
+import VDI
 import cleanup
 import util
 import vhdutil
@@ -83,13 +86,14 @@ class CephFSSR(FileSR.FileSR):
 
     DRIVER_TYPE = 'cephfs'
 
-    def handles(sr_type):
+    @override
+    @staticmethod
+    def handles(sr_type) -> bool:
         # fudge, because the parent class (FileSR) checks for smb to alter its behavior
         return sr_type == CephFSSR.DRIVER_TYPE or sr_type == 'smb'
 
-    handles = staticmethod(handles)
-
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if not self._is_ceph_available():
             raise xs_errors.XenError(
                 'SRUnavailable',
@@ -180,7 +184,8 @@ class CephFSSR(FileSR.FileSR):
             except OSError as inst:
                 raise CephFSException("rmdir failed with error '%s'" % inst.strerror)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self.checkmount():
             try:
                 self.mount()
@@ -189,7 +194,8 @@ class CephFSSR(FileSR.FileSR):
                 raise xs_errors.SROSError(12, exc.errstr)
         self.attached = True
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         try:
             self.mount(PROBE_MOUNTPOINT)
             sr_list = filter(util.match_uuid, util.listdir(PROBE_MOUNTPOINT))
@@ -199,7 +205,8 @@ class CephFSSR(FileSR.FileSR):
         # Create a dictionary from the SR uuids to feed SRtoXML()
         return util.SRtoXML({sr_uuid: {} for sr_uuid in sr_list})
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         if not self.checkmount():
             return
         util.SMlog("Aborting GC/coalesce")
@@ -210,7 +217,8 @@ class CephFSSR(FileSR.FileSR):
         os.unlink(self.path)
         self.attached = False
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         if self.checkmount():
             raise xs_errors.SROSError(113, 'CephFS mount point already attached')
 
@@ -244,7 +252,8 @@ class CephFSSR(FileSR.FileSR):
                                            os.strerror(inst.code)))
         self.detach(sr_uuid)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         # try to remove/delete non VDI contents first
         super(CephFSSR, self).delete(sr_uuid)
         try:
@@ -259,7 +268,8 @@ class CephFSSR(FileSR.FileSR):
             if inst.code != errno.ENOENT:
                 raise xs_errors.SROSError(114, "Failed to remove CephFS mount point")
 
-    def vdi(self, uuid, loadLocked=False):
+    @override
+    def vdi(self, uuid, loadLocked=False) -> VDI.VDI:
         return CephFSFileVDI(self, uuid)
 
     @staticmethod
@@ -267,7 +277,8 @@ class CephFSSR(FileSR.FileSR):
         return util.find_executable('ceph')
 
 class CephFSFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 
@@ -275,7 +286,8 @@ class CephFSFileVDI(FileSR.FileVDI):
 
         return super(CephFSFileVDI, self).attach(sr_uuid, vdi_uuid)
 
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("SMBFileVDI.generate_config")
         if not util.pathexists(self.path):
             raise xs_errors.XenError('VDIUnavailable')
@@ -289,15 +301,16 @@ class CephFSFileVDI(FileSR.FileVDI):
         config = xmlrpc.client.dumps(tuple([resp]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config,), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         try:
             if not util.pathexists(self.sr.path):
-                self.sr.attach(sr_uuid)
+                return self.sr.attach(sr_uuid)
         except:
             util.logException("SMBFileVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable',
                                      opterr='Unable to attach from config')
-
+        return ''
 
 if __name__ == '__main__':
     SRCommand.run(CephFSSR, DRIVER_INFO)

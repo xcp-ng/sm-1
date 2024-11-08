@@ -18,6 +18,8 @@
 # udevSR: represents VDIs which are hotplugged into dom0 via udev e.g.
 #         USB CDROM/disk devices
 
+from sm_typing import override
+
 import SR
 import VDI
 import SRCommand
@@ -50,16 +52,19 @@ TYPE = 'udev'
 class udevSR(SR.SR):
     """udev-driven storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         if type == TYPE:
             return True
         return False
-    handles = staticmethod(handles)
 
-    def content_type(self, sr_uuid):
+    @override
+    def content_type(self, sr_uuid) -> str:
         return super(udevSR, self).content_type(sr_uuid)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         util.SMlog("params = %s" % (self.srcmd.params.keys()))
 
         if 'vdi_location' in self.srcmd.params:
@@ -74,7 +79,8 @@ class udevSR(SR.SR):
         vdi_ref = vdi.get_by_uuid(uuid)
         return vdi.get_location(vdi_ref)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         # First of all, check we've got the correct keys in dconf
         if 'location' not in self.dconf:
             raise xs_errors.XenError('ConfigLocationMissing')
@@ -82,7 +88,8 @@ class udevSR(SR.SR):
         # Cache the sm_config
         self.sm_config = self.session.xenapi.SR.get_sm_config(self.sr_ref)
 
-    def update(self, sr_uuid):
+    @override
+    def update(self, sr_uuid) -> None:
         # Return as much information as we have
         sr_root = self.dconf['location']
 
@@ -102,22 +109,27 @@ class udevSR(SR.SR):
 
         self._db_update()
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         self.update(sr_uuid)
 
         # base class scan does all the work:
-        return super(udevSR, self).scan(sr_uuid)
+        super(udevSR, self).scan(sr_uuid)
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         pass
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         pass
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         pass
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         pass
 
 
@@ -134,7 +146,8 @@ class udevVDI(VDI.VDI):
         self.location = location
         VDI.VDI.__init__(self, sr, None)
 
-    def load(self, location):
+    @override
+    def load(self, location) -> None:
         self.path = self.location
         self.size = 0
         self.utilisation = 0
@@ -149,7 +162,7 @@ class udevVDI(VDI.VDI):
             self.sm_config['hotplugged_at'] = iso8601
 
             self.path = os.path.realpath(self.path)
-	
+
             dev = os.path.basename(self.path)
             info = sysdevice.stat(dev)
             if "size" in info.keys():
@@ -176,7 +189,8 @@ class udevVDI(VDI.VDI):
         except OSError as e:
             self.deleted = True
 
-    def introduce(self, sr_uuid, vdi_uuid):
+    @override
+    def introduce(self, sr_uuid, vdi_uuid) -> str:
         self.uuid = vdi_uuid
         self.location = self.sr.srcmd.params['vdi_location']
         self._db_introduce()
@@ -184,7 +198,8 @@ class udevVDI(VDI.VDI):
         self.sr.update(sr_uuid)
         return super(udevVDI, self).get_params()
 
-    def update(self, sr_uuid, vdi_location):
+    @override
+    def update(self, sr_uuid, vdi_location) -> None:
         self.load(vdi_location)
         # _db_update requires self.uuid to be set
         self.uuid = self.sr.srcmd.params['vdi_uuid']
@@ -198,13 +213,15 @@ class udevVDI(VDI.VDI):
         #self.sr.session.xenapi.VDI.set_name_label(vdi, self.label)
         #self.sr.session.xenapi.VDI.set_name_description(vdi, self.description)
 
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if self.deleted:
             raise xs_errors.XenError('VDIUnavailable')
 
         return super(udevVDI, self).attach(sr_uuid, vdi_uuid)
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         pass
 
 if __name__ == '__main__':

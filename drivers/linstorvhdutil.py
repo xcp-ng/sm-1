@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from sm_typing import override
+
 from linstorjournaler import LinstorJournaler
 from linstorvolumemanager import LinstorVolumeManager
 import base64
@@ -60,7 +62,8 @@ class LinstorCallException(util.SMException):
     def __init__(self, cmd_err):
         self.cmd_err = cmd_err
 
-    def __str__(self):
+    @override
+    def __str__(self) -> str:
         return str(self.cmd_err)
 
 

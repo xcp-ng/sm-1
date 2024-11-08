@@ -18,7 +18,10 @@
 # LVHDoFCoESR: LVHD over Fibre Channel over Ethernet driver
 #
 
+from sm_typing import override
+
 import SR
+import VDI
 import LVHDoHBASR
 import LVHDSR
 import SRCommand
@@ -54,7 +57,9 @@ class LVHDoFCoESR(LVHDoHBASR.LVHDoHBASR):
 
     """LVHD over FCoE storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         if __name__ == '__main__':
             name = sys.argv[0]
         else:
@@ -64,9 +69,9 @@ class LVHDoFCoESR(LVHDoHBASR.LVHDoHBASR):
         if type == "lvhdofcoe":
             return True
         return False
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         driver = SR.driver('hba')
         if 'type' not in self.original_srcmd.params['device_config'] or \
                 'type' in self.original_srcmd.params['device_config'] and \
@@ -86,7 +91,8 @@ class LVHDoFCoESR(LVHDoHBASR.LVHDoHBASR):
         self.SCSIid = self.dconf['SCSIid']
         LVHDSR.LVHDSR.load(self, sr_uuid)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return LVHDoFCoEVDI(self, uuid)
 
 
