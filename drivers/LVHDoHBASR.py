@@ -19,9 +19,12 @@
 # hardware based iSCSI
 #
 
+from sm_typing import override
+
 import SR
 import LVHDSR
 import SRCommand
+import VDI
 import lvutil
 import HBASR
 import os
@@ -58,7 +61,9 @@ DRIVER_INFO = {
 class LVHDoHBASR(LVHDSR.LVHDSR):
     """LVHD over HBA storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         if __name__ == '__main__':
             name = sys.argv[0]
         else:
@@ -68,9 +73,9 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
         if type == "lvhdohba":
             return True
         return False
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         driver = SR.driver('hba')
         self.hbasr = driver(self.original_srcmd, sr_uuid)
 
@@ -108,7 +113,8 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
         self.SCSIid = self.dconf['SCSIid']
         super(LVHDoHBASR, self).load(sr_uuid)
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         self.hbasr.attach(sr_uuid)
         if self.mpath == "true":
             self.mpathmodule.refresh(self.SCSIid, 0)
@@ -121,7 +127,8 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
                 util.remove_mpathcount_field(self.session, self.host_ref, \
                                              self.sr_ref, self.SCSIid)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         self.hbasr.attach(sr_uuid)
         if self.mpath == "true":
             self.mpathmodule.refresh(self.SCSIid, 0)
@@ -140,7 +147,8 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
         LVHDSR.LVHDSR.attach(self, sr_uuid)
         self._setMultipathableFlag(SCSIid=self.SCSIid)
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         # During a reboot, scan is called ahead of attach, which causes the MGT
         # to point of the wrong device instead of dm-x. Running multipathing will
         # take care of this scenario.
@@ -154,7 +162,8 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
                 self._pathrefresh(LVHDoHBASR)
         LVHDSR.LVHDSR.scan(self, sr_uuid)
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         if self.mpath == "true" and 'SCSIid' in self.dconf:
         # When multipathing is enabled, since we don't refcount the multipath maps,
         # we should not attempt to do the iscsi.attach/detach when the map is already present,
@@ -181,7 +190,8 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
                 self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
             raise
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         LVHDSR.LVHDSR.detach(self, sr_uuid)
         self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
         try:
@@ -205,7 +215,8 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
                       (os.path.basename(node)), 'w') as f:
                 f.write('1\n')
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         self._pathrefresh(LVHDoHBASR)
         try:
             LVHDSR.LVHDSR.delete(self, sr_uuid)
@@ -214,12 +225,14 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
                 self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
             self._remove_device_nodes()
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return LVHDoHBAVDI(self, uuid)
 
 
 class LVHDoHBAVDI(LVHDSR.LVHDVDI):
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("LVHDoHBAVDI.generate_config")
         if not lvutil._checkLV(self.path):
             raise xs_errors.XenError('VDIUnavailable')
@@ -235,7 +248,8 @@ class LVHDoHBAVDI(LVHDSR.LVHDVDI):
         config = xmlrpc.client.dumps(tuple([dict]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config, ), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("LVHDoHBAVDI.attach_from_config")
         self.sr.hbasr.attach(sr_uuid)
         if self.sr.mpath == "true":

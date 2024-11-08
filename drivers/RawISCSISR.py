@@ -18,8 +18,11 @@
 # ISCSISR: ISCSI software initiator SR driver
 #
 
+from sm_typing import override
+
 import SR
 import SRCommand
+import VDI
 import BaseISCSI
 import LUNperVDI
 import util
@@ -53,25 +56,30 @@ DRIVER_INFO = {
 class RawISCSISR(BaseISCSI.BaseISCSISR):
     """Raw ISCSI storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         if type == "iscsi":
             return True
         return False
-    handles = staticmethod(handles)
 
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         super(RawISCSISR, self).load(vdi_uuid)
         self.managed = True
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         super(RawISCSISR, self).detach_and_delete(sr_uuid)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return ISCSIVDI(self, uuid)
 
 
 class ISCSIVDI(LUNperVDI.RAWVDI):
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         super(ISCSIVDI, self).load(vdi_uuid)
         self.managed = True
 

@@ -18,9 +18,12 @@
 #
 # XFSSR: Based on local-file storage repository, mounts xfs partition
 
+from sm_typing import override
+
 import SR
 from SR import deviceCheck
 import SRCommand
+import VDI
 import FileSR
 import util
 import lvutil
@@ -60,11 +63,13 @@ class XFSSR(FileSR.FileSR):
 
     DRIVER_TYPE = 'xfs'
 
-    def handles(srtype):
+    @override
+    @staticmethod
+    def handles(srtype) -> bool:
         return srtype == XFSSR.DRIVER_TYPE
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if not self._is_xfs_available():
             raise xs_errors.XenError(
                 'SRUnavailable',
@@ -81,7 +86,8 @@ class XFSSR(FileSR.FileSR):
         self.attached = self._checkmount()
         self.driver_config = DRIVER_CONFIG
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         super(XFSSR, self).delete(sr_uuid)
 
         # Check PVs match VG
@@ -111,7 +117,8 @@ class XFSSR(FileSR.FileSR):
             raise xs_errors.XenError('LVMDelete', \
                   opterr='errno is %d' % inst.code)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self._checkmount():
             try:
                 #Activate LV
@@ -150,7 +157,8 @@ class XFSSR(FileSR.FileSR):
         for dev in self.dconf['device'].split(','):
             self.block_setscheduler(dev)
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         super(XFSSR, self).detach(sr_uuid)
         try:
             # deactivate SR
@@ -160,13 +168,15 @@ class XFSSR(FileSR.FileSR):
             raise xs_errors.XenError('LVMUnMount', \
                   opterr='lvm -an failed errno is %d' % inst.code)
 
+    @override
     @deviceCheck
-    def probe(self):
+    def probe(self) -> str:
         return lvutil.srlist_toxml(lvutil.scan_srlist(EXT_PREFIX, self.dconf['device']),
                 EXT_PREFIX)
 
+    @override
     @deviceCheck
-    def create(self, sr_uuid, size):
+    def create(self, sr_uuid, size) -> None:
         if self._checkmount():
             raise xs_errors.XenError('SRExists')
 
@@ -224,7 +234,8 @@ class XFSSR(FileSR.FileSR):
         scsiutil.add_serial_record(self.session, self.sr_ref, \
                   scsiutil.devlist_to_serialstring(self.dconf['device'].split(',')))
 
-    def vdi(self, uuid, loadLocked = False):
+    @override
+    def vdi(self, uuid, loadLocked = False) -> VDI.VDI:
         return XFSFileVDI(self, uuid)
 
     @staticmethod
@@ -233,7 +244,8 @@ class XFSSR(FileSR.FileSR):
 
 
 class XFSFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 

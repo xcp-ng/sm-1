@@ -16,7 +16,9 @@
 # Functions to read and write SR metadata
 #
 
-from sm_typing import ClassVar
+from sm_typing import ClassVar, override
+
+from abc import abstractmethod
 
 from io import SEEK_SET
 
@@ -275,8 +277,9 @@ class MetadataHandler:
     def vdi_info_size(self):
         return self.VDI_INFO_SIZE_IN_SECTORS * SECTOR_SIZE
 
-    def spaceAvailableForVdis(self, count):
-        raise NotImplementedError("spaceAvailableForVdis is undefined")
+    @abstractmethod
+    def spaceAvailableForVdis(self, count) -> None:
+        pass
 
     # common utility functions
     def getMetadata(self, params={}):
@@ -660,10 +663,10 @@ class MetadataHandler:
             raise
 
     # specific functions, to be implement by the child classes
-    def getVdiInfo(self, Dict, generateSector=0):
+    def getVdiInfo(self, Dict, generateSector=0) -> bytes:
         return b""
 
-    def getSRInfoForSectors(self, sr_info, range):
+    def getSRInfoForSectors(self, sr_info, range) -> bytes:
         return b""
 
 
@@ -676,7 +679,8 @@ class LVMMetadataHandler(MetadataHandler):
         lvutil.ensurePathExists(path)
         MetadataHandler.__init__(self, path, write)
 
-    def spaceAvailableForVdis(self, count):
+    @override
+    def spaceAvailableForVdis(self, count) -> None:
         created = False
         try:
             # The easiest way to do this, is to create a dummy vdi and write it
@@ -707,7 +711,8 @@ class LVMMetadataHandler(MetadataHandler):
     # it also takes in a parameter to determine whether both the sector
     # or only one sector needs to be generated, and which one
     # generateSector - can be 1 or 2, defaults to 0 and generates both sectors
-    def getVdiInfo(self, Dict, generateSector=0):
+    @override
+    def getVdiInfo(self, Dict, generateSector=0) -> bytes:
         util.SMlog("Entering VDI info")
         try:
             vdi_info = b""
@@ -763,7 +768,8 @@ class LVMMetadataHandler(MetadataHandler):
                        (Dict, str(e)))
             raise
 
-    def getSRInfoForSectors(self, sr_info, range):
+    @override
+    def getSRInfoForSectors(self, sr_info, range) -> bytes:
         srinfo = b""
 
         try:

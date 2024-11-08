@@ -1,3 +1,5 @@
+from sm_typing import Set, override
+
 import os
 import unittest
 import unittest.mock as mock
@@ -62,7 +64,8 @@ class TestLVHDoISCSISR_load(unittest.TestCase):
     Tests for 'LVHDoISCSISR.load()'
     """
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         patchers = [
             mock.patch(
                 'BaseISCSI.BaseISCSISR',
@@ -124,14 +127,15 @@ class TestLVHDoISCSISR(ISCSITestCase):
 
     TEST_CLASS = 'LVHDoISCSISR'
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         util_patcher = mock.patch('LVHDoISCSISR.util', autospec=True)
         self.mock_util = util_patcher.start()
         # self.mock_util.SMlog.side_effect = print
         self.mock_util.isVDICommand = util.isVDICommand
         self.mock_util.sessions_less_than_targets = util.sessions_less_than_targets
 
-        self.base_srs = set()
+        self.base_srs: Set[BaseISCSISR] = set()
         baseiscsi_patcher = mock.patch('LVHDoISCSISR.BaseISCSI.BaseISCSISR',
                                        autospec=True)
         patched_baseiscsi = baseiscsi_patcher.start()

@@ -1,4 +1,4 @@
-from sm_typing import Any, Callable, Dict, Optional
+from sm_typing import Any, Callable, Dict, Optional, override
 
 import os
 import socket
@@ -15,10 +15,11 @@ class SingletonWithArgs(type):
     def __init__(cls, name, bases, dct):
         cls._init[cls] = dct.get('__init__', None)
 
-    def __call__(cls, *args, **kwargs):
+    @override
+    def __call__(cls, *args, **kwargs) -> Any:
         init = cls._init[cls]
         if init is not None:
-            key = (cls, frozenset(
+            key: Any = (cls, frozenset(
                     inspect.getcallargs(init, None, *args, **kwargs).items()))
         else:
             key = cls

@@ -18,7 +18,10 @@
 # LVHDoISCSISR: LVHD over ISCSI software initiator SR driver
 #
 
+from sm_typing import override
+
 import SR
+import VDI
 import LVHDSR
 import BaseISCSI
 import SRCommand
@@ -71,7 +74,9 @@ DRIVER_INFO = {
 class LVHDoISCSISR(LVHDSR.LVHDSR):
     """LVHD over ISCSI storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         if __name__ == '__main__':
             name = sys.argv[0]
         else:
@@ -81,9 +86,9 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         if type == "lvhdoiscsi":
             return True
         return False
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if not sr_uuid:
             # This is a probe call, generate a temp sr_uuid
             sr_uuid = util.gen_uuid()
@@ -426,7 +431,8 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         self.iscsi.print_LUNs()
         self.iscsi.detach(sr_uuid)
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         # Check SCSIid not already in use by other PBDs
         if util.test_SCSIid(self.session, sr_uuid, self.SCSIid):
             raise xs_errors.XenError('SRInUse')
@@ -441,13 +447,15 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
             raise xs_errors.XenError("SRUnavailable", opterr=inst)
         self.iscsi.detach(sr_uuid)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         self._pathrefresh(LVHDoISCSISR)
         LVHDSR.LVHDSR.delete(self, sr_uuid)
         for i in self.iscsiSRs:
             i.detach(sr_uuid)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         try:
             connected = False
             stored_exception = None
@@ -485,12 +493,14 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
             raise xs_errors.XenError("SRUnavailable", opterr=inst)
         self._setMultipathableFlag(SCSIid=self.SCSIid)
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         LVHDSR.LVHDSR.detach(self, sr_uuid)
         for i in self.iscsiSRs:
             i.detach(sr_uuid)
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         self._pathrefresh(LVHDoISCSISR)
         if self.mpath == "true":
             for i in self.iscsiSRs:
@@ -500,7 +510,8 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
                     util.SMlog("Connection failed for target %s, continuing.." % i.target)
         LVHDSR.LVHDSR.scan(self, sr_uuid)
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         self.uuid = util.gen_uuid()
 
         # When multipathing is enabled, since we don't refcount the multipath maps,
@@ -523,7 +534,8 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         self.iscsi.detach(self.uuid)
         return out
 
-    def check_sr(self, sr_uuid):
+    @override
+    def check_sr(self, sr_uuid) -> None:
         """Hook to check SR health"""
         pbdref = util.find_my_pbd(self.session, self.host_ref, self.sr_ref)
         if pbdref:
@@ -536,12 +548,14 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
                         except xs_errors.SROSError:
                             util.SMlog("Failed to attach iSCSI target")
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return LVHDoISCSIVDI(self, uuid)
 
 
 class LVHDoISCSIVDI(LVHDSR.LVHDVDI):
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("LVHDoISCSIVDI.generate_config")
         if not lvutil._checkLV(self.path):
             raise xs_errors.XenError('VDIUnavailable')
@@ -562,7 +576,8 @@ class LVHDoISCSIVDI(LVHDSR.LVHDVDI):
         config = xmlrpc.client.dumps(tuple([dict]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config, ), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("LVHDoISCSIVDI.attach_from_config")
         try:
             self.sr.iscsi.attach(sr_uuid)

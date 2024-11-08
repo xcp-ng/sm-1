@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import unittest.mock as mock
 import SR
 import testlib
@@ -15,7 +17,8 @@ import xmlrpc.client
 
 
 class TestVDI(VDI.VDI):
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         self.vdi_type = vhdutil.VDI_TYPE_VHD
         self._state_mock = mock.Mock()
         self.path = "/mock/sr_path/" + str(vdi_uuid)
@@ -25,46 +28,56 @@ class TestVDI(VDI.VDI):
     def state_mock(self):
         return self._state_mock
 
-    def _get_blocktracking_status(self, uuid=None):
+    @override
+    def _get_blocktracking_status(self, uuid=None) -> bool:
         return self.block_tracking_state
 
-    def _ensure_cbt_space(self):
+    @override
+    def _ensure_cbt_space(self) -> None:
         super(TestVDI, self)._ensure_cbt_space()
         self.state_mock._ensure_cbt_space()
 
-    def _get_cbt_logpath(self, uuid):
+    @override
+    def _get_cbt_logpath(self, uuid) -> str:
         super(TestVDI, self)._get_cbt_logpath(uuid)
         self.state_mock._get_cbt_logpath(uuid)
         return "/mock/sr_path/{0}.log".format(uuid)
 
-    def _create_cbt_log(self):
+    @override
+    def _create_cbt_log(self) -> str:
         logpath = super(TestVDI, self)._create_cbt_log()
         self.state_mock._create_cbt_log()
         self.block_tracking_state = True
         return logpath
 
-    def _delete_cbt_log(self):
+    @override
+    def _delete_cbt_log(self) -> None:
         self.state_mock._delete_cbt_log()
         self.block_tracking_state = False
 
-    def _rename(self, from_path, to_path):
+    @override
+    def _rename(self, from_path, to_path) -> None:
         self.state_mock._rename(from_path, to_path)
 
+    @override
     def _do_snapshot(self, sr_uuid, vdi_uuid, snapType,
-                     cloneOp=False, secondary=None, cbtlog=None):
-        self.state_mock._do_snapshot(sr_uuid, vdi_uuid, snapType, cloneOp,
-                                     secondary, cbtlog)
+                     cloneOp=False, secondary=None, cbtlog=None) -> str:
+        return self.state_mock._do_snapshot(
+            sr_uuid, vdi_uuid, snapType, cloneOp, secondary, cbtlog
+        )
 
-    def _activate_cbt_log(self, logname):
-        self.state_mock._activate_cbt_log(logname)
+    @override
+    def _activate_cbt_log(self, logname) -> bool:
+        return self.state_mock._activate_cbt_log(logname)
 
-    def _deactivate_cbt_log(self, logname):
+    @override
+    def _deactivate_cbt_log(self, logname) -> None:
         self.state_mock._deactivate_cbt_log(logname)
 
 
 class TestCBT(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.sr = mock.MagicMock()
         self.vdi_uuid = uuid.uuid4()
         self.sr_uuid = uuid.uuid4()

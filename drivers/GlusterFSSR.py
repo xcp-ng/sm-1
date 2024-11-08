@@ -16,6 +16,8 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
+from sm_typing import override
+
 import errno
 import os
 import syslog as _syslog
@@ -29,6 +31,7 @@ import SR
 import SRCommand
 import FileSR
 # end of careful
+import VDI
 import cleanup
 import util
 import vhdutil
@@ -77,13 +80,14 @@ class GlusterFSSR(FileSR.FileSR):
 
     DRIVER_TYPE = 'glusterfs'
 
-    def handles(sr_type):
+    @override
+    @staticmethod
+    def handles(sr_type) -> bool:
         # fudge, because the parent class (FileSR) checks for smb to alter its behavior
         return sr_type == GlusterFSSR.DRIVER_TYPE or sr_type == 'smb'
 
-    handles = staticmethod(handles)
-
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if not self._is_glusterfs_available():
             raise xs_errors.XenError(
                 'SRUnavailable',
@@ -160,7 +164,8 @@ class GlusterFSSR(FileSR.FileSR):
             except OSError as inst:
                 raise GlusterFSException("rmdir failed with error '%s'" % inst.strerror)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self.checkmount():
             try:
                 self.mount()
@@ -169,7 +174,8 @@ class GlusterFSSR(FileSR.FileSR):
                 raise xs_errors.SROSError(12, exc.errstr)
         self.attached = True
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         try:
             self.mount(PROBE_MOUNTPOINT)
             sr_list = filter(util.match_uuid, util.listdir(PROBE_MOUNTPOINT))
@@ -179,7 +185,8 @@ class GlusterFSSR(FileSR.FileSR):
         # Create a dictionary from the SR uuids to feed SRtoXML()
         return util.SRtoXML({sr_uuid: {} for sr_uuid in sr_list})
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         if not self.checkmount():
             return
         util.SMlog("Aborting GC/coalesce")
@@ -190,7 +197,8 @@ class GlusterFSSR(FileSR.FileSR):
         os.unlink(self.path)
         self.attached = False
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         if self.checkmount():
             raise xs_errors.SROSError(113, 'GlusterFS mount point already attached')
 
@@ -224,7 +232,8 @@ class GlusterFSSR(FileSR.FileSR):
                                            os.strerror(inst.code)))
         self.detach(sr_uuid)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         # try to remove/delete non VDI contents first
         super(GlusterFSSR, self).delete(sr_uuid)
         try:
@@ -239,7 +248,8 @@ class GlusterFSSR(FileSR.FileSR):
             if inst.code != errno.ENOENT:
                 raise xs_errors.SROSError(114, "Failed to remove GlusterFS mount point")
 
-    def vdi(self, uuid, loadLocked=False):
+    @override
+    def vdi(self, uuid, loadLocked=False) -> VDI.VDI:
         return GlusterFSFileVDI(self, uuid)
 
     @staticmethod
@@ -248,7 +258,8 @@ class GlusterFSSR(FileSR.FileSR):
 
 
 class GlusterFSFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 
@@ -256,7 +267,8 @@ class GlusterFSFileVDI(FileSR.FileVDI):
 
         return super(GlusterFSFileVDI, self).attach(sr_uuid, vdi_uuid)
 
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("SMBFileVDI.generate_config")
         if not util.pathexists(self.path):
             raise xs_errors.XenError('VDIUnavailable')
@@ -270,15 +282,16 @@ class GlusterFSFileVDI(FileSR.FileVDI):
         config = xmlrpc.client.dumps(tuple([resp]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config,), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         try:
             if not util.pathexists(self.sr.path):
-                self.sr.attach(sr_uuid)
+                return self.sr.attach(sr_uuid)
         except:
             util.logException("SMBFileVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable',
                                      opterr='Unable to attach from config')
-
+        return ''
 
 if __name__ == '__main__':
     SRCommand.run(GlusterFSSR, DRIVER_INFO)

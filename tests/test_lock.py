@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import fcntl
 import unittest
 import unittest.mock as mock
@@ -12,8 +14,8 @@ import lock
 
 
 class TestLock(unittest.TestCase):
-
-    def tearDown(self):
+    @override
+    def tearDown(self) -> None:
         lock.Lock.INSTANCES = {}
         lock.Lock.BASE_INSTANCES = {}
 
@@ -197,7 +199,8 @@ def create_lock_class_that_fails_to_create_file(number_of_failures):
     class LockThatFailsToCreateFile(lock.LockImplementation):
         _failures = number_of_failures
 
-        def _open_lockfile(self):
+        @override
+        def _open_lockfile(self) -> None:
             if self._failures > 0:
                 error = IOError('No such file')
                 error.errno = errno.ENOENT

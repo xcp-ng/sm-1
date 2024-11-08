@@ -1,3 +1,5 @@
+from sm_typing import Any, Optional, Set, override
+
 import errno
 import os
 import stat
@@ -18,7 +20,8 @@ import xs_errors
 
 
 class FakeFileVDI(FileSR.FileVDI):
-    def load(self, uuid):
+    @override
+    def load(self, uuid) -> None:
         self.vdi_type = vhdutil.VDI_TYPE_VHD
         self.hidden = False
         self.path = os.path.join(self.sr.path, '%s.%s' % (
@@ -27,7 +30,8 @@ class FakeFileVDI(FileSR.FileVDI):
 
 
 class TestFileVDI(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         startlog_patcher = mock.patch('FileSR.util.start_log_entry',
                                         autospec=True)
         self.mock_startlog = startlog_patcher.start()
@@ -50,7 +54,7 @@ class TestFileVDI(unittest.TestCase):
         fist_patcher = mock.patch('FileSR.util.FistPoint.is_active',
                                   autospec=True)
         self.mock_fist = fist_patcher.start()
-        self.active_fists = set()
+        self.active_fists: Set[Any] = set()
         def active_fists():
             return self.active_fists
 
@@ -419,15 +423,19 @@ class FakeSharedFileSR(FileSR.SharedFileSR):
     """
     Test SR class for SharedFileSR
     """
-    def load(self, sr_uuid):
-        self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
-        self.lock = None
 
-    def attach(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
+        self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)
+        self.lock = None # type: ignore
+
+    @override
+    def attach(self, sr_uuid) -> None:
         self._check_writable()
         self._check_hardlinks()
 
-    def _read_hardlink_conf(self):
+    @override
+    def _read_hardlink_conf(self) -> Optional[bool]:
         return None
 
 class TestShareFileSR(unittest.TestCase):
@@ -437,7 +445,8 @@ class TestShareFileSR(unittest.TestCase):
     TEST_SR_REF = "test_sr_ref"
     ERROR_524 = "Unknown error 524"
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         util_patcher = mock.patch('FileSR.util', autospec=True)
         self.mock_util = util_patcher.start()
 
@@ -561,7 +570,8 @@ class TestShareFileSR(unittest.TestCase):
         self.assertEqual(1, len(test_sr.vdis))
 
 class TestFileSR(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         pread_patcher = mock.patch('FileSR.util.pread')
         self.mock_pread = pread_patcher.start()
 

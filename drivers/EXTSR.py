@@ -17,8 +17,11 @@
 #
 # EXTSR: Based on local-file storage repository, mounts ext3 partition
 
+from sm_typing import override
+
 import SR
 from SR import deviceCheck
+import VDI
 import SRCommand
 import FileSR
 import util
@@ -57,11 +60,13 @@ DRIVER_CONFIG = {"ATTACH_FROM_CONFIG_WITH_TAPDISK": True}
 class EXTSR(FileSR.FileSR):
     """EXT3 Local file storage repository"""
 
-    def handles(srtype):
+    @override
+    @staticmethod
+    def handles(srtype) -> bool:
         return srtype == 'ext'
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
@@ -72,7 +77,8 @@ class EXTSR(FileSR.FileSR):
         self.attached = self._checkmount()
         self.driver_config = DRIVER_CONFIG
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         super(EXTSR, self).delete(sr_uuid)
 
         # Check PVs match VG
@@ -102,7 +108,8 @@ class EXTSR(FileSR.FileSR):
             raise xs_errors.XenError('LVMDelete',
                                      opterr='errno is %d' % inst.code)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self._checkmount():
             try:
                 #Activate LV
@@ -136,7 +143,8 @@ class EXTSR(FileSR.FileSR):
         for dev in self.dconf['device'].split(','):
             self.block_setscheduler(dev)
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         super(EXTSR, self).detach(sr_uuid)
         try:
             # deactivate SR
@@ -147,13 +155,15 @@ class EXTSR(FileSR.FileSR):
                 'LVMUnMount',
                 opterr='lvm -an failed errno is %d' % inst.code)
 
+    @override
     @deviceCheck
-    def probe(self):
+    def probe(self) -> str:
         return lvutil.srlist_toxml(lvutil.scan_srlist(EXT_PREFIX, self.dconf['device']),
                 EXT_PREFIX)
 
+    @override
     @deviceCheck
-    def create(self, sr_uuid, size):
+    def create(self, sr_uuid, size) -> None:
         if self._checkmount():
             raise xs_errors.XenError('SRExists')
 
@@ -214,12 +224,14 @@ class EXTSR(FileSR.FileSR):
             self.session, self.sr_ref,
             scsiutil.devlist_to_serialstring(self.dconf['device'].split(',')))
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return EXTFileVDI(self, uuid)
 
 
 class EXTFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 

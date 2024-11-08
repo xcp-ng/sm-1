@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import os
 import unittest
 import unittest.mock as mock
@@ -34,11 +36,12 @@ class Stubs(object):
 
 
 class TestLVHDSR(unittest.TestCase, Stubs):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.init_stubs()
 
-    def tearDown(self):
+    @override
+    def tearDown(self) -> None:
         self.remove_stubs()
 
     def create_LVHDSR(self, master=False, command='foo', sr_uuid=None):
@@ -249,8 +252,8 @@ class TestLVHDSR(unittest.TestCase, Stubs):
 
 
 class TestLVHDVDI(unittest.TestCase, Stubs):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.init_stubs()
 
         lvhdutil_patcher = mock.patch('LVHDSR.lvhdutil', autospec=True)
@@ -287,7 +290,8 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
 
         self.addCleanup(mock.patch.stopall)
 
-    def tearDown(self):
+    @override
+    def tearDown(self) -> None:
         self.remove_stubs()
 
     def create_LVHDSR(self):

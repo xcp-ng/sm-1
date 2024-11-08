@@ -1,6 +1,9 @@
 """
 Unit tests for mpath dmp
 """
+
+from sm_typing import override
+
 import errno
 import os
 import unittest
@@ -22,7 +25,8 @@ class TestMpathDmp(unittest.TestCase):
     Unit tests for mpath dmp
     """
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         time_patcher = mock.patch('mpath_dmp.time', autospec=True)
         self.mock_time = time_patcher.start()
 

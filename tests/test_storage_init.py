@@ -1,3 +1,5 @@
+from sm_typing import DefaultDict, Dict, List, override
+
 import json
 import os
 import re
@@ -31,7 +33,8 @@ class TestStorageInit(unittest.TestCase):
     storage after installation.
     """
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.test_dir = tempfile.TemporaryDirectory()
 
         # There are tweaks we need to make the to storage-init:
@@ -103,11 +106,12 @@ class TestStorageInit(unittest.TestCase):
         self.copy_command("touch")
 
         self.script_exited = False
-        self.created_srs = defaultdict(list)
-        self.misc_xe_calls = []
-        self.unanticipated_xe_calls = []
+        self.created_srs: DefaultDict[str, List[Dict[str, str]]] = defaultdict(list)
+        self.misc_xe_calls: List[List[str]] = []
+        self.unanticipated_xe_calls: List[List[str]] = []
 
-    def tearDown(self):
+    @override
+    def tearDown(self) -> None:
         self.socket.close()
         self.test_dir.cleanup()
 

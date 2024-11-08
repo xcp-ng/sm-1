@@ -15,6 +15,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 
+from sm_typing import override
 
 import errno
 import json
@@ -375,7 +376,8 @@ class LinstorVolumeManager(object):
             self.virtual_size = 0
             self.diskful = []
 
-        def __repr__(self):
+        @override
+        def __repr__(self) -> str:
             return 'VolumeInfo("{}", {}, {}, {})'.format(
                 self.name, self.allocated_size, self.virtual_size,
                 self.diskful

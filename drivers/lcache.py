@@ -15,6 +15,8 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
+from sm_typing import override
+
 import os
 import blktap2
 import glob
@@ -71,7 +73,8 @@ class CachingTap(object):
             self.tapdisk = tapdisk
             self.stats = stats
 
-        def __str__(self):
+        @override
+        def __str__(self) -> str:
             return \
                 "Tapdisk %s in state '%s' not found caching." % \
                 (self.tapdisk, self.stats)
@@ -116,7 +119,8 @@ class ParentCachingTap(CachingTap):
 
         return rd_hits, rd_miss, wr_rdir
 
-    def __str__(self):
+    @override
+    def __str__(self) -> str:
         return "%s(%s, minor=%s)" % \
             (self.__class__.__name__,
              self.tapdisk.path, self.tapdisk.minor)
@@ -144,7 +148,8 @@ class LeafCachingTap(CachingTap):
 
         return rd_hits, rd_miss, wr_rdir
 
-    def __str__(self):
+    @override
+    def __str__(self) -> str:
         return "%s(%s, minor=%s)" % \
             (self.__class__.__name__,
              self.tapdisk.path, self.tapdisk.minor)
@@ -166,7 +171,8 @@ class CacheFileSR(object):
         def __init__(self, path):
             self.path = path
 
-        def __str__(self):
+        @override
+        def __str__(self) -> str:
             return "Not a mount point: %s" % self.path
 
     @classmethod

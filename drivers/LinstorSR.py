@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from sm_typing import Optional, override
+
 from constants import CBTLOG_TAG
 
 try:
@@ -302,11 +304,13 @@ class LinstorSR(SR.SR):
     # SR methods.
     # --------------------------------------------------------------------------
 
+    @override
     @staticmethod
-    def handles(type):
+    def handles(type) -> bool:
         return type == LinstorSR.DRIVER_TYPE
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if not LINSTOR_AVAILABLE:
             raise util.SMException(
                 'Can\'t load LinstorSR: LINSTOR libraries are missing'
@@ -541,12 +545,14 @@ class LinstorSR(SR.SR):
 
         return wrap
 
-    def cleanup(self):
+    @override
+    def cleanup(self) -> None:
         if self._vdi_shared_time:
             self._shared_lock_vdi(self.srcmd.params['vdi_uuid'], locked=False)
 
+    @override
     @_locked_load
-    def create(self, uuid, size):
+    def create(self, uuid, size) -> None:
         util.SMlog('LinstorSR.create for {}'.format(self.uuid))
 
         host_adresses = util.get_host_addresses(self.session)
@@ -635,8 +641,9 @@ class LinstorSR(SR.SR):
                 )
             raise e
 
+    @override
     @_locked_load
-    def delete(self, uuid):
+    def delete(self, uuid) -> None:
         util.SMlog('LinstorSR.delete for {}'.format(self.uuid))
         cleanup.gc_force(self.session, self.uuid)
 
@@ -698,8 +705,9 @@ class LinstorSR(SR.SR):
 
         Lock.cleanupAll(self.uuid)
 
+    @override
     @_locked_load
-    def update(self, uuid):
+    def update(self, uuid) -> None:
         util.SMlog('LinstorSR.update for {}'.format(self.uuid))
 
         # Well, how can we update a SR if it doesn't exist? :thinking:
@@ -722,8 +730,9 @@ class LinstorSR(SR.SR):
             )
         }
 
+    @override
     @_locked_load
-    def attach(self, uuid):
+    def attach(self, uuid) -> None:
         util.SMlog('LinstorSR.attach for {}'.format(self.uuid))
 
         if not self._linstor:
@@ -732,18 +741,22 @@ class LinstorSR(SR.SR):
                 opterr='no such group: {}'.format(self._group_name)
             )
 
+    @override
     @_locked_load
-    def detach(self, uuid):
+    def detach(self, uuid) -> None:
         util.SMlog('LinstorSR.detach for {}'.format(self.uuid))
         cleanup.abort(self.uuid)
 
+    @override
     @_locked_load
-    def probe(self):
+    def probe(self) -> str:
         util.SMlog('LinstorSR.probe for {}'.format(self.uuid))
         # TODO
+        return ''
 
+    @override
     @_locked_load
-    def scan(self, uuid):
+    def scan(self, uuid) -> None:
         if self._init_status == self.INIT_STATUS_FAIL:
             return
 
@@ -792,8 +805,9 @@ class LinstorSR(SR.SR):
 
         return self._is_master
 
+    @override
     @_locked_load
-    def vdi(self, uuid):
+    def vdi(self, uuid) -> VDI.VDI:
         return LinstorVDI(self, uuid)
 
     # To remove in python 3.10
@@ -1565,7 +1579,8 @@ class LinstorVDI(VDI.VDI):
     # VDI methods.
     # --------------------------------------------------------------------------
 
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         self._lock = self.sr.lock
         self._exists = True
         self._linstor = self.sr._linstor
@@ -1636,7 +1651,8 @@ class LinstorVDI(VDI.VDI):
         except Exception as e:
             raise_bad_load(e)
 
-    def create(self, sr_uuid, vdi_uuid, size):
+    @override
+    def create(self, sr_uuid, vdi_uuid, size) -> str:
         # Usage example:
         # xe vdi-create sr-uuid=39a5826b-5a90-73eb-dd09-51e3a116f937
         # name-label="linstor-vdi-1" virtual-size=4096MiB sm-config:type=vhd
@@ -1744,7 +1760,8 @@ class LinstorVDI(VDI.VDI):
 
         return VDI.VDI.get_params(self)
 
-    def delete(self, sr_uuid, vdi_uuid, data_only=False):
+    @override
+    def delete(self, sr_uuid, vdi_uuid, data_only=False) -> None:
         util.SMlog('LinstorVDI.delete for {}'.format(self.uuid))
         if self.attached:
             raise xs_errors.XenError('VDIInUse')
@@ -1790,7 +1807,8 @@ class LinstorVDI(VDI.VDI):
         self.sr._kick_gc()
         return super(LinstorVDI, self).delete(sr_uuid, vdi_uuid, data_only)
 
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog('LinstorVDI.attach for {}'.format(self.uuid))
         attach_from_config = self.sr.srcmd.cmd == 'vdi_attach_from_config'
         if (
@@ -1845,7 +1863,8 @@ class LinstorVDI(VDI.VDI):
         self.attached = True
         return VDI.VDI.attach(self, self.sr.uuid, self.uuid)
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         util.SMlog('LinstorVDI.detach for {}'.format(self.uuid))
         detach_from_config = self.sr.srcmd.cmd == 'vdi_detach_from_config'
         self.attached = False
@@ -1907,7 +1926,8 @@ class LinstorVDI(VDI.VDI):
                     util.SMlog('Failed to clean VDI {} during detach: {}'.format(vdi_uuid, e))
             vdi_uuid = parent_vdi_uuid
 
-    def resize(self, sr_uuid, vdi_uuid, size):
+    @override
+    def resize(self, sr_uuid, vdi_uuid, size) -> str:
         util.SMlog('LinstorVDI.resize for {}'.format(self.uuid))
         if not self.sr.is_master():
             raise xs_errors.XenError(
@@ -1973,10 +1993,12 @@ class LinstorVDI(VDI.VDI):
         self.sr._update_stats(self.size - old_size)
         return VDI.VDI.get_params(self)
 
-    def clone(self, sr_uuid, vdi_uuid):
+    @override
+    def clone(self, sr_uuid, vdi_uuid) -> str:
         return self._do_snapshot(sr_uuid, vdi_uuid, VDI.SNAPSHOT_DOUBLE)
 
-    def compose(self, sr_uuid, vdi1, vdi2):
+    @override
+    def compose(self, sr_uuid, vdi1, vdi2) -> None:
         util.SMlog('VDI.compose for {} -> {}'.format(vdi2, vdi1))
         if self.vdi_type != vhdutil.VDI_TYPE_VHD:
             raise xs_errors.XenError('Unimplemented')
@@ -2007,7 +2029,8 @@ class LinstorVDI(VDI.VDI):
 
         util.SMlog('Compose done')
 
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         """
         Generate the XML config required to attach and activate
         a VDI for use when XAPI is not running. Attach and
@@ -2053,7 +2076,8 @@ class LinstorVDI(VDI.VDI):
         config = xmlrpc.client.dumps(tuple([resp]), 'vdi_attach_from_config')
         return xmlrpc.client.dumps((config,), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         """
         Attach and activate a VDI using config generated by
         vdi_generate_config above. This is used for cases such as
@@ -2074,6 +2098,7 @@ class LinstorVDI(VDI.VDI):
                 'SRUnavailable',
                 opterr='Unable to attach from config'
             )
+        return ''
 
     def reset_leaf(self, sr_uuid, vdi_uuid):
         if self.vdi_type != vhdutil.VDI_TYPE_VHD:
@@ -2140,7 +2165,8 @@ class LinstorVDI(VDI.VDI):
             })
         self.hidden = hidden
 
-    def update(self, sr_uuid, vdi_uuid):
+    @override
+    def update(self, sr_uuid, vdi_uuid) -> None:
         xenapi = self.session.xenapi
         vdi_ref = xenapi.VDI.get_by_uuid(self.uuid)
 
@@ -2316,13 +2342,15 @@ class LinstorVDI(VDI.VDI):
     # Implement specific SR methods.
     # --------------------------------------------------------------------------
 
-    def _rename(self, oldpath, newpath):
+    @override
+    def _rename(self, oldpath, newpath) -> None:
         # TODO: I'm not sure... Used by CBT.
         volume_uuid = self._linstor.get_volume_uuid_from_device_path(oldpath)
         self._linstor.update_volume_name(volume_uuid, newpath)
 
+    @override
     def _do_snapshot(self, sr_uuid, vdi_uuid, snapType,
-                     cloneOp=False, secondary=None, cbtlog=None):
+                     cloneOp=False, secondary=None, cbtlog=None) -> str:
         # If cbt enabled, save file consistency state.
         if cbtlog is not None:
             if blktap2.VDI.tap_status(self.session, vdi_uuid):

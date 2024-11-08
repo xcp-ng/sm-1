@@ -1,3 +1,5 @@
+from sm_typing import Dict, override
+
 import unittest
 import unittest.mock as mock
 import uuid
@@ -25,14 +27,14 @@ class FakeSMBSR(SMBSR.SMBSR):
 
 
 class Test_SMBSR(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
 
         pread_patcher = mock.patch('SMBSR.util.pread', autospec=True)
         self.mock_pread = pread_patcher.start()
         self.mock_pread.side_effect = self.pread
-        self.pread_results = {}
+        self.pread_results: Dict[str, str] = {}
 
         listdir_patcher = mock.patch('SMBSR.util.listdir', autospec=True)
         self.mock_list_dir = listdir_patcher.start()
