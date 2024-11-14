@@ -7,6 +7,15 @@ import struct
 import sys
 from typing import BinaryIO, Dict, List, NoReturn
 
+import errno
+#import util
+
+QEMU_IMG = "/usr/bin/qemu-img"
+
+def ioretry(cmd):
+#    return util.ioretry(lambda: util.pread2(cmd),
+#            errlist = [errno.EIO, errno.EAGAIN])
+    return ""
 
 class QcowInfo:
     """
@@ -85,6 +94,15 @@ class QcowInfo:
         )
 
     @staticmethod
+    def _read_qcow2_backingfile(file: BinaryIO, backing_file_offset: int , backing_file_size: int) -> str:
+        if backing_file_offset == 0:
+            return ""
+
+        file.seek(backing_file_offset)
+        parent_name = file.read(backing_file_size)
+        return parent_name.decode("UTF-8")
+
+    @staticmethod
     def _read_qcow2_header(file: BinaryIO) -> Dict[str, int]:
         """Returns a dict containing some information from QCow2 header.
 
@@ -115,7 +133,7 @@ class QcowInfo:
 
         file.seek(0)
         header = file.read(QcowInfo.QCOW2_HEADER_SIZE)
-        magic, version, _, _, cluster_bits, size, _, l1_size, l1_table_offset = (
+        magic, version, backing_file_offset, backing_file_size, cluster_bits, size, _, l1_size, l1_table_offset = (
             struct.unpack(">IIQIIQIIQ", header[:48])
         )
 
@@ -125,12 +143,15 @@ class QcowInfo:
         if cluster_bits != 16:
             raise ValueError("Only default cluster size of 64K is supported")
 
+        parent_name = _read_qcow2_backingfile(file, backing_file_offset, backing_file_size)
+
         return {
             "version": version,
             "virtual_disk_size": size,
             "cluster_bits": cluster_bits,
             "l1_size": l1_size,
             "l1_table_offset": l1_table_offset,
+            "parent": parent_name,
         }
 
     def _get_l1_entries(self, file: BinaryIO) -> List[int]:
@@ -306,6 +327,53 @@ class QcowInfo:
             file.truncate(l1_table_offset + l1_table_size)
 
 
+def getSizeVirt(path) -> int:
+    qcow_info = QcowInfo(path)
+    return qcow_info.header['virtual_disk_size']
+
+def setSizeVirt(path, new_size) -> None:
+    cmd = [QEMU_IMG, "resize", path, new_size]
+    ioretry(cmd)
+
+def setSizeVirtFast(path, size) -> None:
+    pass
+
+def getSizePhys(path) -> int:
+    return 0
+
+def setSizePhys(path, size, debug = True) -> None:
+    pass
+
+def getAllocateSize(path) -> int:
+    """
+    Return allocated blocks in the QCow2 file in byte
+    """
+    qcow_info = QcowInfo(path)
+    clusters = qcow_info.get_number_of_allocated_clusters()
+    cluster_size = 1 << qcow_info.header["cluster_bits"]
+    return clusters * cluster_size
+
+def getMaxResizeSize(path) -> int:
+    return 0
+
+from vhdutil import VHDInfo
+def getVHDInfo(path, extractUuidFunction, includeParent = True):
+    qcow_info = QcowInfo(path)
+    uuid = extractUuidFunction(path)
+    vhdinfo = VHDInfo(uuid)
+    vhdinfo.path = path
+    vhdinfo.sizeVirt = qcow_info.header["virtual_disk_size"]
+    vhdinfo.sizePhys = 0 # How do we get phys size?
+    vhdinfo.hidden = False # TODO
+    # vhdinfo.sizeAllocated = -1
+    if includeParent:
+        parent_path = ""
+        vhdinfo.parentPath = parent_path # How do we get a qcow2 parent?
+        vhdinfo.parentUuid = extractUuidFunction(parent_path)
+    vhdinfo.error = 0
+
+    return vhdinfo
+
 def print_help() -> NoReturn:
     """Print help."""
     help_msg = """
@@ -359,5 +427,8 @@ if __name__ == "__main__":
     elif command == "info":
         qcow_info = QcowInfo(sys.argv[2])
         print(f"Virtual size: {qcow_info.header['virtual_disk_size']} bytes")
+    elif command == "parent":
+        qcow_info = QcowInfo(sys.argv[2])
+        print(f"Parent: {qcow_info.header['parent']}")
     else:
         print_help()
