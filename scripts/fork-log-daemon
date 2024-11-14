@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import select
 import signal
 import subprocess
@@ -7,7 +8,13 @@ import sys
 import syslog
 
 def main():
-    process = subprocess.Popen(sys.argv[1:], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(
+        sys.argv[1:],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        universal_newlines=True,
+        env=dict(os.environ, PYTHONUNBUFFERED='1')
+    )
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     write_to_stdout = True
 
