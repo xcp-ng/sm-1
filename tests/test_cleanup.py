@@ -1365,6 +1365,7 @@ class TestSR(unittest.TestCase):
         vdi = cleanup.FileVDI(sr, vdi_uuid, False)
         vdi.path = '%s.vhd' % (vdi_uuid)
         vdi.parent = parent
+        vdi._sizeAllocated = 20971520 #10 blocks of 2MB changed in the child
         parent.children.append(vdi)
 
         sr.vdis[vdi_uuid] = vdi
