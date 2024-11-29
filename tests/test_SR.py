@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import unittest
 import unittest.mock as mock
 import SR
@@ -18,10 +20,12 @@ class TestSR(unittest.TestCase):
         def verify(self):
             pass
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         pass
 
-    def tearDown(self):
+    @override
+    def tearDown(self) -> None:
         pass
 
     def create_SR(self, cmd, dconf, cmd_params=None):

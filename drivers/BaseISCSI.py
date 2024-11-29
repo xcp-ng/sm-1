@@ -18,7 +18,10 @@
 # ISCSISR: ISCSI software initiator SR driver
 #
 
+from sm_typing import override
+
 import SR
+import VDI
 import util
 import time
 import LUNperVDI
@@ -100,11 +103,12 @@ class BaseISCSISR(SR.SR):
             self._initPaths()
         return self._address
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         return False
-    handles = staticmethod(handles)
 
-    def _synchroniseAddrList(self, addrlist):
+    def _synchroniseAddrList(self, addrlist) -> None:
         if not self.multihomed:
             return
         change = False
@@ -133,7 +137,8 @@ class BaseISCSISR(SR.SR):
             except:
                 pass
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         if self.force_tapdisk:
             self.sr_vditype = 'aio'
         else:
@@ -175,11 +180,11 @@ class BaseISCSISR(SR.SR):
                 and ('chappassword' in self.dconf or 'chappassword_secret' in self.dconf):
             self.chapuser = self.dconf['chapuser'].encode('utf-8')
             if 'chappassword_secret' in self.dconf:
-                self.chappassword = util.get_secret(self.session, self.dconf['chappassword_secret'])
+                chappassword = util.get_secret(self.session, self.dconf['chappassword_secret'])
             else:
-                self.chappassword = self.dconf['chappassword']
+                chappassword = self.dconf['chappassword']
 
-            self.chappassword = self.chappassword.encode('utf-8')
+            self.chappassword = chappassword.encode('utf-8')
 
         self.incoming_chapuser = ""
         self.incoming_chappassword = ""
@@ -187,11 +192,11 @@ class BaseISCSISR(SR.SR):
                 and ('incoming_chappassword' in self.dconf or 'incoming_chappassword_secret' in self.dconf):
             self.incoming_chapuser = self.dconf['incoming_chapuser'].encode('utf-8')
             if 'incoming_chappassword_secret' in self.dconf:
-                self.incoming_chappassword = util.get_secret(self.session, self.dconf['incoming_chappassword_secret'])
+                incoming_chappassword = util.get_secret(self.session, self.dconf['incoming_chappassword_secret'])
             else:
-                self.incoming_chappassword = self.dconf['incoming_chappassword']
+                incoming_chappassword = self.dconf['incoming_chappassword']
 
-            self.incoming_chappassword = self.incoming_chappassword.encode('utf-8')
+            self.incoming_chappassword = incoming_chappassword.encode('utf-8')
 
         self.port = DEFAULT_PORT
         if 'port' in self.dconf and self.dconf['port']:
@@ -276,7 +281,7 @@ class BaseISCSISR(SR.SR):
             self._address = self.tgtidx
         self._synchroniseAddrList(addrlist)
 
-    def _init_adapters(self):
+    def _init_adapters(self) -> None:
         # Generate a list of active adapters
         ids = scsiutil._genHostList(ISCSI_PROCNAME)
         util.SMlog(ids)
@@ -293,7 +298,8 @@ class BaseISCSISR(SR.SR):
                 pass
         self._devs = scsiutil.cacheSCSIidentifiers()
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         self._mpathHandle()
 
         multiTargets = False
@@ -391,10 +397,9 @@ class BaseISCSISR(SR.SR):
         util._incr_iscsiSR_refcount(self.targetIQN, sr_uuid)
         IQNs = []
         if "multiSession" in self.dconf:
-            IQNs = ""
             for iqn in self.dconf['multiSession'].split("|"):
                 if len(iqn):
-                    IQNs += iqn.split(',')[2]
+                    IQNs.append(iqn.split(',')[2])
         else:
             IQNs.append(self.targetIQN)
 
@@ -429,7 +434,11 @@ class BaseISCSISR(SR.SR):
                 realdev = os.path.realpath(os.path.join(dev_path, dev))
                 util.set_scheduler(os.path.basename(realdev))
 
-    def detach(self, sr_uuid, delete=False):
+    @override
+    def detach(self, sr_uuid) -> None:
+        self.detach_and_delete(sr_uuid, delete=False)
+
+    def detach_and_delete(self, sr_uuid, delete=True) -> None:
         keys = []
         pbdref = None
         try:
@@ -470,7 +479,8 @@ class BaseISCSISR(SR.SR):
 
         self.attached = False
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         # Check whether an SR already exists
         SRs = self.session.xenapi.SR.get_all_records()
         for sr in SRs:
@@ -499,11 +509,13 @@ class BaseISCSISR(SR.SR):
         self.session.xenapi.SR.set_sm_config(self.sr_ref, self.sm_config)
         return
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         self.detach(sr_uuid)
         return
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         SRs = self.session.xenapi.SR.get_all_records()
         Recs = {}
         for sr in SRs:
@@ -513,8 +525,9 @@ class BaseISCSISR(SR.SR):
                sm_config['targetIQN'] == self.targetIQN:
                 Recs[record["uuid"]] = sm_config
         return self.srlist_toxml(Recs)
-    
-    def scan(self, sr_uuid):
+
+    @override
+    def scan(self, sr_uuid) -> None:
         if not self.passthrough:
             if not self.attached:
                 raise xs_errors.XenError('SRUnavailable')
@@ -526,9 +539,10 @@ class BaseISCSISR(SR.SR):
                 if vdi.managed:
                     self.physical_utilisation += vdi.size
             self.virtual_allocation = self.physical_utilisation
-        return super(BaseISCSISR, self).scan(sr_uuid)
+        super(BaseISCSISR, self).scan(sr_uuid)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return LUNperVDI.RAWVDI(self, uuid)
 
     def _scan_IQNs(self):

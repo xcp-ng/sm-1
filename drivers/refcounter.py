@@ -39,6 +39,7 @@ class RefCounter:
 
     BASE_DIR = "/var/run/sm/refcount"
 
+    @staticmethod
     def get(obj, binary, ns=None):
         """Get (inc ref count) 'obj' in namespace 'ns' (optional). 
         Returns new ref count"""
@@ -46,8 +47,8 @@ class RefCounter:
             return RefCounter._adjust(ns, obj, 0, 1)
         else:
             return RefCounter._adjust(ns, obj, 1, 0)
-    get = staticmethod(get)
 
+    @staticmethod
     def put(obj, binary, ns=None):
         """Put (dec ref count) 'obj' in namespace 'ns' (optional). If ref
         count was zero already, this operation is a no-op.
@@ -56,8 +57,8 @@ class RefCounter:
             return RefCounter._adjust(ns, obj, 0, -1)
         else:
             return RefCounter._adjust(ns, obj, -1, 0)
-    put = staticmethod(put)
 
+    @staticmethod
     def set(obj, count, binaryCount, ns=None):
         """Set normal & binary counts explicitly to the specified values.
         Returns new ref count"""
@@ -66,14 +67,14 @@ class RefCounter:
         if binaryCount > 1:
             raise RefCounterException("Binary count = %d > 1" % binaryCount)
         RefCounter._set(ns, obj, count, binaryCount)
-    set = staticmethod(set)
 
+    @staticmethod
     def check(obj, ns=None):
         """Get the ref count values for 'obj' in namespace 'ns' (optional)"""
         (obj, ns) = RefCounter._getSafeNames(obj, ns)
         return RefCounter._get(ns, obj)
-    check = staticmethod(check)
 
+    @staticmethod
     def checkLocked(obj, ns):
         """Lock-protected access"""
         lock = Lock(obj, ns)
@@ -82,13 +83,13 @@ class RefCounter:
             return RefCounter.check(obj, ns)
         finally:
             lock.release()
-    checkLocked = staticmethod(checkLocked)
 
+    @staticmethod
     def reset(obj, ns=None):
         """Reset ref counts for 'obj' in namespace 'ns' (optional) to 0."""
         RefCounter.resetAll(ns, obj)
-    reset = staticmethod(reset)
 
+    @staticmethod
     def resetAll(ns=None, obj=None):
         """Reset ref counts of 'obj' in namespace 'ns' to 0. If obj is not
         provided, reset all existing objects in 'ns' to 0. If neither obj nor 
@@ -106,8 +107,8 @@ class RefCounter:
                 raise RefCounterException("failed to get namespace list")
         for ns in nsList:
             RefCounter._reset(ns, obj)
-    resetAll = staticmethod(resetAll)
 
+    @staticmethod
     def _adjust(ns, obj, delta, binaryDelta):
         """Add 'delta' to the normal refcount and 'binaryDelta' to the binary
         refcount of 'obj' in namespace 'ns'. 
@@ -133,8 +134,8 @@ class RefCounter:
                     newCount, newBinaryCount))
         RefCounter._set(ns, obj, newCount, newBinaryCount)
         return newCount + newBinaryCount
-    _adjust = staticmethod(_adjust)
 
+    @staticmethod
     def _get(ns, obj):
         """Get the ref count values for 'obj' in namespace 'ns'"""
         objFile = os.path.join(RefCounter.BASE_DIR, ns, obj)
@@ -142,8 +143,8 @@ class RefCounter:
         if util.pathexists(objFile):
             (count, binaryCount) = RefCounter._readCount(objFile)
         return (count, binaryCount)
-    _get = staticmethod(_get)
 
+    @staticmethod
     def _set(ns, obj, count, binaryCount):
         """Set the ref count values for 'obj' in namespace 'ns'"""
         util.SMlog("Refcount for %s:%s set => (%d, %db)" % \
@@ -156,8 +157,7 @@ class RefCounter:
             while not RefCounter._writeCount(objFile, count, binaryCount):
                 RefCounter._createNamespace(ns)
 
-    _set = staticmethod(_set)
-
+    @staticmethod
     def _getSafeNames(obj, ns):
         """Get a name that can be used as a file name"""
         if not ns:
@@ -167,8 +167,8 @@ class RefCounter:
         for char in ['/', '*', '?', '\\']:
             obj = obj.replace(char, "_")
         return (obj, ns)
-    _getSafeNames = staticmethod(_getSafeNames)
 
+    @staticmethod
     def _createNamespace(ns):
         nsDir = os.path.join(RefCounter.BASE_DIR, ns)
         try:
@@ -177,8 +177,8 @@ class RefCounter:
             if e.errno != errno.EEXIST:
                 raise RefCounterException("failed to makedirs '%s' (%s)" % \
                         (nsDir, e))
-    _createNamespace = staticmethod(_createNamespace)
 
+    @staticmethod
     def _removeObject(ns, obj):
         nsDir = os.path.join(RefCounter.BASE_DIR, ns)
         objFile = os.path.join(nsDir, obj)
@@ -199,8 +199,8 @@ class RefCounter:
                 pass
             else:
                 raise RefCounterException("failed to remove '%s'" % nsDir)
-    _removeObject = staticmethod(_removeObject)
 
+    @staticmethod
     def _reset(ns, obj=None):
         nsDir = os.path.join(RefCounter.BASE_DIR, ns)
         if not util.pathexists(nsDir):
@@ -216,8 +216,8 @@ class RefCounter:
                 raise RefCounterException("failed to list '%s'" % ns)
         for obj in objList:
             RefCounter._removeObject(ns, obj)
-    _reset = staticmethod(_reset)
 
+    @staticmethod
     def _readCount(fn):
         try:
             f = open(fn, 'r')
@@ -229,8 +229,8 @@ class RefCounter:
         except IOError:
             raise RefCounterException("failed to read file '%s'" % fn)
         return (count, binaryCount)
-    _readCount = staticmethod(_readCount)
 
+    @staticmethod
     def _writeCount(fn, count, binaryCount):
         try:
             f = open(fn, 'w')
@@ -243,8 +243,8 @@ class RefCounter:
                 return False
             raise RefCounterException("failed to write '(%d %d)' to '%s': %s" \
                     % (count, binaryCount, fn, e))
-    _writeCount = staticmethod(_writeCount)
 
+    @staticmethod
     def _runTests():
         "Unit tests"
 
@@ -535,7 +535,6 @@ class RefCounter:
         RefCounter.resetAll()
 
         return 0
-    _runTests = staticmethod(_runTests)
 
 
 if __name__ == '__main__':

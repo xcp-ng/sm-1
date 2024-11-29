@@ -17,6 +17,8 @@
 #
 # FileSR: local-file storage repository
 
+from sm_typing import Dict, Optional, List, override
+
 import SR
 import VDI
 import SRCommand
@@ -36,7 +38,7 @@ import xmlrpc.client
 import XenAPI # pylint: disable=import-error
 from constants import CBTLOG_TAG
 
-geneology = {}
+geneology: Dict[str, List[str]] = {}
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", \
                 "VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETACH", \
                 "VDI_CLONE", "VDI_SNAPSHOT", "VDI_RESIZE", "VDI_MIRROR",
@@ -71,9 +73,10 @@ class FileSR(SR.SR):
 
     SR_TYPE = "file"
 
-    def handles(srtype):
+    @override
+    @staticmethod
+    def handles(srtype) -> bool:
         return srtype == 'file'
-    handles = staticmethod(handles)
 
     def _check_o_direct(self):
         if self.sr_ref and self.session is not None:
@@ -89,7 +92,8 @@ class FileSR(SR.SR):
         SR.SR.__init__(self, srcmd, sr_uuid)
         self._check_o_direct()
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         self.ops_exclusive = OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = vhdutil.VDI_TYPE_VHD
@@ -102,7 +106,8 @@ class FileSR(SR.SR):
         self.attached = False
         self.driver_config = DRIVER_CONFIG
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         """ Create the SR.  The path must not already exist, or if it does, 
         it must be empty.  (This accounts for the case where the user has
         mounted a device onto a directory manually and want to use this as the
@@ -124,7 +129,8 @@ class FileSR(SR.SR):
         except:
             raise xs_errors.XenError('FileSRCreate')
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         self.attach(sr_uuid)
         cleanup.gc_force(self.session, self.uuid)
 
@@ -156,7 +162,11 @@ class FileSR(SR.SR):
             raise xs_errors.XenError('FileSRDelete', \
                   opterr='error %d' % inst.code)
 
-    def attach(self, sr_uuid, bind=True):
+    @override
+    def attach(self, sr_uuid) -> None:
+        self.attach_and_bind(sr_uuid)
+
+    def attach_and_bind(self, sr_uuid, bind=True) -> None:
         if not self._checkmount():
             try:
                 util.ioretry(lambda: util.makedirs(self.path, mode=0o700))
@@ -175,7 +185,8 @@ class FileSR(SR.SR):
                                          opterr='fail to mount FileSR. Errno is %s' % inst.code)
         self.attached = True
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         if self._checkmount():
             try:
                 util.SMlog("Aborting GC/coalesce")
@@ -187,7 +198,8 @@ class FileSR(SR.SR):
                 raise xs_errors.XenError('SRInUse', opterr=str(e))
         self.attached = False
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         if not self._checkmount():
             raise xs_errors.XenError('SRUnavailable', \
                   opterr='no such directory %s' % self.path)
@@ -221,7 +233,8 @@ class FileSR(SR.SR):
         # default behaviour from here on
         super(FileSR, self).scan(sr_uuid)
 
-    def update(self, sr_uuid):
+    @override
+    def update(self, sr_uuid) -> None:
         if not self._checkmount():
             raise xs_errors.XenError('SRUnavailable', \
                   opterr='no such directory %s' % self.path)
@@ -234,10 +247,12 @@ class FileSR(SR.SR):
         self.physical_utilisation = self._getutilisation()
         self._db_update()
 
-    def content_type(self, sr_uuid):
+    @override
+    def content_type(self, sr_uuid) -> str:
         return super(FileSR, self).content_type(sr_uuid)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return FileVDI(self, uuid)
 
     def added_vdi(self, vdi):
@@ -247,7 +262,8 @@ class FileSR(SR.SR):
         if uuid in self.vdis:
             del self.vdis[uuid]
 
-    def replay(self, uuid):
+    @override
+    def replay(self, uuid) -> None:
         try:
             file = open(self.path + "/filelog.txt", "r")
             data = file.readlines()
@@ -387,7 +403,7 @@ class FileSR(SR.SR):
         st2 = os.stat(self.remotepath)
         return st1.st_dev == st2.st_dev and st1.st_ino == st2.st_ino
 
-    def _checkmount(self):
+    def _checkmount(self) -> bool:
         mount_path = self.path
         if self.handles("smb"):
             mount_path = self.mountpoint
@@ -397,7 +413,7 @@ class FileSR(SR.SR):
                                  util.pathexists(self.remotepath) and self._isbind()))
 
     # Override in SharedFileSR.
-    def _check_hardlinks(self):
+    def _check_hardlinks(self) -> bool:
         return True
 
 class FileVDI(VDI.VDI):
@@ -440,7 +456,8 @@ class FileVDI(VDI.VDI):
 
         return found
 
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         self.lock = self.sr.lock
 
         self.sr.srcmd.params['o_direct'] = self.sr.o_direct
@@ -549,13 +566,15 @@ class FileVDI(VDI.VDI):
                 raise xs_errors.XenError('VDILoad', \
                       opterr='Failed load VDI information %s' % self.path)
 
-    def update(self, sr_uuid, vdi_location):
+    @override
+    def update(self, sr_uuid, vdi_location) -> None:
         self.load(vdi_location)
         vdi_ref = self.sr.srcmd.params['vdi_ref']
         self.sm_config = self.session.xenapi.VDI.get_sm_config(vdi_ref)
         self._db_update()
 
-    def create(self, sr_uuid, vdi_uuid, size):
+    @override
+    def create(self, sr_uuid, vdi_uuid, size) -> str:
         if util.ioretry(lambda: util.pathexists(self.path)):
             raise xs_errors.XenError('VDIExists')
 
@@ -586,7 +605,8 @@ class FileVDI(VDI.VDI):
         self.sr._update(self.sr.uuid, self.size)
         return super(FileVDI, self).get_params()
 
-    def delete(self, sr_uuid, vdi_uuid, data_only=False):
+    @override
+    def delete(self, sr_uuid, vdi_uuid, data_only=False) -> None:
         if not util.ioretry(lambda: util.pathexists(self.path)):
             return super(FileVDI, self).delete(sr_uuid, vdi_uuid, data_only)
 
@@ -609,7 +629,8 @@ class FileVDI(VDI.VDI):
         self.sr._kickGC()
         return super(FileVDI, self).delete(sr_uuid, vdi_uuid, data_only)
 
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if self.path is None:
             self._find_path_with_retries(vdi_uuid)
         if not self._checkpath(self.path):
@@ -633,10 +654,12 @@ class FileVDI(VDI.VDI):
         except util.CommandException as inst:
             raise xs_errors.XenError('VDILoad', opterr='error %d' % inst.code)
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         self.attached = False
 
-    def resize(self, sr_uuid, vdi_uuid, size):
+    @override
+    def resize(self, sr_uuid, vdi_uuid, size) -> str:
         if not self.exists:
             raise xs_errors.XenError('VDIUnavailable', \
                   opterr='VDI %s unavailable %s' % (vdi_uuid, self.path))
@@ -676,10 +699,12 @@ class FileVDI(VDI.VDI):
         super(FileVDI, self).resize_cbt(self.sr.uuid, self.uuid, self.size)
         return VDI.VDI.get_params(self)
 
-    def clone(self, sr_uuid, vdi_uuid):
+    @override
+    def clone(self, sr_uuid, vdi_uuid) -> str:
         return self._do_snapshot(sr_uuid, vdi_uuid, VDI.SNAPSHOT_DOUBLE)
 
-    def compose(self, sr_uuid, vdi1, vdi2):
+    @override
+    def compose(self, sr_uuid, vdi1, vdi2) -> None:
         if self.vdi_type != vhdutil.VDI_TYPE_VHD:
             raise xs_errors.XenError('Unimplemented')
         parent_fn = vdi1 + vhdutil.FILE_EXTN[vhdutil.VDI_TYPE_VHD]
@@ -706,8 +731,9 @@ class FileVDI(VDI.VDI):
 
         vhdutil.killData(self.path)
 
-    def _do_snapshot(self, sr_uuid, vdi_uuid, snap_type,
-                     secondary=None, cbtlog=None):
+    @override
+    def _do_snapshot(self, sr_uuid, vdi_uuid, snapType,
+                     cloneOp=False, secondary=None, cbtlog=None) -> str:
         # If cbt enabled, save file consistency state
         if cbtlog is not None:
             if blktap2.VDI.tap_status(self.session, vdi_uuid):
@@ -725,11 +751,12 @@ class FileVDI(VDI.VDI):
         if not blktap2.VDI.tap_pause(self.session, sr_uuid, vdi_uuid):
             raise util.SMException("failed to pause VDI %s" % vdi_uuid)
         try:
-            return self._snapshot(snap_type, cbtlog, consistency_state)
+            return self._snapshot(snapType, cbtlog, consistency_state)
         finally:
             blktap2.VDI.tap_unpause(self.session, sr_uuid, vdi_uuid, secondary)
 
-    def _rename(self, src, dst):
+    @override
+    def _rename(self, src, dst) -> None:
         util.SMlog("FileVDI._rename %s to %s" % (src, dst))
         util.ioretry(lambda: os.rename(src, dst))
 
@@ -910,7 +937,8 @@ class FileVDI(VDI.VDI):
             ret_vdi = self
         return ret_vdi.get_params()
 
-    def get_params(self):
+    @override
+    def get_params(self) -> str:
         if not self._checkpath(self.path):
             raise xs_errors.XenError('VDIUnavailable', \
                   opterr='VDI %s unavailable %s' % (self.uuid, self.path))
@@ -990,7 +1018,8 @@ class FileVDI(VDI.VDI):
         return uuid
     extractUuid = staticmethod(extractUuid)
 
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         """
         Generate the XML config required to attach and activate
         a VDI for use when XAPI is not running. Attach and
@@ -1009,7 +1038,8 @@ class FileVDI(VDI.VDI):
         config = xmlrpc.client.dumps(tuple([resp]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config, ), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         """
         Attach and activate a VDI using config generated by
         vdi_generate_config above. This is used for cases such as
@@ -1018,15 +1048,17 @@ class FileVDI(VDI.VDI):
         util.SMlog("FileVDI.attach_from_config")
         try:
             if not util.pathexists(self.sr.path):
-                self.sr.attach(sr_uuid)
+                return self.sr.attach(sr_uuid)
         except:
             util.logException("FileVDI.attach_from_config")
             raise xs_errors.XenError(
                 'SRUnavailable',
                 opterr='Unable to attach from config'
             )
+        return ''
 
-    def _create_cbt_log(self):
+    @override
+    def _create_cbt_log(self) -> str:
         # Create CBT log file
         # Name: <vdi_uuid>.cbtlog
         #Handle if file already exists
@@ -1035,7 +1067,8 @@ class FileVDI(VDI.VDI):
         open_file.close()
         return super(FileVDI, self)._create_cbt_log()
 
-    def _delete_cbt_log(self):
+    @override
+    def _delete_cbt_log(self) -> None:
         logPath = self._get_cbt_logpath(self.uuid)
         try:
             os.remove(logPath)
@@ -1043,7 +1076,8 @@ class FileVDI(VDI.VDI):
             if e.errno != errno.ENOENT:
                 raise
 
-    def _cbt_log_exists(self, logpath):
+    @override
+    def _cbt_log_exists(self, logpath) -> bool:
         return util.pathexists(logpath)
 
 
@@ -1069,7 +1103,8 @@ class SharedFileSR(FileSR):
     def _raise_hardlink_error(self):
         raise OSError(524, "Unknown error 524")
 
-    def _check_hardlinks(self):
+    @override
+    def _check_hardlinks(self) -> bool:
         hardlink_conf = self._read_hardlink_conf()
         if hardlink_conf is not None:
             return hardlink_conf
@@ -1111,7 +1146,7 @@ class SharedFileSR(FileSR):
     def _get_hardlink_conf_path(self):
         return os.path.join(self.path, 'sm-hardlink.conf')
 
-    def _read_hardlink_conf(self):
+    def _read_hardlink_conf(self) -> Optional[bool]:
         try:
             with open(self._get_hardlink_conf_path(), 'r') as f:
                 try:

@@ -16,6 +16,8 @@
 
 """Serialization for concurrent operations"""
 
+from sm_typing import Dict
+
 import os
 import errno
 import flock
@@ -37,8 +39,8 @@ class Lock(object):
 
     BASE_DIR = "/var/lock/sm"
 
-    INSTANCES = {}
-    BASE_INSTANCES = {}
+    INSTANCES: Dict[str, 'LockImplementation'] = {}
+    BASE_INSTANCES: Dict[str, 'LockImplementation'] = {}
 
     def __new__(cls, name, ns=None, *args, **kwargs):
         if ns:
@@ -64,6 +66,7 @@ class Lock(object):
     def held(self):
         raise NotImplementedError("Lock methods implemented in LockImplementation")
 
+    @staticmethod
     def _mknamespace(ns):
 
         if ns is None:
@@ -72,7 +75,6 @@ class Lock(object):
         assert not ns.startswith(".")
         assert ns.find(os.path.sep) < 0
         return ns
-    _mknamespace = staticmethod(_mknamespace)
 
     @staticmethod
     def clearAll():
@@ -82,6 +84,7 @@ class Lock(object):
         Lock.INSTANCES = {}
         Lock.BASE_INSTANCES = {}
 
+    @staticmethod
     def cleanup(name, ns=None):
         if ns:
             if ns in Lock.INSTANCES:
@@ -97,8 +100,7 @@ class Lock(object):
         if os.path.exists(path):
             Lock._unlink(path)
 
-    cleanup = staticmethod(cleanup)
-
+    @staticmethod
     def cleanupAll(ns=None):
         ns = Lock._mknamespace(ns)
         nspath = os.path.join(Lock.BASE_DIR, ns)
@@ -112,11 +114,11 @@ class Lock(object):
 
         Lock._rmdir(nspath)
 
-    cleanupAll = staticmethod(cleanupAll)
     #
     # Lock and attribute file management
     #
 
+    @staticmethod
     def _mkdirs(path):
         """Concurrent makedirs() catching EEXIST."""
         if os.path.exists(path):
@@ -126,8 +128,8 @@ class Lock(object):
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise LockException("Failed to makedirs(%s)" % path)
-    _mkdirs = staticmethod(_mkdirs)
 
+    @staticmethod
     def _unlink(path):
         """Non-raising unlink()."""
         util.SMlog("lock: unlinking lock file %s" % path)
@@ -135,8 +137,8 @@ class Lock(object):
             os.unlink(path)
         except Exception as e:
             util.SMlog("Failed to unlink(%s): %s" % (path, e))
-    _unlink = staticmethod(_unlink)
 
+    @staticmethod
     def _rmdir(path):
         """Non-raising rmdir()."""
         util.SMlog("lock: removing lock dir %s" % path)
@@ -144,7 +146,6 @@ class Lock(object):
             os.rmdir(path)
         except Exception as e:
             util.SMlog("Failed to rmdir(%s): %s" % (path, e))
-    _rmdir = staticmethod(_rmdir)
 
 
 class LockImplementation(object):
@@ -193,7 +194,7 @@ class LockImplementation(object):
         fd = self.lockfile.fileno()
         self.lock = flock.WriteLock(fd)
 
-    def _open_lockfile(self):
+    def _open_lockfile(self) -> None:
         """Provide a seam, so extreme situations could be tested"""
         util.SMlog("lock: opening lock file %s" % self.lockpath)
         self.lockfile = open(self.lockpath, "w+")

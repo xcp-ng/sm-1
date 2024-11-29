@@ -19,8 +19,11 @@
 # hardware based iSCSI
 #
 
+from sm_typing import Dict, List, override
+
 import SR
 import SRCommand
+import VDI
 import devscan
 import scsiutil
 import util
@@ -50,20 +53,22 @@ DRIVER_INFO = {
 class HBASR(SR.SR):
     """HBA storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         if type == "hba":
             return True
         return False
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         self.sr_vditype = 'phy'
         self.type = "any"
         if 'type' in self.dconf and self.dconf['type']:
             self.type = self.dconf['type']
         self.attached = False
         self.procname = ""
-        self.devs = {}
+        self.devs: Dict[str, List[str]] = {}
 
     def _init_hbadict(self):
         if not hasattr(self, "hbas"):
@@ -174,15 +179,18 @@ class HBASR(SR.SR):
             raise xs_errors.XenError('XMLParse', \
                                      opterr='HBA probe failed')
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         self._mpathHandle()
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         if util._containsVDIinuse(self):
             return
         return
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         # Check whether an SR already exists
         SRs = self.session.xenapi.SR.get_all_records()
         for sr in SRs:
@@ -211,11 +219,13 @@ class HBASR(SR.SR):
         self.sm_config['multipathable'] = 'true'
         self.session.xenapi.SR.set_sm_config(self.sr_ref, self.sm_config)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         self.detach(sr_uuid)
         return
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         self._init_hbadict()
         self.attach("")
         SRs = self.session.xenapi.SR.get_all_records()
@@ -228,7 +238,8 @@ class HBASR(SR.SR):
                 Recs[record["uuid"]] = sm_config
         return self.srlist_toxml(Recs)
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         self._init_hbadict()
         if not self.passthrough:
             if not self.attached:
@@ -242,7 +253,7 @@ class HBASR(SR.SR):
                 if vdi.managed:
                     self.physical_utilisation += vdi.size
             self.virtual_allocation = self.physical_utilisation
-        return super(HBASR, self).scan(sr_uuid)
+        super(HBASR, self).scan(sr_uuid)
 
     def print_devs(self):
         self.attach("")
@@ -273,7 +284,8 @@ class HBASR(SR.SR):
     def _getLUNbySMconfig(self, sm_config):
         raise xs_errors.XenError('VDIUnavailable')
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return LUNperVDI.RAWVDI(self, uuid)
 
     def srlist_toxml(self, SRs):

@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import errno
 import json
 from io import StringIO
@@ -23,7 +25,8 @@ class TestTapdisk(unittest.TestCase):
     # hence no usual decorator mocks and the monkey patching.
     # https://bugs.python.org/issue23078
     #
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         subprocess_patcher = mock.patch("blktap2.subprocess")
         self.mock_subprocess = subprocess_patcher.start()
 
@@ -110,7 +113,8 @@ class TestTapdisk(unittest.TestCase):
 
 
 class TestVDI(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
 
         lock_patcher = mock.patch('blktap2.Lock', autospec=True)
@@ -337,8 +341,8 @@ class TestVDI(unittest.TestCase):
 
 
 class TestTapCtl(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         subprocess_patcher = mock.patch("blktap2.subprocess")
         self.mock_subprocess = subprocess_patcher.start()
 

@@ -2,6 +2,8 @@
 Unit tests for the Base ISCSI SR
 """
 
+from sm_typing import override
+
 from unittest import mock
 from uuid import uuid4
 
@@ -15,7 +17,8 @@ class TestBaseISCSI(ISCSITestCase):
 
     TEST_CLASS = 'BaseISCSI'
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
 
         util_patcher = mock.patch('BaseISCSI.util', autospec=True)

@@ -17,8 +17,11 @@
 #
 # SMBSR: SMB filesystem based storage repository
 
+from sm_typing import override
+
 import SR
 import SRCommand
+import VDI
 import FileSR
 import util
 import errno
@@ -71,11 +74,13 @@ class SMBException(Exception):
 class SMBSR(FileSR.SharedFileSR):
     """SMB file-based storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         return type == 'smb'
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
@@ -190,7 +195,8 @@ class SMBSR(FileSR.SharedFileSR):
                 restrictions['restrict_cifs'] == "true":
             raise xs_errors.XenError('NoSMBLicense')
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self.checkmount():
             try:
                 self.mount()
@@ -208,7 +214,8 @@ class SMBSR(FileSR.SharedFileSR):
 
         self.attached = True
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         err = "SMBMount"
         try:
             self.mount(PROBE_MOUNTPOINT)
@@ -220,13 +227,11 @@ class SMBSR(FileSR.SharedFileSR):
             raise xs_errors.XenError(err, opterr=inst.errstr)
         except (util.CommandException, xs_errors.XenError):
             raise
-
         # Create a dictionary from the SR uuids to feed SRtoXML()
-        sr_dict = {sr_uuid: {} for sr_uuid in sr_list}
+        return util.SRtoXML({sr_uuid: {} for sr_uuid in sr_list})
 
-        return util.SRtoXML(sr_dict)
-
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         """Detach the SR: Unmounts and removes the mountpoint"""
         if not self.checkmount():
             return
@@ -244,7 +249,8 @@ class SMBSR(FileSR.SharedFileSR):
 
         self.attached = False
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         self.__check_license()
 
         if self.checkmount():
@@ -286,7 +292,8 @@ class SMBSR(FileSR.SharedFileSR):
                             .format(os.strerror(inst.code))) from inst
         self.detach(sr_uuid)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         # try to remove/delete non VDI contents first
         super(SMBSR, self).delete(sr_uuid)
         try:
@@ -302,12 +309,14 @@ class SMBSR(FileSR.SharedFileSR):
             if inst.code != errno.ENOENT:
                 raise xs_errors.XenError('SMBDelete')
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return SMBFileVDI(self, uuid)
 
 
 class SMBFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 
@@ -315,7 +324,8 @@ class SMBFileVDI(FileSR.FileVDI):
 
         return super(SMBFileVDI, self).attach(sr_uuid, vdi_uuid)
 
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("SMBFileVDI.generate_config")
         if not util.pathexists(self.path):
             raise xs_errors.XenError('VDIUnavailable')
@@ -330,17 +340,19 @@ class SMBFileVDI(FileSR.FileVDI):
         config = xmlrpc.client.dumps(tuple([resp]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config, ), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         """Used for HA State-file only. Will not just attach the VDI but
         also start a tapdisk on the file"""
         util.SMlog("SMBFileVDI.attach_from_config")
         try:
             if not util.pathexists(self.sr.path):
-                self.sr.attach(sr_uuid)
+                return self.sr.attach(sr_uuid)
         except:
             util.logException("SMBFileVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable', \
                         opterr='Unable to attach from config')
+        return ''
 
 
 if __name__ == '__main__':

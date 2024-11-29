@@ -1,3 +1,5 @@
+from sm_typing import Generator, override
+
 import io
 import random
 import string
@@ -453,14 +455,17 @@ class LVMMetadataTestContext(testlib.TestContext):
         super().__init__()
         self._metadata_file_content = b'\x00' * 4 * 1024 * 1024
 
-    def start(self):
+    @override
+    def start(self) -> None:
         super().start()
         self.patch("util.gen_uuid", new=genuuid)
 
-    def generate_device_paths(self):
+    @override
+    def generate_device_paths(self) -> Generator[str, None, None]:
         yield self.METADATA_PATH
 
-    def fake_open(self, fname, mode='r'):
+    @override
+    def fake_open(self, fname, mode='r') -> io.TextIOBase:
         if fname != self.METADATA_PATH: # pragma: no cover
             return super().fake_open(fname, mode)
         else:

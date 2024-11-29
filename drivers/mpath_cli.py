@@ -15,6 +15,8 @@
 #
 # Talk to the multipathd cli
 
+from sm_typing import override
+
 import util
 import re
 import time
@@ -25,7 +27,8 @@ class MPathCLIFail(Exception):
     def __init__(self):
         return
 
-    def __str__(self):
+    @override
+    def __str__(self) -> str:
         return "MPath CLI failed"
 
 mpathcmd = ["/usr/sbin/multipathd", "-k"]

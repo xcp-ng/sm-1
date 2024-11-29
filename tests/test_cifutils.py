@@ -44,7 +44,7 @@ class TestCreate(unittest.TestCase):
         self.assertEqual(domain, None)
 
     def test_password_and_username_domain(self):
-        junk_dconf = {"cifspassword": "123", "username": "citrix\jsmith"}
+        junk_dconf = {"cifspassword": "123", "username": "citrix\\jsmith"}
         junk_session = 123
         credentials, domain = cifutils.getCIFCredentials(junk_dconf,
                                                          junk_session,
@@ -54,7 +54,7 @@ class TestCreate(unittest.TestCase):
         self.assertEqual(domain, "citrix")
 
     def test_password_and_username_domain_smbsr(self):
-        junk_dconf = {"password": "123", "username": "citrix\jsmith"}
+        junk_dconf = {"password": "123", "username": "citrix\\jsmith"}
         junk_session = 123
         credentials, domain = cifutils.getCIFCredentials(junk_dconf,
                                                          junk_session)
@@ -90,7 +90,7 @@ class TestCreate(unittest.TestCase):
     @mock.patch('util.get_secret', autospec=True)
     def test_password_secret_and_username_also_domain(self, get_secret):
         junk_dconf = {"cifspassword_secret": "123",
-                      "username": "citrix\jsmith"}
+                      "username": "citrix\\jsmith"}
         junk_session = 123
         get_secret.return_value = 'winter2019'
         credentials, domain = cifutils.getCIFCredentials(junk_dconf,
@@ -104,7 +104,7 @@ class TestCreate(unittest.TestCase):
     @mock.patch('util.get_secret', autospec=True)
     def test_password_secret_and_username_also_domain_smbsr(self, get_secret):
         junk_dconf = {"password_secret": "123",
-                      "username": "citrix\jsmith"}
+                      "username": "citrix\\jsmith"}
         junk_session = 123
         get_secret.return_value = 'winter2019'
         credentials, domain = cifutils.getCIFCredentials(junk_dconf,
@@ -116,23 +116,23 @@ class TestCreate(unittest.TestCase):
 
     def test_username_bad_domain(self):
         junk_dconf = {"cifspassword_secret": "123",
-                      "username": "citrix\gjk\jsmith"}
+                      "username": "citrix\\gjk\\jsmith"}
         junk_session = 123
         with self.assertRaises(cifutils.CIFSException) as cm:
             cifutils.getCIFCredentials(junk_dconf, junk_session, prefix="cifs")
         expected_message = ("A maximum of 2 tokens are expected "
-                            "(<domain>\<username>). 3 were given.")
+                            "(<domain>\\<username>). 3 were given.")
         the_exception = cm.exception
         self.assertEqual(the_exception.errstr, expected_message)
 
     def test_username_bad_domain_smbsr(self):
         junk_dconf = {"password_secret": "123",
-                      "username": "citrix\gjk\jsmith"}
+                      "username": "citrix\\gjk\\jsmith"}
         junk_session = 123
         with self.assertRaises(cifutils.CIFSException) as cm:
             cifutils.getCIFCredentials(junk_dconf, junk_session)
         expected_message = ("A maximum of 2 tokens are expected "
-                            "(<domain>\<username>). 3 were given.")
+                            "(<domain>\\<username>). 3 were given.")
         the_exception = cm.exception
         self.assertEqual(the_exception.errstr, expected_message)
 

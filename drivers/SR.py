@@ -80,10 +80,10 @@ class SR(object):
       sr_vditype: string, repository type
     """
 
-    def handles(type):
+    @staticmethod
+    def handles(type) -> bool:
         """Returns True if this SR class understands the given dconf string"""
         return False
-    handles = staticmethod(handles)
 
     def __init__(self, srcmd, sr_uuid):
         """Base class initializer. All subclasses should call SR.__init__
@@ -153,7 +153,7 @@ class SR(object):
 
     @staticmethod
     def from_uuid(session, sr_uuid):
-        import imp
+        import importlib.util
 
         _SR = session.xenapi.SR
         sr_ref = _SR.get_by_uuid(sr_uuid)
@@ -169,7 +169,10 @@ class SR(object):
         driver_real = os.path.realpath(driver_path)
         module_name = os.path.basename(driver_path)
 
-        module = imp.load_source(module_name, driver_real)
+        spec = importlib.util.spec_from_file_location(module_name, driver_real)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
         target = driver(sm_type)
         # NB. get the host pbd's device_config
 
@@ -226,7 +229,7 @@ class SR(object):
         except:
             pass
 
-    def create(self, uuid, size):
+    def create(self, uuid, size) -> None:
         """Create this repository.
         This operation may delete existing data.
 
@@ -240,7 +243,7 @@ class SR(object):
         """
         raise xs_errors.XenError('Unimplemented')
 
-    def delete(self, uuid):
+    def delete(self, uuid) -> None:
         """Delete this repository and its contents.
 
         This operation IS idempotent -- it will succeed if the repository
@@ -256,7 +259,7 @@ class SR(object):
         """
         raise xs_errors.XenError('Unimplemented')
 
-    def update(self, uuid):
+    def update(self, uuid) -> None:
         """Refresh the fields in the SR object
 
         Returns:
@@ -267,7 +270,7 @@ class SR(object):
         # no-op unless individual backends implement it
         return
 
-    def attach(self, uuid):
+    def attach(self, uuid) -> None:
         """Initiate local access to the SR. Initialises any
         device state required to access the substrate.
 
@@ -280,7 +283,7 @@ class SR(object):
         """
         raise xs_errors.XenError('Unimplemented')
 
-    def after_master_attach(self, uuid):
+    def after_master_attach(self, uuid) -> None:
         """Perform actions required after attaching on the pool master
         Return:
           None
@@ -295,7 +298,7 @@ class SR(object):
             self.session.xenapi.message.create(
                 msg_name, 2, "SR", uuid, msg_body)
 
-    def detach(self, uuid):
+    def detach(self, uuid) -> None:
         """Remove local access to the SR. Destroys any device
         state initiated by the sr_attach() operation.
 
@@ -309,7 +312,7 @@ class SR(object):
         """
         raise xs_errors.XenError('Unimplemented')
 
-    def probe(self):
+    def probe(self) -> str:
         """Perform a backend-specific scan, using the current dconf.  If the
         dconf is complete, then this will return a list of the SRs present of
         this type on the device, if any.  If the dconf is partial, then a
@@ -329,7 +332,7 @@ class SR(object):
         """
         raise xs_errors.XenError('Unimplemented')
 
-    def scan(self, uuid):
+    def scan(self, uuid) -> None:
         """
         Returns:
         """
@@ -339,7 +342,7 @@ class SR(object):
         scanrecord = ScanRecord(self)
         scanrecord.synchronise()
 
-    def replay(self, uuid):
+    def replay(self, uuid) -> None:
         """Replay a multi-stage log entry
 
         Returns:
@@ -349,30 +352,27 @@ class SR(object):
         """
         raise xs_errors.XenError('Unimplemented')
 
-    def content_type(self, uuid):
+    def content_type(self, uuid) -> str:
         """Returns the 'content_type' of an SR as a string"""
         return xmlrpc.client.dumps((str(self.sr_vditype), ), "", True)
 
-    def load(self, sr_uuid):
+    def load(self, sr_uuid) -> None:
         """Post-init hook"""
         pass
 
-    def check_sr(self, sr_uuid):
+    def check_sr(self, sr_uuid) -> None:
         """Hook to check SR health"""
         pass
 
-    def vdi(self, uuid):
+    def vdi(self, uuid) -> 'VDI.VDI':
         """Return VDI object owned by this repository"""
-        if uuid not in self.vdis:
-            self.vdis[uuid] = VDI.VDI(self, uuid)
         raise xs_errors.XenError('Unimplemented')
-        return self.vdis[uuid]
 
-    def forget_vdi(self, uuid):
+    def forget_vdi(self, uuid) -> None:
         vdi = self.session.xenapi.VDI.get_by_uuid(uuid)
         self.session.xenapi.VDI.db_forget(vdi)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         # callback after the op is done
         pass
 

@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import unittest.mock as mock
 import os
 import syslog
@@ -25,7 +27,8 @@ def with_lvm_subsystem(func):
 
 
 class TestCreate(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         lock_patcher = mock.patch('lvutil.Fairlock', autospec=True)
         self.addCleanup(lock_patcher.stop)
         self.mock_lock = lock_patcher.start()
@@ -98,7 +101,8 @@ class TestCreate(unittest.TestCase):
 
 
 class TestRemove(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         lock_patcher = mock.patch('lvutil.Fairlock', autospec=True)
         self.addCleanup(lock_patcher.stop)
         self.mock_lock = lock_patcher.start()
@@ -123,8 +127,8 @@ class TestRemove(unittest.TestCase):
 
 
 class TestDeactivate(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         lock_patcher = mock.patch('lvutil.Fairlock', autospec=True)
         pathexists_patcher = mock.patch('lvutil.util.pathexists', autospec=True)
         lexists_patcher = mock.patch('lvutil.os.path.lexists', autospec=True)
@@ -208,7 +212,8 @@ class TestDeactivate(unittest.TestCase):
 
 
 class TestActivate(unittest.TestCase):
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
 
         lock_patcher = mock.patch('lvutil.Fairlock', autospec=True)

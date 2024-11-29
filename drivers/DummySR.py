@@ -17,6 +17,8 @@
 #
 # DummySR: an example dummy SR for the SDK
 
+from sm_typing import Dict, Optional, List, Tuple, override
+
 import SR
 import VDI
 import SRCommand
@@ -28,7 +30,7 @@ CAPABILITIES = ["SR_PROBE", "VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETAC
                 "VDI_ACTIVATE", "VDI_DEACTIVATE", "VDI_CLONE", "VDI_SNAPSHOT", "VDI_RESIZE",
                 "VDI_INTRODUCE", "VDI_MIRROR"]
 
-CONFIGURATION = []
+CONFIGURATION: List[Tuple[str, str]] = []
 
 DRIVER_INFO = {
     'name': 'dummy',
@@ -47,35 +49,43 @@ TYPE = 'dummy'
 class DummySR(SR.SR):
     """dummy storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         if type == TYPE:
             return True
         return False
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         self.sr_vditype = 'phy'
 
-    def content_type(self, sr_uuid):
+    @override
+    def content_type(self, sr_uuid) -> str:
         return super(DummySR, self).content_type(sr_uuid)
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         self._assertValues(['sr_uuid', 'args', 'host_ref', 'session_ref', 'device_config', 'command', 'sr_ref'])
         assert(len(self.srcmd.params['args']) == 1)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         self._assertValues(['sr_uuid', 'args', 'host_ref', 'session_ref', 'device_config', 'command', 'sr_ref'])
         assert(len(self.srcmd.params['args']) == 0)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         self._assertValues(['sr_uuid', 'args', 'host_ref', 'session_ref', 'device_config', 'command', 'sr_ref'])
         assert(len(self.srcmd.params['args']) == 0)
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         self._assertValues(['sr_uuid', 'args', 'host_ref', 'session_ref', 'device_config', 'command', 'sr_ref'])
         assert(len(self.srcmd.params['args']) == 0)
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         # N.B. There are no SR references
         self._assertValues(['args', 'host_ref', 'session_ref', 'device_config', 'command'])
         assert(len(self.srcmd.params['args']) == 0)
@@ -89,10 +99,12 @@ class DummySR(SR.SR):
         # Return the Probe XML
         return util.SRtoXML(SRlist)
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return DummyVDI(self, uuid)
 
-    def scan(self, sr_uuid):
+    @override
+    def scan(self, sr_uuid) -> None:
         self._assertValues(['sr_uuid', 'args', 'host_ref', 'session_ref', 'device_config', 'command', 'sr_ref'])
         assert(len(self.srcmd.params['args']) == 0)
 
@@ -106,7 +118,7 @@ class DummySR(SR.SR):
         self.physical_size = 2000000000000
         self.physical_utilisation = 0
         self.virtual_allocation = 0
-        return super(DummySR, self).scan(sr_uuid)
+        super(DummySR, self).scan(sr_uuid)
 
     def _assertValues(self, vals):
         for attr in vals:
@@ -132,15 +144,17 @@ class DummySR(SR.SR):
 
 
 class DummyVDI(VDI.VDI):
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         self.path = "/dev/null"  # returned on attach
         self.uuid = vdi_uuid
         self.size = 0
         self.utilisation = 0
         self.location = vdi_uuid
-        self.sm_config = {}
+        self.sm_config: Dict[str, str] = {}
 
-    def create(self, sr_uuid, vdi_uuid, size):
+    @override
+    def create(self, sr_uuid, vdi_uuid, size) -> str:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_sm_config'])
         assert(len(self.sr.srcmd.params['args']) == 8)
 
@@ -159,7 +173,8 @@ class DummyVDI(VDI.VDI):
         self.run_corner_cases_tests()
         return self.get_params()
 
-    def delete(self, sr_uuid, vdi_uuid):
+    @override
+    def delete(self, sr_uuid, vdi_uuid, data_only=False) -> None:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_ref', 'vdi_location', 'vdi_uuid'])
         assert(len(self.sr.srcmd.params['args']) == 0)
 
@@ -168,7 +183,8 @@ class DummyVDI(VDI.VDI):
         self.run_corner_cases_tests()
         self._db_forget()
 
-    def introduce(self, sr_uuid, vdi_uuid):
+    @override
+    def introduce(self, sr_uuid, vdi_uuid) -> str:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_sm_config', 'new_uuid'])
         assert(len(self.sr.srcmd.params['args']) == 0)
         self.vdi_sm_config = self.sr.srcmd.params['vdi_sm_config']
@@ -184,19 +200,22 @@ class DummyVDI(VDI.VDI):
         self.run_corner_cases_tests()
         return  super(DummyVDI, self).get_params()
 
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_ref', 'vdi_location', 'vdi_uuid'])
         assert(len(self.sr.srcmd.params['args']) == 1)
         vdi = super(DummyVDI, self).attach(sr_uuid, vdi_uuid)
         self.run_corner_cases_tests()
         return vdi
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_ref', 'vdi_location', 'vdi_uuid'])
         self.run_corner_cases_tests()
         assert(len(self.sr.srcmd.params['args']) == 0)
 
-    def activate(self, sr_uuid, vdi_uuid):
+    @override
+    def activate(self, sr_uuid, vdi_uuid) -> Optional[Dict[str, str]]:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_ref', 'vdi_location', 'vdi_uuid'])
         assert(len(self.sr.srcmd.params['args']) == 1)
         self.vdi_ref = self.sr.srcmd.params['vdi_ref']
@@ -204,13 +223,16 @@ class DummyVDI(VDI.VDI):
         self.run_corner_cases_tests()
         for key in self.other_config.keys():
             util.SMlog("\tvdi_other_config: [%s:%s]" % (key, self.other_config[key]))
+        return None
 
-    def deactivate(self, sr_uuid, vdi_uuid):
+    @override
+    def deactivate(self, sr_uuid, vdi_uuid) -> None:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_ref', 'vdi_location', 'vdi_uuid'])
         self.run_corner_cases_tests()
         assert(len(self.sr.srcmd.params['args']) == 0)
 
-    def resize(self, sr_uuid, vdi_uuid, size):
+    @override
+    def resize(self, sr_uuid, vdi_uuid, size) -> str:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref', 'vdi_ref', 'vdi_location', 'vdi_uuid'])
         assert(len(self.sr.srcmd.params['args']) == 1)
 
@@ -220,7 +242,8 @@ class DummyVDI(VDI.VDI):
         self.run_corner_cases_tests()
         return super(DummyVDI, self).get_params()
 
-    def snapshot(self, sr_uuid, vdi_uuid):
+    @override
+    def snapshot(self, sr_uuid, vdi_uuid) -> str:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref'])
         assert(len(self.sr.srcmd.params['args']) == 0)
 
@@ -234,7 +257,8 @@ class DummyVDI(VDI.VDI):
         self.run_corner_cases_tests()
         return vdi.get_params()
 
-    def clone(self, sr_uuid, vdi_uuid):
+    @override
+    def clone(self, sr_uuid, vdi_uuid) -> str:
         self.sr._assertValues(['sr_uuid', 'args', 'host_ref', 'device_config', 'command', 'sr_ref'])
         assert(len(self.sr.srcmd.params['args']) == 0)
 

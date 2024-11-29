@@ -1,3 +1,5 @@
+from sm_typing import DefaultDict, Dict, List, override
+
 import json
 import os
 import re
@@ -31,7 +33,8 @@ class TestStorageInit(unittest.TestCase):
     storage after installation.
     """
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.test_dir = tempfile.TemporaryDirectory()
 
         # There are tweaks we need to make the to storage-init:
@@ -103,11 +106,12 @@ class TestStorageInit(unittest.TestCase):
         self.copy_command("touch")
 
         self.script_exited = False
-        self.created_srs = defaultdict(list)
-        self.misc_xe_calls = []
-        self.unanticipated_xe_calls = []
+        self.created_srs: DefaultDict[str, List[Dict[str, str]]] = defaultdict(list)
+        self.misc_xe_calls: List[List[str]] = []
+        self.unanticipated_xe_calls: List[List[str]] = []
 
-    def tearDown(self):
+    @override
+    def tearDown(self) -> None:
         self.socket.close()
         self.test_dir.cleanup()
 
@@ -355,7 +359,7 @@ sys.exit(resp.get("returncode", 0))
         combined_args = " ".join(sorted(args[1:]))
 
         if subcmd == "sm-list":
-            m = re.match("--minimal params=uuid type=(\S+)$", combined_args)
+            m = re.match(r"--minimal params=uuid type=(\S+)$", combined_args)
             if m:
                 sm_uuid = "uuid-for-sr-type-" + m.group(1)
                 return CmdResult(stdout=f"{sm_uuid}\n")
@@ -365,7 +369,7 @@ sys.exit(resp.get("returncode", 0))
                 if not self.created_srs:
                     return CmdResult()
 
-            m = re.match("--minimal params=uuid type=(\S+)$", combined_args)
+            m = re.match(r"--minimal params=uuid type=(\S+)$", combined_args)
             if m:
                 sr_type = m.group(1)
                 num_srs = len(self.created_srs[sr_type])

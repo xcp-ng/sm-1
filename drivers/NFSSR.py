@@ -17,9 +17,12 @@
 #
 # FileSR: local-file storage repository
 
+from sm_typing import override
+
 import socket
 
 import SR
+import VDI
 import SRCommand
 import FileSR
 import util
@@ -68,11 +71,13 @@ PROBEVERSION = 'probeversion'
 class NFSSR(FileSR.SharedFileSR):
     """NFS file-based storage repository"""
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         return type == 'nfs'
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
         self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
@@ -137,7 +142,8 @@ class NFSSR(FileSR.SharedFileSR):
         except nfs.NfsException as exc:
             raise xs_errors.XenError('NFSMount', opterr=exc.errstr)
 
-    def attach(self, sr_uuid):
+    @override
+    def attach(self, sr_uuid) -> None:
         if not self._checkmount():
             try:
                 self.validate_remotepath(False)
@@ -164,7 +170,8 @@ class NFSSR(FileSR.SharedFileSR):
             self.mount(self.path, self.remotepath,
                        timeout=io_timeout, retrans=io_retrans)
 
-    def probe(self):
+    @override
+    def probe(self) -> str:
         # Verify NFS target and port
         util._testHost(self.dconf['server'], NFSPORT, 'NFSTarget')
 
@@ -182,7 +189,8 @@ class NFSSR(FileSR.SharedFileSR):
             except:
                 pass
 
-    def detach(self, sr_uuid):
+    @override
+    def detach(self, sr_uuid) -> None:
         """Detach the SR: Unmounts and removes the mountpoint"""
         if not self._checkmount():
             return
@@ -199,7 +207,8 @@ class NFSSR(FileSR.SharedFileSR):
 
         self.attached = False
 
-    def create(self, sr_uuid, size):
+    @override
+    def create(self, sr_uuid, size) -> None:
         util._testHost(self.dconf['server'], NFSPORT, 'NFSTarget')
         self.validate_remotepath(True)
         if self._checkmount():
@@ -239,7 +248,8 @@ class NFSSR(FileSR.SharedFileSR):
                                 % inst.code)
         self.detach(sr_uuid)
 
-    def delete(self, sr_uuid):
+    @override
+    def delete(self, sr_uuid) -> None:
         # try to remove/delete non VDI contents first
         super(NFSSR, self).delete(sr_uuid)
         try:
@@ -260,7 +270,8 @@ class NFSSR(FileSR.SharedFileSR):
             if inst.code != errno.ENOENT:
                 raise xs_errors.XenError('NFSDelete')
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return NFSFileVDI(self, uuid)
 
     def scan_exports(self, target):
@@ -287,7 +298,8 @@ class NFSSR(FileSR.SharedFileSR):
 
 
 class NFSFileVDI(FileSR.FileVDI):
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         if not hasattr(self, 'xenstore_data'):
             self.xenstore_data = {}
 
@@ -295,7 +307,8 @@ class NFSFileVDI(FileSR.FileVDI):
 
         return super(NFSFileVDI, self).attach(sr_uuid, vdi_uuid)
 
-    def generate_config(self, sr_uuid, vdi_uuid):
+    @override
+    def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("NFSFileVDI.generate_config")
         if not util.pathexists(self.path):
             raise xs_errors.XenError('VDIUnavailable')
@@ -311,12 +324,13 @@ class NFSFileVDI(FileSR.FileVDI):
         config = xmlrpc.client.dumps(tuple([resp]), "vdi_attach_from_config")
         return xmlrpc.client.dumps((config, ), "", True)
 
-    def attach_from_config(self, sr_uuid, vdi_uuid):
+    @override
+    def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
         """Used for HA State-file only. Will not just attach the VDI but
         also start a tapdisk on the file"""
         util.SMlog("NFSFileVDI.attach_from_config")
         try:
-            self.sr.attach(sr_uuid)
+            return self.sr.attach(sr_uuid)
         except:
             util.logException("NFSFileVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable', \

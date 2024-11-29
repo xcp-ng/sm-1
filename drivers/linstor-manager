@@ -21,7 +21,6 @@ import sys
 sys.path[0] = '/opt/xensource/sm/'
 
 import base64
-import distutils.util
 import os
 import socket
 import XenAPI
@@ -313,7 +312,7 @@ def release_sr(session, args):
 
 def update_drbd_reactor(session, args):
     try:
-        enabled = distutils.util.strtobool(args['enabled'])
+        enabled = util.strtobool(args['enabled'])
         update_drbd_reactor_service(start=enabled)
         return str(True)
     except Exception as e:
@@ -389,10 +388,10 @@ def destroy(session, args):
 def check(session, args):
     try:
         device_path = args['devicePath']
-        ignore_missing_footer = distutils.util.strtobool(
+        ignore_missing_footer = util.strtobool(
             args['ignoreMissingFooter']
         )
-        fast = distutils.util.strtobool(args['fast'])
+        fast = util.strtobool(args['fast'])
         check_ex(device_path, ignore_missing_footer, fast)
         return str(True)
     except Exception as e:
@@ -404,7 +403,7 @@ def get_vhd_info(session, args):
     try:
         device_path = args['devicePath']
         group_name = args['groupName']
-        include_parent = distutils.util.strtobool(args['includeParent'])
+        include_parent = util.strtobool(args['includeParent'])
 
         linstor = LinstorVolumeManager(
             get_controller_uri(),
@@ -560,7 +559,7 @@ def deflate(session, args):
         device_path = args['devicePath']
         new_size = int(args['newSize'])
         old_size = int(args['oldSize'])
-        zeroize = distutils.util.strtobool(args['zeroize'])
+        zeroize = util.strtobool(args['zeroize'])
         group_name = args['groupName']
 
         linstor = LinstorVolumeManager(
@@ -581,7 +580,7 @@ def lock_vdi(session, args):
         sr_uuid = args['srUuid']
         vdi_uuid = args['vdiUuid']
         group_name = args['groupName']
-        locked = distutils.util.strtobool(args['locked'])
+        locked = util.strtobool(args['locked'])
 
         # We must lock to mark the VDI.
         lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
@@ -824,7 +823,7 @@ def create_sr(session, args):
         elif provisioning != 'thin' and provisioning != 'thick':
             raise Exception('unsupported provisioning')
 
-        force = distutils.util.strtobool(args.get('force') or '0')
+        force = util.strtobool(args.get('force'))
 
         return exec_create_sr(
             session, name, description, disks, volume_group, redundancy, provisioning, force

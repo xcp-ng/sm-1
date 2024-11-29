@@ -535,8 +535,8 @@ def _checkAnyTGT():
     except Exception as e:
         util.SMlog("%s failed with %s" % (cmd, e.args))
         stdout = ""
-    for e in filter(match_session, stdout.split('\n')):
-        iqn = e.split()[-1]
+    for session in filter(match_session, stdout.split('\n')):
+        iqn = session.split()[-1]
         if not iqn in rootIQNs:
             return True
     return False

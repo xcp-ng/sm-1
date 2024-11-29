@@ -14,10 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from sm_typing import override
+
 from linstorjournaler import LinstorJournaler
 from linstorvolumemanager import LinstorVolumeManager
 import base64
-import distutils.util
 import errno
 import json
 import socket
@@ -61,7 +62,8 @@ class LinstorCallException(util.SMException):
     def __init__(self, cmd_err):
         self.cmd_err = cmd_err
 
-    def __str__(self):
+    @override
+    def __str__(self) -> str:
         return str(self.cmd_err)
 
 
@@ -205,7 +207,7 @@ class LinstorVhdUtil:
 
     @linstorhostcall(check_ex, 'check')
     def _check(self, vdi_uuid, response):
-        return distutils.util.strtobool(response)
+        return util.strtobool(response)
 
     def get_vhd_info(self, vdi_uuid, include_parent=True):
         kwargs = {
@@ -233,7 +235,7 @@ class LinstorVhdUtil:
 
     @linstorhostcall(vhdutil.hasParent, 'hasParent')
     def has_parent(self, vdi_uuid, response):
-        return distutils.util.strtobool(response)
+        return util.strtobool(response)
 
     def get_parent(self, vdi_uuid):
         return self._get_parent(vdi_uuid, self._extract_uuid)

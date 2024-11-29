@@ -1,3 +1,5 @@
+from sm_typing import override
+
 import errno
 import unittest
 import unittest.mock as mock
@@ -27,7 +29,8 @@ class Test_on_slave_is_open(unittest.TestCase):
         print('Asked to import {}'.format(args[0]))
         return self.mocks.get(args[0], self.real_import(*args, **kwargs))
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
         self.mocks = {x: mock.MagicMock() for x in self.MOCK_IMPORTS}
 
@@ -132,7 +135,8 @@ class Test_on_slave_refresh_lun(unittest.TestCase):
     Tests for refresh_lun_size_by_SCSIid
     """
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.mock_session = mock.MagicMock()
 
     @mock.patch('on_slave.scsiutil')
@@ -164,7 +168,8 @@ class Test_on_slave_multi(unittest.TestCase):
 
     TMP_RENAME_PREFIX = "TEST_OLD_"
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.session = mock.MagicMock()
 
         lvmcache_patcher = mock.patch('on_slave.LVMCache', autospec=True)

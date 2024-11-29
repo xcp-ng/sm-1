@@ -1080,7 +1080,7 @@ def diskFromPartition(partition):
         return m.group(2)
 
     numlen = 0  # number of digit characters
-    m = re.match("\D+(\d+)", partition)
+    m = re.match(r"\D+(\d+)", partition)
     if m is not None:
         numlen = len(m.group(1))
 
@@ -1091,7 +1091,7 @@ def diskFromPartition(partition):
     # is it a mapper path?
     if partition.startswith("mapper"):
         if re.search("p[0-9]*$", partition):
-            numlen = len(re.match("\d+", partition[::-1]).group(0)) + 1
+            numlen = len(re.match(r"\d+", partition[::-1]).group(0)) + 1
             SMlog("Found mapper part, len %d" % numlen)
         else:
             numlen = 0
@@ -2091,3 +2091,32 @@ def make_profile(name, function):
         cProfile.runctx('function()', None, locals(), profile_path)
     finally:
         SMlog('* End profiling of {} ({}) *'.format(name, filename))
+
+
+def strtobool(str):
+    # Note: `distutils` package is deprecated and slated for removal in Python 3.12.
+    # There is not alternative for strtobool.
+    # See: https://peps.python.org/pep-0632/#migration-advice
+    # So this is a custom implementation with differences:
+    # - A boolean is returned instead of integer
+    # - Empty string and None are supported (False is returned in this case)
+    if not str:
+        return False
+    str = str.lower()
+    if str in ('y', 'yes', 't', 'true', 'on', '1'):
+        return True
+    if str in ('n', 'no', 'f', 'false', 'off', '0'):
+        return False
+    raise ValueError("invalid truth value '{}'".format(str))
+
+
+def find_executable(name):
+    return shutil.which(name)
+
+
+def conditional_decorator(decorator, condition):
+    def wrapper(func):
+        if not condition:
+            return func
+        return decorator(func)
+    return wrapper

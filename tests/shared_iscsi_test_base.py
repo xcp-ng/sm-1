@@ -1,3 +1,5 @@
+from sm_typing import Dict, List, Tuple, override
+
 import unittest
 from unittest import mock
 
@@ -6,8 +8,11 @@ from SRCommand import SRCommand
 
 
 class ISCSITestCase(unittest.TestCase):
+    # Declared in subclasses.
+    TEST_CLASS: str
 
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         iscsilib_patcher = mock.patch(f'{self.TEST_CLASS}.iscsilib',
                                       autospec=True)
         self.mock_iscsilib = iscsilib_patcher.start()
@@ -15,8 +20,8 @@ class ISCSITestCase(unittest.TestCase):
         self.mock_iscsilib._checkTGT.side_effect = self._checkTGT
         self.mock_iscsilib.login.side_effect = self.iscsi_login
         self.mock_iscsilib.parse_IP_port = iscsilib.parse_IP_port
-        self.discovery_data = {}
-        self.sessions = []
+        self.discovery_data: Dict[str, Tuple[str, int, str]] = {}
+        self.sessions: List[str] = []
 
         sleep_patcher = mock.patch(f'{self.TEST_CLASS}.time.sleep',
                                    autospec=True)

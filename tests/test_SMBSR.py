@@ -1,3 +1,5 @@
+from sm_typing import Dict, override
+
 import unittest
 import unittest.mock as mock
 import uuid
@@ -12,17 +14,10 @@ import xs_errors
 
 
 class FakeSMBSR(SMBSR.SMBSR):
-    uuid = None
-    sr_ref = None
-    mountpoint = None
-    linkpath = None
-    path = None
-    session = None
-    remoteserver = None
-
     def __init__(self, srcmd, none):
         self.dconf = srcmd.dconf
         self.srcmd = srcmd
+        self.session = None
         self.uuid = 'auuid'
         self.sr_ref = 'asr_ref'
         self.mountpoint = 'aMountpoint'
@@ -32,14 +27,14 @@ class FakeSMBSR(SMBSR.SMBSR):
 
 
 class Test_SMBSR(unittest.TestCase):
-
-    def setUp(self):
+    @override
+    def setUp(self) -> None:
         self.addCleanup(mock.patch.stopall)
 
         pread_patcher = mock.patch('SMBSR.util.pread', autospec=True)
         self.mock_pread = pread_patcher.start()
         self.mock_pread.side_effect = self.pread
-        self.pread_results = {}
+        self.pread_results: Dict[str, str] = {}
 
         listdir_patcher = mock.patch('SMBSR.util.listdir', autospec=True)
         self.mock_list_dir = listdir_patcher.start()
@@ -135,7 +130,7 @@ class Test_SMBSR(unittest.TestCase):
     def test_attach_with_cifs_password_and_domain(
             self, symlink, mock_lock, makeMountPoint,
             mock_checkmount, mock_checklinks, mock_checkwritable):
-        smbsr = self.create_smbsr(username="citrix\jsmith", dconf_update={"password": "winter2019"})
+        smbsr = self.create_smbsr(username="citrix\\jsmith", dconf_update={"password": "winter2019"})
         mock_checkmount.return_value = False
         makeMountPoint.return_value = "/var/mount"
         smbsr.attach('asr_uuid')

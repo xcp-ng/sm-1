@@ -18,6 +18,8 @@
 # LVHDSR: VHD on LVM storage repository
 #
 
+from sm_typing import Dict, List, override
+
 import SR
 from SR import deviceCheck
 import VDI
@@ -54,7 +56,7 @@ from constants import CBTLOG_TAG
 from fairlock import Fairlock
 DEV_MAPPER_ROOT = os.path.join('/dev/mapper', lvhdutil.VG_PREFIX)
 
-geneology = {}
+geneology: Dict[str, List[str]] = {}
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_TRIM",
         "VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETACH", "VDI_MIRROR",
         "VDI_CLONE", "VDI_SNAPSHOT", "VDI_RESIZE", "ATOMIC_PAUSE",
@@ -133,7 +135,9 @@ class LVHDSR(SR.SR):
 
     legacyMode = True
 
-    def handles(type):
+    @override
+    @staticmethod
+    def handles(type) -> bool:
         """Returns True if this SR class understands the given dconf string"""
         # we can pose as LVMSR or EXTSR for compatibility purposes
         if __name__ == '__main__':
@@ -145,9 +149,9 @@ class LVHDSR(SR.SR):
         elif name.endswith("EXTSR"):
             return type == "ext"
         return type == LVHDSR.DRIVER_TYPE
-    handles = staticmethod(handles)
 
-    def load(self, sr_uuid):
+    @override
+    def load(self, sr_uuid) -> None:
         self.ops_exclusive = OPS_EXCLUSIVE
 
         self.isMaster = False
@@ -163,8 +167,7 @@ class LVHDSR(SR.SR):
         self.provision = self.PROVISIONING_DEFAULT
 
         self.other_conf = None
-        has_sr_ref = self.srcmd.params.get("sr_ref")
-        if has_sr_ref:
+        if self.srcmd.params.get("sr_ref"):
             self.other_conf = self.session.xenapi.SR.get_other_config(self.sr_ref)
 
         self.lvm_conf = None
@@ -178,7 +181,7 @@ class LVHDSR(SR.SR):
                         opterr='Failed to initialise the LVMCache')
         self.lvActivator = LVActivator(self.uuid, self.lvmCache)
         self.journaler = Journaler(self.lvmCache)
-        if not has_sr_ref:
+        if not self.other_conf:
             return  # must be a probe call
         # Test for thick vs thin provisioning conf parameter
         if 'allocation' in self.dconf:
@@ -236,7 +239,8 @@ class LVHDSR(SR.SR):
         except:
             pass
 
-    def cleanup(self):
+    @override
+    def cleanup(self) -> None:
         # we don't need to hold the lock to dec refcounts of activated LVs
         if not self.lvActivator.deactivateAll():
             raise util.SMException("failed to deactivate LVs")
@@ -479,8 +483,9 @@ class LVHDSR(SR.SR):
                 util.logException("LVHDSR._expand_size for %s failed to resize"
                                   " the PV" % self.uuid)
 
+    @override
     @deviceCheck
-    def create(self, uuid, size):
+    def create(self, uuid, size) -> None:
         util.SMlog("LVHDSR.create for %s" % self.uuid)
         if not self.isMaster:
             util.SMlog('sr_create blocked for non-master')
@@ -508,7 +513,8 @@ class LVHDSR(SR.SR):
         self.session.xenapi.SR.add_to_sm_config(self.sr_ref, \
                                                 self.FLAG_USE_VHD, 'true')
 
-    def delete(self, uuid):
+    @override
+    def delete(self, uuid) -> None:
         util.SMlog("LVHDSR.delete for %s" % self.uuid)
         if not self.isMaster:
             raise xs_errors.XenError('LVMMaster')
@@ -562,7 +568,8 @@ class LVHDSR(SR.SR):
         lvutil.removeVG(self.dconf['device'], self.vgname)
         self._cleanup()
 
-    def attach(self, uuid):
+    @override
+    def attach(self, uuid) -> None:
         util.SMlog("LVHDSR.attach for %s" % self.uuid)
 
         self._cleanup(True)  # in case of host crashes, if detach wasn't called
@@ -600,7 +607,8 @@ class LVHDSR(SR.SR):
         for dev in self.dconf['device'].split(','):
             self.block_setscheduler(dev)
 
-    def detach(self, uuid):
+    @override
+    def detach(self, uuid) -> None:
         util.SMlog("LVHDSR.detach for %s" % self.uuid)
         cleanup.abort(self.uuid)
 
@@ -658,12 +666,14 @@ class LVHDSR(SR.SR):
         # only place to do so.
         self._cleanup(self.isMaster)
 
-    def forget_vdi(self, uuid):
+    @override
+    def forget_vdi(self, uuid) -> None:
         if not self.legacyMode:
             LVMMetadataHandler(self.mdpath).deleteVdiFromMetadata(uuid)
         super(LVHDSR, self).forget_vdi(uuid)
 
-    def scan(self, uuid):
+    @override
+    def scan(self, uuid) -> None:
         activated = True
         try:
             lvname = ''
@@ -684,35 +694,35 @@ class LVHDSR(SR.SR):
             # Now check if there are any VDIs in the metadata, which are not in
             # XAPI
             if self.mdexists:
-                vdiToSnaps = {}
+                vdiToSnaps: Dict[str, List[str]] = {}
                 # get VDIs from XAPI
                 vdis = self.session.xenapi.SR.get_VDIs(self.sr_ref)
                 vdi_uuids = set([])
                 for vdi in vdis:
                     vdi_uuids.add(self.session.xenapi.VDI.get_uuid(vdi))
 
-                Dict = LVMMetadataHandler(self.mdpath, False).getMetadata()[1]
+                info = LVMMetadataHandler(self.mdpath, False).getMetadata()[1]
 
-                for vdi in list(Dict.keys()):
-                    vdi_uuid = Dict[vdi][UUID_TAG]
-                    if bool(int(Dict[vdi][IS_A_SNAPSHOT_TAG])):
-                        if Dict[vdi][SNAPSHOT_OF_TAG] in vdiToSnaps:
-                            vdiToSnaps[Dict[vdi][SNAPSHOT_OF_TAG]].append(vdi_uuid)
+                for vdi in list(info.keys()):
+                    vdi_uuid = info[vdi][UUID_TAG]
+                    if bool(int(info[vdi][IS_A_SNAPSHOT_TAG])):
+                        if info[vdi][SNAPSHOT_OF_TAG] in vdiToSnaps:
+                            vdiToSnaps[info[vdi][SNAPSHOT_OF_TAG]].append(vdi_uuid)
                         else:
-                            vdiToSnaps[Dict[vdi][SNAPSHOT_OF_TAG]] = [vdi_uuid]
+                            vdiToSnaps[info[vdi][SNAPSHOT_OF_TAG]] = [vdi_uuid]
 
                     if vdi_uuid not in vdi_uuids:
                         util.SMlog("Introduce VDI %s as it is present in " \
                                    "metadata and not in XAPI." % vdi_uuid)
                         sm_config = {}
-                        sm_config['vdi_type'] = Dict[vdi][VDI_TYPE_TAG]
+                        sm_config['vdi_type'] = info[vdi][VDI_TYPE_TAG]
                         lvname = "%s%s" % \
                             (lvhdutil.LV_PREFIX[sm_config['vdi_type']], vdi_uuid)
                         self.lvmCache.activateNoRefcount(lvname)
                         activated = True
                         lvPath = os.path.join(self.path, lvname)
 
-                        if Dict[vdi][VDI_TYPE_TAG] == vhdutil.VDI_TYPE_RAW:
+                        if info[vdi][VDI_TYPE_TAG] == vhdutil.VDI_TYPE_RAW:
                             size = self.lvmCache.getSize( \
                                 lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_RAW] + \
                                     vdi_uuid)
@@ -736,31 +746,31 @@ class LVHDSR(SR.SR):
 
                         vdi_ref = self.session.xenapi.VDI.db_introduce(
                                         vdi_uuid,
-                                        Dict[vdi][NAME_LABEL_TAG],
-                                        Dict[vdi][NAME_DESCRIPTION_TAG],
+                                        info[vdi][NAME_LABEL_TAG],
+                                        info[vdi][NAME_DESCRIPTION_TAG],
                                         self.sr_ref,
-                                        Dict[vdi][TYPE_TAG],
+                                        info[vdi][TYPE_TAG],
                                         False,
-                                        bool(int(Dict[vdi][READ_ONLY_TAG])),
+                                        bool(int(info[vdi][READ_ONLY_TAG])),
                                         {},
                                         vdi_uuid,
                                         {},
                                         sm_config)
 
                         self.session.xenapi.VDI.set_managed(vdi_ref,
-                                                    bool(int(Dict[vdi][MANAGED_TAG])))
+                                                    bool(int(info[vdi][MANAGED_TAG])))
                         self.session.xenapi.VDI.set_virtual_size(vdi_ref,
                                                                  str(size))
                         self.session.xenapi.VDI.set_physical_utilisation( \
                             vdi_ref, str(utilisation))
                         self.session.xenapi.VDI.set_is_a_snapshot( \
-                            vdi_ref, bool(int(Dict[vdi][IS_A_SNAPSHOT_TAG])))
-                        if bool(int(Dict[vdi][IS_A_SNAPSHOT_TAG])):
+                            vdi_ref, bool(int(info[vdi][IS_A_SNAPSHOT_TAG])))
+                        if bool(int(info[vdi][IS_A_SNAPSHOT_TAG])):
                             self.session.xenapi.VDI.set_snapshot_time( \
-                                vdi_ref, DateTime(Dict[vdi][SNAPSHOT_TIME_TAG]))
-                        if Dict[vdi][TYPE_TAG] == 'metadata':
+                                vdi_ref, DateTime(info[vdi][SNAPSHOT_TIME_TAG]))
+                        if info[vdi][TYPE_TAG] == 'metadata':
                             self.session.xenapi.VDI.set_metadata_of_pool( \
-                                vdi_ref, Dict[vdi][METADATA_OF_POOL_TAG])
+                                vdi_ref, info[vdi][METADATA_OF_POOL_TAG])
 
                     # Update CBT status of disks either just added
                     # or already in XAPI
@@ -811,7 +821,8 @@ class LVHDSR(SR.SR):
             if lvname != '' and activated:
                 self.lvmCache.deactivateNoRefcount(lvname)
 
-    def update(self, uuid):
+    @override
+    def update(self, uuid) -> None:
         if not lvutil._checkVG(self.vgname):
             return
         self._updateStats(uuid, 0)
@@ -840,15 +851,17 @@ class LVHDSR(SR.SR):
         self.physical_utilisation = stats['physical_utilisation']
         self._db_update()
 
+    @override
     @deviceCheck
-    def probe(self):
+    def probe(self) -> str:
         return lvutil.srlist_toxml(
                 lvutil.scan_srlist(lvhdutil.VG_PREFIX, self.dconf['device']),
                 lvhdutil.VG_PREFIX,
                 ('metadata' in self.srcmd.params['sr_sm_config'] and \
                  self.srcmd.params['sr_sm_config']['metadata'] == 'true'))
 
-    def vdi(self, uuid):
+    @override
+    def vdi(self, uuid) -> VDI.VDI:
         return LVHDVDI(self, uuid)
 
     def _loadvdis(self):
@@ -1305,12 +1318,13 @@ class LVHDSR(SR.SR):
         # Ensure we have space for at least one LV
         self._ensureSpaceAvailable(self.journaler.LV_SIZE)
 
-        
+
 class LVHDVDI(VDI.VDI):
 
     JRN_CLONE = "clone"  # journal entry type for the clone operation
 
-    def load(self, vdi_uuid):
+    @override
+    def load(self, vdi_uuid) -> None:
         self.lock = self.sr.lock
         self.lvActivator = self.sr.lvActivator
         self.loaded = False
@@ -1350,7 +1364,8 @@ class LVHDVDI(VDI.VDI):
         self.lvname = "%s%s" % (lvhdutil.LV_PREFIX[self.vdi_type], vdi_uuid)
         self.path = os.path.join(self.sr.path, self.lvname)
 
-    def create(self, sr_uuid, vdi_uuid, size):
+    @override
+    def create(self, sr_uuid, vdi_uuid, size) -> str:
         util.SMlog("LVHDVDI.create for %s" % self.uuid)
         if not self.sr.isMaster:
             raise xs_errors.XenError('LVMMaster')
@@ -1414,7 +1429,8 @@ class LVHDVDI(VDI.VDI):
 
         return VDI.VDI.get_params(self)
 
-    def delete(self, sr_uuid, vdi_uuid, data_only=False):
+    @override
+    def delete(self, sr_uuid, vdi_uuid, data_only=False) -> None:
         util.SMlog("LVHDVDI.delete for %s" % self.uuid)
         try:
             self._loadThis()
@@ -1459,7 +1475,8 @@ class LVHDVDI(VDI.VDI):
         self.sr._kickGC()
         return super(LVHDVDI, self).delete(sr_uuid, vdi_uuid, data_only)
 
-    def attach(self, sr_uuid, vdi_uuid):
+    @override
+    def attach(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("LVHDVDI.attach for %s" % self.uuid)
         if self.sr.journaler.hasJournals(self.uuid):
             raise xs_errors.XenError('VDIUnavailable',
@@ -1489,7 +1506,8 @@ class LVHDVDI(VDI.VDI):
             if not self.sr.lvActivator.deactivateAll():
                 util.SMlog("Failed to deactivate LVs back (%s)" % self.uuid)
 
-    def detach(self, sr_uuid, vdi_uuid):
+    @override
+    def detach(self, sr_uuid, vdi_uuid) -> None:
         util.SMlog("LVHDVDI.detach for %s" % self.uuid)
         self._loadThis()
         already_deflated = (self.utilisation < \
@@ -1520,7 +1538,8 @@ class LVHDVDI(VDI.VDI):
                 raise xs_errors.XenError("SMGeneral", opterr="deactivation")
 
     # We only support offline resize
-    def resize(self, sr_uuid, vdi_uuid, size):
+    @override
+    def resize(self, sr_uuid, vdi_uuid, size) -> str:
         util.SMlog("LVHDVDI.resize for %s" % self.uuid)
         if not self.sr.isMaster:
             raise xs_errors.XenError('LVMMaster')
@@ -1573,11 +1592,13 @@ class LVHDVDI(VDI.VDI):
         super(LVHDVDI, self).resize_cbt(self.sr.uuid, self.uuid, self.size)
         return VDI.VDI.get_params(self)
 
-    def clone(self, sr_uuid, vdi_uuid):
+    @override
+    def clone(self, sr_uuid, vdi_uuid) -> str:
         return self._do_snapshot(
                      sr_uuid, vdi_uuid, VDI.SNAPSHOT_DOUBLE, cloneOp=True)
 
-    def compose(self, sr_uuid, vdi1, vdi2):
+    @override
+    def compose(self, sr_uuid, vdi1, vdi2) -> None:
         util.SMlog("LVHDSR.compose for %s -> %s" % (vdi2, vdi1))
         if self.vdi_type != vhdutil.VDI_TYPE_VHD:
             raise xs_errors.XenError('Unimplemented')
@@ -1637,8 +1658,9 @@ class LVHDVDI(VDI.VDI):
         self._chainSetActive(False, True)
         self.attached = False
 
+    @override
     def _do_snapshot(self, sr_uuid, vdi_uuid, snapType,
-                     cloneOp=False, secondary=None, cbtlog=None):
+                     cloneOp=False, secondary=None, cbtlog=None) -> str:
         # If cbt enabled, save file consistency state
         if cbtlog is not None:
             if blktap2.VDI.tap_status(self.session, vdi_uuid):
@@ -2167,7 +2189,8 @@ class LVHDVDI(VDI.VDI):
             self.session.xenapi.SR.set_physical_utilisation(self.sr.sr_ref,
                     str(sr_utilisation))
 
-    def update(self, sr_uuid, vdi_uuid):
+    @override
+    def update(self, sr_uuid, vdi_uuid) -> None:
         if self.sr.legacyMode:
             return
 
@@ -2187,28 +2210,33 @@ class LVHDVDI(VDI.VDI):
             self.session.xenapi.VDI.get_metadata_of_pool(vdi_ref)
         LVMMetadataHandler(self.sr.mdpath).updateMetadata(update_map)
 
-    def _ensure_cbt_space(self):
+    @override
+    def _ensure_cbt_space(self) -> None:
         self.sr.ensureCBTSpace()
 
-    def _create_cbt_log(self):
+    @override
+    def _create_cbt_log(self) -> str:
         logname = self._get_cbt_logname(self.uuid)
         self.sr.lvmCache.create(logname, self.sr.journaler.LV_SIZE, CBTLOG_TAG)
         logpath = super(LVHDVDI, self)._create_cbt_log()
         self.sr.lvmCache.deactivateNoRefcount(logname)
         return logpath
 
-    def _delete_cbt_log(self):
+    @override
+    def _delete_cbt_log(self) -> None:
         logpath = self._get_cbt_logpath(self.uuid)
         if self._cbt_log_exists(logpath):
             logname = self._get_cbt_logname(self.uuid)
             self.sr.lvmCache.remove(logname)
 
-    def _rename(self, oldpath, newpath):
+    @override
+    def _rename(self, oldpath, newpath) -> None:
         oldname = os.path.basename(oldpath)
         newname = os.path.basename(newpath)
         self.sr.lvmCache.rename(oldname, newname)
 
-    def _activate_cbt_log(self, lv_name):
+    @override
+    def _activate_cbt_log(self, lv_name) -> bool:
         self.sr.lvmCache.refresh()
         if not self.sr.lvmCache.is_active(lv_name):
             try:
@@ -2221,14 +2249,16 @@ class LVHDVDI(VDI.VDI):
         else:
             return False
 
-    def _deactivate_cbt_log(self, lv_name):
+    @override
+    def _deactivate_cbt_log(self, lv_name) -> None:
         try:
             self.sr.lvmCache.deactivateNoRefcount(lv_name)
         except Exception as e:
             util.SMlog("Exception in _deactivate_cbt_log, Error: %s." % str(e))
             raise
 
-    def _cbt_log_exists(self, logpath):
+    @override
+    def _cbt_log_exists(self, logpath) -> bool:
         return lvutil.exists(logpath)
 
 if __name__ == '__main__':
