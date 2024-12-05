@@ -82,7 +82,7 @@ class TestLVHDoHBASR(unittest.TestCase):
         self.sr_uuid = str(uuid4())
         self.scsi_id = '360a98000534b4f4e46704c76692d6d33'
 
-        lock_patcher = mock.patch('LVHDSR.Lock', autospec=True)
+        lock_patcher = mock.patch('LVHDSR.lock.Lock', autospec=True)
         self.mock_lock = lock_patcher.start()
         lvhdsr_patcher = mock.patch('LVHDoHBASR.LVHDSR')
         self.mock_lvhdsr = lvhdsr_patcher.start()

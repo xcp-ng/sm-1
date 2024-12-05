@@ -68,7 +68,7 @@ class Test_SMBSR(unittest.TestCase):
     #Attach
     @mock.patch('SMBSR.SMBSR.checkmount', autospec=True)
     @mock.patch('SMBSR.SMBSR.mount', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     def test_attach_smbexception_raises_xenerror(
             self, mock_lock, mock_mount, mock_checkmount):
         smbsr = self.create_smbsr()
@@ -80,7 +80,7 @@ class Test_SMBSR(unittest.TestCase):
         self.assertEqual(cm.exception.errno, 111)
 
     @mock.patch('SMBSR.SMBSR.checkmount', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     def test_attach_if_mounted_then_attached(self, mock_lock, mock_checkmount):
         smbsr = self.create_smbsr()
         mock_checkmount.return_value = True
@@ -91,7 +91,7 @@ class Test_SMBSR(unittest.TestCase):
     @mock.patch('FileSR.SharedFileSR._check_hardlinks', autospec=True)
     @mock.patch('SMBSR.SMBSR.checkmount', autospec=True)
     @mock.patch('SMBSR.SMBSR.makeMountPoint', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('os.symlink', autospec=True)
     def test_attach_vanilla(self, symlink, mock_lock,
                             makeMountPoint, mock_checkmount, mock_checklinks,
@@ -109,7 +109,7 @@ class Test_SMBSR(unittest.TestCase):
     @mock.patch('FileSR.SharedFileSR._check_hardlinks', autospec=True)
     @mock.patch('SMBSR.SMBSR.checkmount', autospec=True)
     @mock.patch('SMBSR.SMBSR.makeMountPoint', autospec=True)
-    @mock.patch('SMBSR.Lock', autospecd=True)
+    @mock.patch('SMBSR.lock.Lock', autospecd=True)
     @mock.patch('os.symlink', autospec=True)
     def test_attach_with_cifs_password(
             self, symlink, mock_lock, makeMountPoint,
@@ -125,7 +125,7 @@ class Test_SMBSR(unittest.TestCase):
     @mock.patch('FileSR.SharedFileSR._check_hardlinks', autospec=True)
     @mock.patch('SMBSR.SMBSR.checkmount', autospec=True)
     @mock.patch('SMBSR.SMBSR.makeMountPoint', autospec=True)
-    @mock.patch('SMBSR.Lock', autospecd=True)
+    @mock.patch('SMBSR.lock.Lock', autospecd=True)
     @mock.patch('os.symlink', autospec=True)
     def test_attach_with_cifs_password_and_domain(
             self, symlink, mock_lock, makeMountPoint,
@@ -143,7 +143,7 @@ class Test_SMBSR(unittest.TestCase):
     @mock.patch('SMBSR.SMBSR.checkmount', autospec=True)
     @mock.patch('SMBSR.SMBSR.mount', autospec=True)
     @mock.patch('SMBSR.SMBSR.unmount', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('os.symlink', autospec=True)
     @mock.patch('os.unlink', autospec=True)
     @mock.patch('util.pathexists', autospec=True)
@@ -193,7 +193,7 @@ class Test_SMBSR(unittest.TestCase):
     @mock.patch('SMBSR.SMBSR.checkmount', autospec=True)
     @mock.patch('SMBSR.SMBSR.mount', autospec=True)
     @mock.patch('SMBSR.SMBSR.unmount', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('os.unlink', autospec=True)
     @mock.patch('util.pathexists', autospec=True)
     def test_attach_misc_mount_failure(self, mock_pathexists, mock_unlink,
@@ -213,7 +213,7 @@ class Test_SMBSR(unittest.TestCase):
     #Detach
     @mock.patch('SMBSR.SMBSR.checkmount', return_value=True, autospec=True)
     @mock.patch('SMBSR.SMBSR.unmount', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('SMBSR.os.chdir', autospec=True)
     @mock.patch('SMBSR.cleanup', autospec=True)
     def test_detach_smbexception_raises_xenerror(
@@ -227,7 +227,7 @@ class Test_SMBSR(unittest.TestCase):
         self.assertEqual(cm.exception.errno, 112)
 
     @mock.patch('SMBSR.SMBSR.checkmount', return_value=False, autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     def test_detach_not_detached_if_not_mounted(self, mock_lock, mock_checkmount):
         smbsr = self.create_smbsr()
         smbsr.attached = True
@@ -237,7 +237,7 @@ class Test_SMBSR(unittest.TestCase):
 
     #Mount
     @mock.patch('SMBSR.util.isdir', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('util.time', autospec=True)
     def test_mount_mountpoint_isdir(self, mock_time, mock_lock, mock_isdir):
         # Not sure that the code rerying in an ioretry loop in the case of a
@@ -248,14 +248,14 @@ class Test_SMBSR(unittest.TestCase):
         with self.assertRaises(SMBSR.SMBException) as cm:
             smbsr.mount()
 
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     def test_mount_mountpoint_empty_string(self, mock_lock):
         smbsr = self.create_smbsr()
         self.assertRaises(SMBSR.SMBException, smbsr.mount, "")
 
     @mock.patch('util.makedirs', autospec=True)
     @mock.patch('util.get_pool_restrictions', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('SMBSR.os.symlink', autospec=True)
     def test_create_success(self, symlink, lock, restrict, makedirs):
         # Arrange
@@ -276,7 +276,7 @@ class Test_SMBSR(unittest.TestCase):
 
     @mock.patch('util.makedirs', autospec=True)
     @mock.patch('util.get_pool_restrictions', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('SMBSR.os.symlink', autospec=True)
     def test_create_read_only(self, symlink, lock, restrict, makedirs):
         # Arrange
@@ -305,7 +305,7 @@ class Test_SMBSR(unittest.TestCase):
 
     @mock.patch('util.makedirs', autospec=True)
     @mock.patch('util.get_pool_restrictions', autospec=True)
-    @mock.patch('SMBSR.Lock', autospec=True)
+    @mock.patch('SMBSR.lock.Lock', autospec=True)
     @mock.patch('SMBSR.os.symlink', autospec=True)
     def test_create_nospace(self, symlink, lock, restrict, makedirs):
         # Arrange

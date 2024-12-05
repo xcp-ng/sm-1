@@ -31,9 +31,9 @@ import os
 import sys
 import xmlrpc.client
 import xs_errors
+import lock
 import nfs
 import vhdutil
-from lock import Lock
 import cleanup
 
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_CACHING",
@@ -79,7 +79,7 @@ class NFSSR(FileSR.SharedFileSR):
     @override
     def load(self, sr_uuid) -> None:
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
-        self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
+        self.lock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
         self.driver_config = DRIVER_CONFIG
         if 'server' not in self.dconf:

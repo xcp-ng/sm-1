@@ -456,7 +456,7 @@ class TestShareFileSR(unittest.TestCase):
         unlink_patcher = mock.patch('FileSR.util.force_unlink')
         self.mock_unlink = unlink_patcher.start()
 
-        lock_patcher = mock.patch('FileSR.Lock')
+        lock_patcher = mock.patch('FileSR.lock.Lock')
         self.mock_lock = lock_patcher.start()
 
         lock_patcher_cleanup = mock.patch('cleanup.lock.Lock')

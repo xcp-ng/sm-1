@@ -30,6 +30,7 @@ import lvmcache
 import vhdutil
 import lvhdutil
 import scsiutil
+import lock
 import os
 import sys
 import time
@@ -38,7 +39,6 @@ import xs_errors
 import cleanup
 import blktap2
 from journaler import Journaler
-from lock import Lock
 from refcounter import RefCounter
 from ipc import IPCFlag
 from lvmanager import LVActivator
@@ -158,7 +158,7 @@ class LVHDSR(SR.SR):
         if 'SRmaster' in self.dconf and self.dconf['SRmaster'] == 'true':
             self.isMaster = True
 
-        self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
+        self.lock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
         self.uuid = sr_uuid
         self.vgname = lvhdutil.VG_PREFIX + self.uuid
@@ -1301,8 +1301,8 @@ class LVHDSR(SR.SR):
         RefCounter.resetAll(lvhdutil.NS_PREFIX_LVM + self.uuid)
         IPCFlag(self.uuid).clearAll()
         if not skipLockCleanup:
-            Lock.cleanupAll(self.uuid)
-            Lock.cleanupAll(lvhdutil.NS_PREFIX_LVM + self.uuid)
+            lock.Lock.cleanupAll(self.uuid)
+            lock.Lock.cleanupAll(lvhdutil.NS_PREFIX_LVM + self.uuid)
 
     def _prepareTestMode(self):
         util.SMlog("Test mode: %s" % self.testMode)

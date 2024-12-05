@@ -28,6 +28,7 @@ VERBOSE = True
 # Still just called "running" for backwards compatibility
 LOCK_TYPE_GC_RUNNING = "running"
 LOCK_TYPE_ISCSIADM_RUNNING = "isciadm_running"
+LOCK_TYPE_SR = "sr"
 
 class LockException(util.SMException):
     pass

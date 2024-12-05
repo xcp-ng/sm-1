@@ -43,7 +43,7 @@ class TestZFSSR(unittest.TestCase):
         return sr
 
     @mock.patch('ZFSSR.is_zfs_available', autospec=True)
-    @mock.patch('FileSR.Lock', autospec=True)
+    @mock.patch('FileSR.lock.Lock', autospec=True)
     def test_load(self, lock, is_zfs_available):
         self.create_zfs_sr()
 
@@ -59,14 +59,14 @@ class TestZFSSR(unittest.TestCase):
 
     @mock.patch('ZFSSR.is_zfs_available', autospec=True)
     @mock.patch('ZFSSR.is_zfs_path', autospec=True)
-    @mock.patch('FileSR.Lock', autospec=True)
+    @mock.patch('FileSR.lock.Lock', autospec=True)
     def test_create(self, lock, is_zfs_path, is_zfs_available):
         sr = self.create_zfs_sr()
         sr.create(sr.uuid, 42)
 
     @mock.patch('ZFSSR.is_zfs_available', autospec=True)
     @mock.patch('ZFSSR.is_zfs_path', autospec=True)
-    @mock.patch('FileSR.Lock', autospec=True)
+    @mock.patch('FileSR.lock.Lock', autospec=True)
     @mock.patch('xs_errors.XML_DEFS', new=XML_DEFS)
     def test_create_with_invalid_zfs_path(
         self, lock, is_zfs_path, is_zfs_available
@@ -84,7 +84,7 @@ class TestZFSSR(unittest.TestCase):
 
     @mock.patch('ZFSSR.is_zfs_available', autospec=True)
     @mock.patch('ZFSSR.is_zfs_path', autospec=True)
-    @mock.patch('FileSR.Lock', autospec=True)
+    @mock.patch('FileSR.lock.Lock', autospec=True)
     @mock.patch('FileSR.FileSR._checkmount', autospec=True)
     @mock.patch('FileSR.FileSR._loadvdis', autospec=True)
     @mock.patch('SR.SR.scan', autospec=True)
@@ -98,7 +98,7 @@ class TestZFSSR(unittest.TestCase):
 
     @mock.patch('ZFSSR.is_zfs_available', autospec=True)
     @mock.patch('ZFSSR.is_zfs_path', autospec=True)
-    @mock.patch('FileSR.Lock', autospec=True)
+    @mock.patch('FileSR.lock.Lock', autospec=True)
     @mock.patch('FileSR.FileSR._checkmount', autospec=True)
     @mock.patch('xs_errors.XML_DEFS', new=XML_DEFS)
     def test_scan_with_invalid_zfs_path(

@@ -30,9 +30,9 @@ from json import JSONEncoder
 from linstorjournaler import LinstorJournaler
 from linstorvhdutil import LinstorVhdUtil, check_ex
 from linstorvolumemanager import get_controller_uri, get_local_volume_openers, LinstorVolumeManager
-from lock import Lock
 import json
 import LinstorSR
+import lock
 import re
 import util
 import vhdutil
@@ -583,7 +583,7 @@ def lock_vdi(session, args):
         locked = util.strtobool(args['locked'])
 
         # We must lock to mark the VDI.
-        lock = Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
+        lock = lock.Lock(lock.LOCK_TYPE_SR, sr_uuid)
         if locked:
             lock.acquire()
 

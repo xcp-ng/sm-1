@@ -34,13 +34,13 @@ class TestMooseFSSR(unittest.TestCase):
         return moosefssr
 
     @mock.patch('MooseFSSR.MooseFSSR._is_moosefs_available', mock.MagicMock(return_value="mfsmount"))
-    @mock.patch('MooseFSSR.Lock', autospec=True)
+    @mock.patch('MooseFSSR.lock.Lock', autospec=True)
     def test_load(self, Lock):
         self.create_moosefssr()
 
     @mock.patch('MooseFSSR.MooseFSSR._is_moosefs_available', mock.MagicMock(return_value="mfsmount"))
     @mock.patch('MooseFSSR.MooseFSSR.checkmount', autospec=True)
-    @mock.patch('MooseFSSR.Lock', autospec=True)
+    @mock.patch('MooseFSSR.lock.Lock', autospec=True)
     def test_attach_if_mounted_then_attached(self, mock_lock, mock_checkmount):
         mfssr = self.create_moosefssr()
         mock_checkmount.return_value=True
@@ -48,14 +48,14 @@ class TestMooseFSSR(unittest.TestCase):
         self.assertTrue(mfssr.attached)
 
     @mock.patch('MooseFSSR.MooseFSSR._is_moosefs_available', mock.MagicMock(return_value="mfsmount"))
-    @mock.patch('MooseFSSR.Lock', autospec=True)
+    @mock.patch('MooseFSSR.lock.Lock', autospec=True)
     def test_mount_mountpoint_empty_string(self, mock_lock):
         mfssr = self.create_moosefssr()
         self.assertRaises(MooseFSSR.MooseFSException, mfssr.mount)
 
     @mock.patch('MooseFSSR.MooseFSSR._is_moosefs_available', mock.MagicMock(return_value="mfsmount"))
     @mock.patch('MooseFSSR.MooseFSSR.checkmount',return_value=False, autospec=True)
-    @mock.patch('MooseFSSR.Lock', autospec=True)
+    @mock.patch('MooseFSSR.lock.Lock', autospec=True)
     def test_detach_not_detached_if_not_mounted(self, mock_lock, mock_checkmount):
         mfssr = self.create_moosefssr()
         mfssr.attached = True

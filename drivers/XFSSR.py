@@ -29,10 +29,10 @@ import util
 import lvutil
 import scsiutil
 
+import lock
 import os
 import xs_errors
 import vhdutil
-from lock import Lock
 from constants import EXT_PREFIX
 
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING", \
@@ -77,7 +77,7 @@ class XFSSR(FileSR.FileSR):
             )
 
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
-        self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
+        self.lock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
 
         self.path = os.path.join(SR.MOUNT_BASE, sr_uuid)

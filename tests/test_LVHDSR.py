@@ -59,7 +59,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
 
     @mock.patch('lvutil.Fairlock', autospec=True)
     @mock.patch('lvhdutil.getVDIInfo', autospec=True)
-    @mock.patch('LVHDSR.Lock', autospec=True)
+    @mock.patch('LVHDSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_loadvids(self, mock_xenapi, mock_lock, mock_getVDIInfo, mock_lvlock):
         """sr.allVDIs populated by _loadvdis"""
@@ -75,7 +75,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
     @mock.patch('lvhdutil.lvRefreshOnAllSlaves', autospec=True)
     @mock.patch('lvhdutil.getVDIInfo', autospec=True)
     @mock.patch('journaler.Journaler.getAll', autospec=True)
-    @mock.patch('LVHDSR.Lock', autospec=True)
+    @mock.patch('LVHDSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_undoAllInflateJournals(
             self,
@@ -104,7 +104,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
 
     @mock.patch('LVHDSR.cleanup', autospec=True)
     @mock.patch('LVHDSR.IPCFlag', autospec=True)
-    @mock.patch('LVHDSR.Lock', autospec=True)
+    @mock.patch('LVHDSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     @testlib.with_context
     def test_srlifecycle_success(self,
@@ -320,7 +320,7 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         test_vhdInfo.hidden = hidden
         self.mock_vhdutil.getVHDInfo.return_value = test_vhdInfo
 
-    @mock.patch('LVHDSR.Lock', autospec=True)
+    @mock.patch('LVHDSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_clone_success(self, mock_xenapi, mock_lock):
         """
@@ -350,7 +350,7 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         # Assert
         self.assertIsNotNone(clone)
 
-    @mock.patch('LVHDSR.Lock', autospec=True)
+    @mock.patch('LVHDSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_snapshot_attached_success(self, mock_xenapi, mock_lock):
         """
@@ -387,7 +387,7 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         # Assert
         self.assertIsNotNone(snap)
 
-    @mock.patch('LVHDSR.Lock', autospec=True)
+    @mock.patch('LVHDSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_snapshot_attached_cbt_success(self, mock_xenapi, mock_lock):
         """

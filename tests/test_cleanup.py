@@ -1848,7 +1848,7 @@ class TestLockGCActive(unittest.TestCase):
 
     def test_can_acquire_when_already_holding_sr_lock(self):
         # Given
-        srLock = lock.Lock(vhdutil.LOCK_TYPE_SR, self.sr_uuid)
+        srLock = lock.Lock(lock.LOCK_TYPE_SR, self.sr_uuid)
         srLock.held = True
         gcLock = cleanup.LockActive(self.sr_uuid)
 

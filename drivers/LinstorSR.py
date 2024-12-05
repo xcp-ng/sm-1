@@ -33,11 +33,11 @@ except ImportError:
 
     LINSTOR_AVAILABLE = False
 
-from lock import Lock, LOCK_TYPE_GC_RUNNING
 import blktap2
 import cleanup
 import errno
 import functools
+import lock
 import lvutil
 import os
 import re
@@ -358,7 +358,7 @@ class LinstorSR(SR.SR):
         # Define properties for SR parent class.
         self.ops_exclusive = OPS_EXCLUSIVE
         self.path = LinstorVolumeManager.DEV_ROOT_PATH
-        self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
+        self.lock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
 
         if self.cmd == 'sr_create':
@@ -703,7 +703,7 @@ class LinstorSR(SR.SR):
                 opterr=str(e)
             )
 
-        Lock.cleanupAll(self.uuid)
+        lock.Lock.cleanupAll(self.uuid)
 
     @override
     @_locked_load
@@ -1539,8 +1539,8 @@ class LinstorSR(SR.SR):
         # Don't bother if an instance already running. This is just an
         # optimization to reduce the overhead of forking a new process if we
         # don't have to, but the process will check the lock anyways.
-        lock = Lock(LOCK_TYPE_GC_RUNNING, self.uuid)
-        if not lock.acquireNoblock():
+        sr_lock = lock.Lock(lock.LOCK_TYPE_GC_RUNNING, self.uuid)
+        if not sr_lock.acquireNoblock():
             if not cleanup.should_preempt(self.session, self.uuid):
                 util.SMlog('A GC instance already running, not kicking')
                 return
@@ -1554,7 +1554,7 @@ class LinstorSR(SR.SR):
                     raise
                 util.SMlog('Failed to abort the GC')
         else:
-            lock.release()
+            sr_lock.release()
 
         util.SMlog('Kicking GC')
         cleanup.gc(self.session, self.uuid, True)

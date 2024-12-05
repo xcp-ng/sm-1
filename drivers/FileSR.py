@@ -25,6 +25,7 @@ import SRCommand
 import util
 import scsiutil
 import vhdutil
+import lock
 import os
 import errno
 import xs_errors
@@ -33,7 +34,6 @@ import blktap2
 import time
 import glob
 from uuid import uuid4
-from lock import Lock
 import xmlrpc.client
 import XenAPI # pylint: disable=import-error
 from constants import CBTLOG_TAG
@@ -95,7 +95,7 @@ class FileSR(SR.SR):
     @override
     def load(self, sr_uuid) -> None:
         self.ops_exclusive = OPS_EXCLUSIVE
-        self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
+        self.lock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = vhdutil.VDI_TYPE_VHD
         if 'location' not in self.dconf or  not self.dconf['location']:
             raise xs_errors.XenError('ConfigLocationMissing')

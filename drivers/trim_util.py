@@ -105,7 +105,7 @@ def do_trim(session, args):
         return to_xml(err_msg)
 
     # Lock SR, get vg empty space details
-    sr_lock = lock.Lock(vhdutil.LOCK_TYPE_SR, sr_uuid)
+    sr_lock = lock.Lock(lock.LOCK_TYPE_SR, sr_uuid)
     got_lock = False
     for i in range(LOCK_RETRY_ATTEMPTS):
         got_lock = sr_lock.acquireNoblock()

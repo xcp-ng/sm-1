@@ -28,8 +28,8 @@ import errno
 import os
 import xmlrpc.client
 import xs_errors
+import lock
 import vhdutil
-from lock import Lock
 import cleanup
 import cifutils
 
@@ -82,7 +82,7 @@ class SMBSR(FileSR.SharedFileSR):
     @override
     def load(self, sr_uuid) -> None:
         self.ops_exclusive = FileSR.OPS_EXCLUSIVE
-        self.lock = Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
+        self.lock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
         self.sr_vditype = SR.DEFAULT_TAP
         self.driver_config = DRIVER_CONFIG
         if 'server' not in self.dconf:

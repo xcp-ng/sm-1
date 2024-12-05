@@ -1881,7 +1881,7 @@ class SR(object):
         self._locked = 0
         self._srLock = None
         if createLock:
-            self._srLock = lock.Lock(vhdutil.LOCK_TYPE_SR, self.uuid)
+            self._srLock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
         else:
             Util.log("Requested no SR locking")
         self.name = self.xapi.srRecord["name_label"]
@@ -3743,7 +3743,7 @@ class LockActive:
     """
     def __init__(self, srUuid):
         self._lock = lock.Lock(LOCK_TYPE_GC_ACTIVE, srUuid)
-        self._srLock = lock.Lock(vhdutil.LOCK_TYPE_SR, srUuid)
+        self._srLock = lock.Lock(lock.LOCK_TYPE_SR, srUuid)
 
     def acquireNoblock(self):
         self._srLock.acquire()
