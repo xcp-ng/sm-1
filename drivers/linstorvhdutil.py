@@ -376,7 +376,7 @@ class LinstorVhdUtil:
 
     @linstormodifier()
     def force_coalesce(self, path):
-        return self._call_method(vhdutil.coalesce, 'coalesce', path, use_parent=True)
+        return int(self._call_method(vhdutil.coalesce, 'coalesce', path, use_parent=True))
 
     @linstormodifier()
     def force_repair(self, path):

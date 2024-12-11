@@ -539,8 +539,7 @@ def set_parent(session, args):
 def coalesce(session, args):
     try:
         device_path = args['devicePath']
-        vhdutil.coalesce(device_path)
-        return ''
+        return str(vhdutil.coalesce(device_path))
     except Exception as e:
         util.SMlog('linstor-manager:coalesce error: {}'.format(e))
         raise
