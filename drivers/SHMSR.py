@@ -23,6 +23,7 @@ import SRCommand
 import util
 import os
 import xs_errors
+from vditype import VdiType
 
 CAPABILITIES = ["VDI_ATTACH", "VDI_DETACH", "VDI_CLONE", "VDI_SNAPSHOT",
                 "SR_SCAN", "SR_ATTACH", "SR_DETACH"]
@@ -126,7 +127,7 @@ class SHMVDI(VDI.VDI):
         VDI.VDI.__init__(self, mysr, None)
         self.label = filename
         self.location = filename
-        self.vdi_type = 'file'
+        self.vdi_type = VdiType.FILE
         self.read_only = True
         self.shareable = True
         self.sm_config = {}

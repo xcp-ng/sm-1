@@ -25,6 +25,7 @@ SM_DRIVERS += LargeBlock
 SM_LIBS := SR
 SM_LIBS += SRCommand
 SM_LIBS += VDI
+SM_LIBS += vditype
 SM_LIBS += BaseISCSI
 SM_LIBS += cleanup
 SM_LIBS += lvutil

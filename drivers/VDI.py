@@ -28,6 +28,7 @@ import os
 import base64
 from constants import CBTLOG_TAG
 from bitarray import bitarray
+from vditype import VdiType
 import uuid
 
 SM_CONFIG_PASS_THROUGH_FIELDS = ["base_mirror", "key_hash"]
@@ -580,7 +581,7 @@ class VDI(object):
         vdi_ref = self.sr.srcmd.params['vdi_ref']
 
         # Check if raw VDI or snapshot
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW or \
+        if self.vdi_type == VdiType.RAW or \
             self.session.xenapi.VDI.get_is_a_snapshot(vdi_ref):
             raise xs_errors.XenError('VDIType',
                                      opterr='Raw VDI or snapshot not permitted')
@@ -810,7 +811,7 @@ class VDI(object):
         """ Get blocktracking status """
         if not uuid:
             uuid = self.uuid
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+        if self.vdi_type == VdiType.RAW:
             return False
         elif 'VDI_CONFIG_CBT' not in util.sr_get_capability(self.sr.uuid):
             return False

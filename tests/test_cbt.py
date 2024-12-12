@@ -14,12 +14,13 @@ import cbtutil
 from bitarray import bitarray
 import base64
 import xmlrpc.client
+from vditype import VdiType
 
 
 class TestVDI(VDI.VDI):
     @override
     def load(self, vdi_uuid) -> None:
-        self.vdi_type = vhdutil.VDI_TYPE_VHD
+        self.vdi_type = VdiType.VHD
         self._state_mock = mock.Mock()
         self.path = "/mock/sr_path/" + str(vdi_uuid)
         self.block_tracking_state = False

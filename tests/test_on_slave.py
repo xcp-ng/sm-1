@@ -11,6 +11,7 @@ import util
 import vhdutil
 
 import on_slave
+from vditype import VdiType
 
 
 class Test_on_slave_is_open(unittest.TestCase):
@@ -205,7 +206,7 @@ class Test_on_slave_multi(unittest.TestCase):
         child_uuid = str(uuid.uuid4())
         child_fileName = "child-vdi.vhd"
         parent_fileName = "parent-vdi.vhd"
-        tmpName = lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_VHD] + \
+        tmpName = lvhdutil.LV_PREFIX[VdiType.VHD] + \
                 self.TMP_RENAME_PREFIX + child_uuid
 
         args = {"vgName": vgName,

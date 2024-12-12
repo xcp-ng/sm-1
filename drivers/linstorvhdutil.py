@@ -26,6 +26,7 @@ import time
 import util
 import vhdutil
 import xs_errors
+from vditype import VdiType
 
 MANAGER_PLUGIN = 'linstor-manager'
 
@@ -402,13 +403,13 @@ class LinstorVhdUtil:
 
     @classmethod
     def compute_volume_size(cls, virtual_size, image_type):
-        if image_type == vhdutil.VDI_TYPE_VHD:
+        if image_type == VdiType.VHD:
             # All LINSTOR VDIs have the metadata area preallocated for
             # the maximum possible virtual size (for fast online VDI.resize).
             meta_overhead = vhdutil.calcOverheadEmpty(cls.MAX_SIZE)
             bitmap_overhead = vhdutil.calcOverheadBitmap(virtual_size)
             virtual_size += meta_overhead + bitmap_overhead
-        elif image_type != vhdutil.VDI_TYPE_RAW:
+        elif image_type != VdiType.RAW:
             raise Exception('Invalid image type: {}'.format(image_type))
 
         return LinstorVolumeManager.round_up_volume_size(virtual_size)

@@ -28,6 +28,7 @@ import XenAPI
 import lvhdutil
 import vhdutil
 import lvmcache
+from vditype import VdiType
 
 try:
     from linstorvhdutil import LinstorVhdUtil
@@ -135,8 +136,8 @@ class Tapdisk:
                 if os.path.exists(p):
                     _mkphylink(self.sr_uuid, self.vdi_uuid, p)
                     self.realpath = p
-                    if ty == "LV": self.vdi_type = "aio"
-                    else: self.vdi_type = "vhd"
+                    if ty == "LV": self.vdi_type = VdiType.RAW
+                    else: self.vdi_type = VdiType.VHD
         elif realpath.startswith('/dev/drbd/by-res/xcp-volume-'):
             if not LINSTOR_AVAILABLE:
                 raise util.SMException(
@@ -211,7 +212,7 @@ class Tapdisk:
             vg_name = lvhdutil.VG_PREFIX + self.sr_uuid
             ns = lvhdutil.NS_PREFIX_LVM + self.sr_uuid
             lvm_cache = lvmcache.LVMCache(vg_name)
-            lv_name = lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_VHD] + self.vdi_uuid
+            lv_name = lvhdutil.LV_PREFIX[VdiType.VHD] + self.vdi_uuid
             vdi_list = vhdutil.getParentChain(lv_name,
                     lvhdutil.extractUuid, vg_name)
             for uuid, lv_name in vdi_list.items():

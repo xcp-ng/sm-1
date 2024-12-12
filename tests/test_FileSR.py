@@ -17,15 +17,16 @@ import testlib
 import util
 import vhdutil
 import xs_errors
+from vditype import VdiType
 
 
 class FakeFileVDI(FileSR.FileVDI):
     @override
     def load(self, uuid) -> None:
-        self.vdi_type = vhdutil.VDI_TYPE_VHD
+        self.vdi_type = VdiType.VHD
         self.hidden = False
         self.path = os.path.join(self.sr.path, '%s.%s' % (
-               uuid, vhdutil.VDI_TYPE_VHD))
+               uuid, VdiType.VHD))
         self.key_hash = None
 
 
@@ -322,13 +323,12 @@ class TestFileVDI(unittest.TestCase):
     @mock.patch('FileSR.vhdutil', spec=True)
     def test_create_vdi_vhd(self, mock_vhdutil):
         # Arrange
-        mock_vhdutil.VDI_TYPE_VHD = vhdutil.VDI_TYPE_VHD
         sr_uuid = str(uuid.uuid4())
         vdi_uuid = str(uuid.uuid4())
         sr = mock.MagicMock()
         sr.path = "sr_path"
         vdi = FakeFileVDI(sr, vdi_uuid)
-        vdi.vdi_type = vhdutil.VDI_TYPE_VHD
+        vdi.vdi_type = VdiType.VHD
         mock_vhdutil.validate_and_round_vhd_size.side_effect = vhdutil.validate_and_round_vhd_size
 
         # Act
@@ -337,22 +337,21 @@ class TestFileVDI(unittest.TestCase):
         # Assert
         expected_path = f"sr_path/{vdi_uuid}.vhd"
         self.mock_pread.assert_has_calls([
-            mock.call(["/usr/sbin/td-util", "create", "vhd",
+            mock.call(["/usr/sbin/td-util", "create", vdi.vdi_type,
                        "20", expected_path]),
-            mock.call(["/usr/sbin/td-util", "query", "vhd", "-v",
+            mock.call(["/usr/sbin/td-util", "query", vdi.vdi_type, "-v",
                        expected_path])])
 
     @mock.patch('FileSR.vhdutil', spec=True)
     @mock.patch('builtins.open', new_callable=mock.mock_open())
     def test_create_vdi_raw(self, mock_open, mock_vhdutil):
         # Arrange
-        mock_vhdutil.VDI_TYPE_RAW = vhdutil.VDI_TYPE_RAW
         sr_uuid = str(uuid.uuid4())
         vdi_uuid = str(uuid.uuid4())
         sr = mock.MagicMock()
         sr.path = "sr_path"
         vdi = FakeFileVDI(sr, vdi_uuid)
-        vdi.vdi_type = vhdutil.VDI_TYPE_RAW
+        vdi.vdi_type = VdiType.RAW
 
         # Act
         vdi.create(sr_uuid, vdi_uuid, 20 * 1024 * 1024)
@@ -379,7 +378,7 @@ hidden: 0
         }
         sr = FakeSharedFileSR(srcmd, sr_uuid)
         vdi = FileSR.FileVDI(sr, vdi_uuid)
-        vdi.vdi_type = vhdutil.VDI_TYPE_VHD
+        vdi.vdi_type = VdiType.VHD
         mock_pathexists.return_value = True
 
         # Act

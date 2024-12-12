@@ -27,8 +27,11 @@ import lvutil
 import lvhdutil
 import vhdutil
 
+import VDI
+
 from lock import Lock
 from refcounter import RefCounter
+from vditype import VdiType
 
 # Stores the vdi activated, comes handy while deactivating
 VHDs_passed = 0
@@ -109,7 +112,7 @@ def checkAllVHD(sr_uuid):
     VHDs_total = 0
 
     vg_name = lvhdutil.VG_PREFIX + sr_uuid
-    pattern = "%s*" % lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_VHD]
+    pattern = "%s*" % lvhdutil.LV_PREFIX[VdiType.VHD]
 
     # Do a vhd scan and gets all the VHDs
     vhds = vhdutil.getAllVHDs(pattern, lvhdutil.extractUuid, vg_name)

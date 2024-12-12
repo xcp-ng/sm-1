@@ -42,6 +42,7 @@ from journaler import Journaler
 from refcounter import RefCounter
 from ipc import IPCFlag
 from lvmanager import LVActivator
+from vditype import VdiType
 import XenAPI # pylint: disable=import-error
 import re
 from srmetadata import ALLOCATION_TAG, NAME_LABEL_TAG, NAME_DESCRIPTION_TAG, \
@@ -221,11 +222,11 @@ class LVHDSR(SR.SR):
             # if the lvname has a uuid in it
             type = None
             if contains_uuid_regex.search(key) is not None:
-                if key.startswith(lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_VHD]):
-                    type = vhdutil.VDI_TYPE_VHD
+                if key.startswith(lvhdutil.LV_PREFIX[VdiType.VHD]):
+                    type = VdiType.VHD
                     vdi = key[len(lvhdutil.LV_PREFIX[type]):]
-                elif key.startswith(lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_RAW]):
-                    type = vhdutil.VDI_TYPE_RAW
+                elif key.startswith(lvhdutil.LV_PREFIX[VdiType.RAW]):
+                    type = VdiType.RAW
                     vdi = key[len(lvhdutil.LV_PREFIX[type]):]
                 else:
                     continue
@@ -597,7 +598,7 @@ class LVHDSR(SR.SR):
         if self.isMaster and self.legacyMode:
             vdiInfo = lvhdutil.getVDIInfo(self.lvmCache)
             for uuid, info in vdiInfo.items():
-                if info.vdiType == vhdutil.VDI_TYPE_VHD:
+                if info.vdiType == VdiType.VHD:
                     self.legacyMode = False
                     map = self.session.xenapi.SR.get_sm_config(self.sr_ref)
                     self._introduceMetaDataVolume()
@@ -722,9 +723,9 @@ class LVHDSR(SR.SR):
                         activated = True
                         lvPath = os.path.join(self.path, lvname)
 
-                        if info[vdi][VDI_TYPE_TAG] == vhdutil.VDI_TYPE_RAW:
+                        if info[vdi][VDI_TYPE_TAG] == VdiType.RAW:
                             size = self.lvmCache.getSize( \
-                                lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_RAW] + \
+                                lvhdutil.LV_PREFIX[VdiType.RAW] + \
                                     vdi_uuid)
                             utilisation = \
                                         util.roundup(lvutil.LVM_SIZE_INCREMENT,
@@ -735,7 +736,7 @@ class LVHDSR(SR.SR):
 
                             if parent is not None:
                                 sm_config['vhd-parent'] = parent[len( \
-                                    lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_VHD]):]
+                                    lvhdutil.LV_PREFIX[VdiType.VHD]):]
                             size = vhdutil.getSizeVirt(lvPath)
                             if self.provision == "thin":
                                 utilisation = \
@@ -990,18 +991,18 @@ class LVHDSR(SR.SR):
         origRefcountNormal = 0
 
         # un-hide the parent
-        if base.vdiType == vhdutil.VDI_TYPE_VHD:
+        if base.vdiType == VdiType.VHD:
             self.lvActivator.activate(baseUuid, base.name, False)
             origRefcountNormal = 1
             vhdInfo = vhdutil.getVHDInfo(basePath, lvhdutil.extractUuid, False)
-        if base.vdiType == vhdutil.VDI_TYPE_VHD and vhdInfo.hidden:
+        if base.vdiType == VdiType.VHD and vhdInfo.hidden:
             vhdutil.setHidden(basePath, False)
-        elif base.vdiType == vhdutil.VDI_TYPE_RAW and base.hidden:
+        elif base.vdiType == VdiType.RAW and base.hidden:
             self.lvmCache.setHidden(base.name, False)
 
         # remove the child nodes
         if clonUuid and lvs.get(clonUuid):
-            if lvs[clonUuid].vdiType != vhdutil.VDI_TYPE_VHD:
+            if lvs[clonUuid].vdiType != VdiType.VHD:
                 raise util.SMException("clone %s not VHD" % clonUuid)
             self.lvmCache.remove(lvs[clonUuid].name)
             if self.lvActivator.get(clonUuid, False):
@@ -1010,7 +1011,7 @@ class LVHDSR(SR.SR):
             self.lvmCache.remove(lvs[origUuid].name)
 
         # inflate the parent to fully-allocated size
-        if base.vdiType == vhdutil.VDI_TYPE_VHD:
+        if base.vdiType == VdiType.VHD:
             fullSize = lvhdutil.calcSizeVHDLV(vhdInfo.sizeVirt)
             lvhdutil.inflate(self.journaler, self.uuid, baseUuid, fullSize)
 
@@ -1048,7 +1049,7 @@ class LVHDSR(SR.SR):
 
         # make sure the parent is hidden and read-only
         if not base.hidden:
-            if base.vdiType == vhdutil.VDI_TYPE_RAW:
+            if base.vdiType == VdiType.RAW:
                 self.lvmCache.setHidden(base.lvName)
             else:
                 basePath = os.path.join(self.path, base.lvName)
@@ -1065,7 +1066,7 @@ class LVHDSR(SR.SR):
             vdi_ref = self.session.xenapi.VDI.get_by_uuid(origUuid)
             sm_config = self.session.xenapi.VDI.get_sm_config(vdi_ref)
             type = self.session.xenapi.VDI.get_type(vdi_ref)
-            sm_config["vdi_type"] = vhdutil.VDI_TYPE_VHD
+            sm_config["vdi_type"] = VdiType.VHD
             sm_config['vhd-parent'] = baseUuid
             self.session.xenapi.VDI.set_sm_config(vdi_ref, sm_config)
         except XenAPI.Failure:
@@ -1079,7 +1080,7 @@ class LVHDSR(SR.SR):
                 clon_vdi.location = clonUuid
                 clon_vdi.utilisation = clon.sizeLV
                 clon_vdi.sm_config = {
-                        "vdi_type": vhdutil.VDI_TYPE_VHD,
+                        "vdi_type": VdiType.VHD,
                         "vhd-parent": baseUuid}
 
                 if not self.legacyMode:
@@ -1118,7 +1119,7 @@ class LVHDSR(SR.SR):
             base_vdi.utilisation = base.sizeLV
             base_vdi.managed = False
             base_vdi.sm_config = {
-                    "vdi_type": vhdutil.VDI_TYPE_VHD,
+                    "vdi_type": VdiType.VHD,
                     "vhd-parent": baseUuid}
 
             if not self.legacyMode:
@@ -1328,9 +1329,9 @@ class LVHDVDI(VDI.VDI):
         self.lock = self.sr.lock
         self.lvActivator = self.sr.lvActivator
         self.loaded = False
-        self.vdi_type = vhdutil.VDI_TYPE_VHD
+        self.vdi_type = VdiType.VHD
         if self.sr.legacyMode or util.fistpoint.is_active("xenrt_default_vdi_type_legacy"):
-            self.vdi_type = vhdutil.VDI_TYPE_RAW
+            self.vdi_type = VdiType.RAW
         self.uuid = vdi_uuid
         self.location = self.uuid
         self.exists = True
@@ -1353,9 +1354,9 @@ class LVHDVDI(VDI.VDI):
                 "type" in self.sr.srcmd.params["vdi_sm_config"]:
             type = self.sr.srcmd.params["vdi_sm_config"]["type"]
             if type == PARAM_RAW:
-                self.vdi_type = vhdutil.VDI_TYPE_RAW
+                self.vdi_type = VdiType.RAW
             elif type == PARAM_VHD:
-                self.vdi_type = vhdutil.VDI_TYPE_VHD
+                self.vdi_type = VdiType.VHD
                 if self.sr.cmd == 'vdi_create' and self.sr.legacyMode:
                     raise xs_errors.XenError('VDICreate', \
                         opterr='Cannot create VHD type disk in legacy mode')
@@ -1378,7 +1379,7 @@ class LVHDVDI(VDI.VDI):
                 (self.vdi_type, self.path, size))
         lvSize = 0
         self.sm_config = self.sr.srcmd.params["vdi_sm_config"]
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+        if self.vdi_type == VdiType.RAW:
             lvSize = util.roundup(lvutil.LVM_SIZE_INCREMENT, int(size))
         else:
             if self.sr.provision == "thin":
@@ -1391,7 +1392,7 @@ class LVHDVDI(VDI.VDI):
 
         try:
             self.sr.lvmCache.create(self.lvname, lvSize)
-            if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+            if self.vdi_type == VdiType.RAW:
                 self.size = self.sr.lvmCache.getSize(self.lvname)
             else:
                 vhdutil.create(self.path, int(size), False, lvhdutil.MSIZE_MB)
@@ -1486,7 +1487,7 @@ class LVHDVDI(VDI.VDI):
         writable = ('args' not in self.sr.srcmd.params) or \
                 (self.sr.srcmd.params['args'][0] == "true")
         needInflate = True
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW or not writable:
+        if self.vdi_type == VdiType.RAW or not writable:
             needInflate = False
         else:
             self._loadThis()
@@ -1513,7 +1514,7 @@ class LVHDVDI(VDI.VDI):
         already_deflated = (self.utilisation < \
                 lvhdutil.calcSizeVHDLV(self.size))
         needDeflate = True
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW or already_deflated:
+        if self.vdi_type == VdiType.RAW or already_deflated:
             needDeflate = False
         elif self.sr.provision == "thick":
             needDeflate = False
@@ -1558,7 +1559,7 @@ class LVHDVDI(VDI.VDI):
         if size == self.size:
             return VDI.VDI.get_params(self)
 
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+        if self.vdi_type == VdiType.RAW:
             lvSizeOld = self.size
             lvSizeNew = util.roundup(lvutil.LVM_SIZE_INCREMENT, size)
         else:
@@ -1572,7 +1573,7 @@ class LVHDVDI(VDI.VDI):
         self.sr._ensureSpaceAvailable(spaceNeeded)
 
         oldSize = self.size
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+        if self.vdi_type == VdiType.RAW:
             self.sr.lvmCache.setSize(self.lvname, lvSizeNew)
             self.size = self.sr.lvmCache.getSize(self.lvname)
             self.utilisation = self.size
@@ -1600,11 +1601,11 @@ class LVHDVDI(VDI.VDI):
     @override
     def compose(self, sr_uuid, vdi1, vdi2) -> None:
         util.SMlog("LVHDSR.compose for %s -> %s" % (vdi2, vdi1))
-        if self.vdi_type != vhdutil.VDI_TYPE_VHD:
+        if self.vdi_type != VdiType.VHD:
             raise xs_errors.XenError('Unimplemented')
 
         parent_uuid = vdi1
-        parent_lvname = lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_VHD] + parent_uuid
+        parent_lvname = lvhdutil.LV_PREFIX[VdiType.VHD] + parent_uuid
         assert(self.sr.lvmCache.checkLV(parent_lvname))
         parent_path = os.path.join(self.sr.path, parent_lvname)
 
@@ -1623,7 +1624,7 @@ class LVHDVDI(VDI.VDI):
 
     def reset_leaf(self, sr_uuid, vdi_uuid):
         util.SMlog("LVHDSR.reset_leaf for %s" % vdi_uuid)
-        if self.vdi_type != vhdutil.VDI_TYPE_VHD:
+        if self.vdi_type != VdiType.VHD:
             raise xs_errors.XenError('Unimplemented')
 
         self.sr.lvActivator.activate(self.uuid, self.lvname, False)
@@ -1720,7 +1721,7 @@ class LVHDVDI(VDI.VDI):
             raise xs_errors.XenError('VDIUnavailable', \
                     opterr='VDI unavailable: %s' % (self.path))
 
-        if self.vdi_type == vhdutil.VDI_TYPE_VHD:
+        if self.vdi_type == VdiType.VHD:
             depth = vhdutil.getDepth(self.path)
             if depth == -1:
                 raise xs_errors.XenError('VDIUnavailable', \
@@ -1756,7 +1757,7 @@ class LVHDVDI(VDI.VDI):
         # inflate journal (for the failure handling
         size_req = lvSizeOrig + lvSizeClon + 2 * self.sr.journaler.LV_SIZE
         lvSizeBase = self.size
-        if self.vdi_type == vhdutil.VDI_TYPE_VHD:
+        if self.vdi_type == VdiType.VHD:
             lvSizeBase = util.roundup(lvutil.LVM_SIZE_INCREMENT,
                     vhdutil.getSizePhys(self.path))
             size_req -= (self.utilisation - lvSizeBase)
@@ -1791,7 +1792,7 @@ class LVHDVDI(VDI.VDI):
 
             # shrink the base copy to the minimum - we do it before creating
             # the snapshot volumes to avoid requiring double the space
-            if self.vdi_type == vhdutil.VDI_TYPE_VHD:
+            if self.vdi_type == VdiType.VHD:
                 lvhdutil.deflate(self.sr.lvmCache, self.lvname, lvSizeBase)
                 self.utilisation = lvSizeBase
             util.fistpoint.activate("LVHDRT_clone_vdi_after_shrink_parent", self.sr.uuid)
@@ -1811,7 +1812,7 @@ class LVHDVDI(VDI.VDI):
             # new VHD children have been created, which are referencing it;
             # otherwise we would introduce a race with GC that could reclaim
             # the parent before we snapshot it
-            if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+            if self.vdi_type == VdiType.RAW:
                 self.sr.lvmCache.setHidden(self.lvname)
             else:
                 vhdutil.setHidden(self.path)
@@ -1850,14 +1851,14 @@ class LVHDVDI(VDI.VDI):
 
     def _createSnap(self, snapUuid, snapSizeLV, isNew):
         """Snapshot self and return the snapshot VDI object"""
-        snapLV = lvhdutil.LV_PREFIX[vhdutil.VDI_TYPE_VHD] + snapUuid
+        snapLV = lvhdutil.LV_PREFIX[VdiType.VHD] + snapUuid
         snapPath = os.path.join(self.sr.path, snapLV)
         self.sr.lvmCache.create(snapLV, int(snapSizeLV))
         util.fistpoint.activate("LVHDRT_clone_vdi_after_lvcreate", self.sr.uuid)
         if isNew:
             RefCounter.set(snapUuid, 1, 0, lvhdutil.NS_PREFIX_LVM + self.sr.uuid)
         self.sr.lvActivator.add(snapUuid, snapLV, False)
-        parentRaw = (self.vdi_type == vhdutil.VDI_TYPE_RAW)
+        parentRaw = (self.vdi_type == VdiType.RAW)
         vhdutil.snapshot(snapPath, self.path, parentRaw, lvhdutil.MSIZE_MB)
         snapParent = vhdutil.getParent(snapPath, lvhdutil.extractUuid)
 
@@ -1872,7 +1873,7 @@ class LVHDVDI(VDI.VDI):
                     "type", "vdi_type", "vhd-parent", "paused", "relinking", "activating"] and \
                     not key.startswith("host_"):
                 snapVDI.sm_config[key] = val
-        snapVDI.sm_config["vdi_type"] = vhdutil.VDI_TYPE_VHD
+        snapVDI.sm_config["vdi_type"] = VdiType.VHD
         snapVDI.sm_config["vhd-parent"] = snapParent
         snapVDI.lvname = snapLV
         return snapVDI
@@ -2041,7 +2042,7 @@ class LVHDVDI(VDI.VDI):
             self.sm_config_override["vdi_type"] = self.vdi_type
         else:
             self.sm_config_override = {'vdi_type': self.vdi_type}
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+        if self.vdi_type == VdiType.RAW:
             self.loaded = True
 
     def _initFromVHDInfo(self, vhdInfo):
@@ -2095,7 +2096,7 @@ class LVHDVDI(VDI.VDI):
         """Load VDI info for this VDI and activate the LV if it's VHD. We
         don't do it in VDI.load() because not all VDI operations need it."""
         if self.loaded:
-            if self.vdi_type == vhdutil.VDI_TYPE_VHD:
+            if self.vdi_type == VdiType.VHD:
                 self.sr.lvActivator.activate(self.uuid, self.lvname, False)
             return
         try:
@@ -2106,7 +2107,7 @@ class LVHDVDI(VDI.VDI):
         if not lvs.get(self.uuid):
             raise xs_errors.XenError('VDIUnavailable', opterr='LV not found')
         self._initFromLVInfo(lvs[self.uuid])
-        if self.vdi_type == vhdutil.VDI_TYPE_VHD:
+        if self.vdi_type == VdiType.VHD:
             self.sr.lvActivator.activate(self.uuid, self.lvname, False)
             vhdInfo = vhdutil.getVHDInfo(self.path, lvhdutil.extractUuid, False)
             if not vhdInfo:
@@ -2123,7 +2124,7 @@ class LVHDVDI(VDI.VDI):
                 return  # this is a redundant activation/deactivation call
 
         vdiList = {self.uuid: self.lvname}
-        if self.vdi_type == vhdutil.VDI_TYPE_VHD:
+        if self.vdi_type == VdiType.VHD:
             vdiList = vhdutil.getParentChain(self.lvname,
                     lvhdutil.extractUuid, self.sr.vgname)
         for uuid, lvName in vdiList.items():
@@ -2149,7 +2150,7 @@ class LVHDVDI(VDI.VDI):
         raise xs_errors.XenError('VDIClone', opterr=msg)
 
     def _markHidden(self):
-        if self.vdi_type == vhdutil.VDI_TYPE_RAW:
+        if self.vdi_type == VdiType.RAW:
             self.sr.lvmCache.setHidden(self.lvname)
         else:
             vhdutil.setHidden(self.path)

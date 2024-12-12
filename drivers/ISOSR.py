@@ -28,6 +28,7 @@ import os
 import re
 import xs_errors
 import cifutils
+from vditype import VdiType
 
 CAPABILITIES = ["VDI_CREATE", "VDI_DELETE", "VDI_ATTACH", "VDI_DETACH",
                 "SR_SCAN", "SR_ATTACH", "SR_DETACH"]
@@ -698,7 +699,7 @@ class ISOVDI(VDI.VDI):
     def load(self, vdi_uuid) -> None:
         # Nb, in the vdi_create call, the filename is unset, so the following
         # will fail.
-        self.vdi_type = "iso"
+        self.vdi_type = VdiType.ISO
         try:
             stat = os.stat(self.path)
             self.utilisation = int(stat.st_size)
