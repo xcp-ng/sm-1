@@ -1178,8 +1178,6 @@ class VDI(object):
         def get_vdi_type(self):
             _type = self.vdi.vdi_type
             if not _type:
-                _type = self.vdi.sr.sr_vditype
-            if not _type:
                 raise VDI.UnexpectedVDIType(_type, self.vdi)
             return _type
 

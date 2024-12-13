@@ -97,7 +97,7 @@ class FileSR(SR.SR):
     def load(self, sr_uuid) -> None:
         self.ops_exclusive = OPS_EXCLUSIVE
         self.lock = lock.Lock(lock.LOCK_TYPE_SR, self.uuid)
-        self.sr_vditype = VdiType.VHD
+        self.sr_vditype = SR.DEFAULT_TAP
         if 'location' not in self.dconf or  not self.dconf['location']:
             raise xs_errors.XenError('ConfigLocationMissing')
         self.remotepath = self.dconf['location']

@@ -29,7 +29,7 @@ import os
 import traceback
 
 MOUNT_BASE = '/var/run/sr-mount'
-DEFAULT_TAP = 'vhd'
+DEFAULT_TAP = "vhd,qcow2"
 TAPDISK_UTIL = '/usr/sbin/td-util'
 MASTER_LVM_CONF = '/etc/lvm/master'
 
