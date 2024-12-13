@@ -14,6 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+from sm_typing import Final
+
 # TODO: Use StrEnum in python 3.11.
 class VdiType(object):
     RAW = "aio"
@@ -21,3 +23,19 @@ class VdiType(object):
     ISO = "iso"
     FILE = "file"
     CBTLOG = "cbtlog"
+
+# TODO: Use StrEnum in python 3.11.
+class VdiTypeExtension(object):
+    RAW = ".raw"
+    VHD = ".vhd"
+    ISO = ".iso"
+    FILE = ".file"
+    CBTLOG = ".cbtlog"
+
+VDI_TYPE_TO_EXTENSION: Final = {
+    VdiType.RAW: VdiTypeExtension.RAW,
+    VdiType.VHD: VdiTypeExtension.VHD,
+    VdiType.ISO: VdiTypeExtension.ISO,
+    VdiType.FILE: VdiTypeExtension.FILE,
+    VdiType.CBTLOG: VdiTypeExtension.CBTLOG
+}

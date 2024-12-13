@@ -34,7 +34,7 @@ import blktap2
 import time
 import glob
 from uuid import uuid4
-from vditype import VdiType
+from vditype import VdiType, VdiTypeExtension, VDI_TYPE_TO_EXTENSION
 import xmlrpc.client
 import XenAPI # pylint: disable=import-error
 from constants import CBTLOG_TAG
@@ -277,7 +277,7 @@ class FileSR(SR.SR):
         if self.vdis:
             return
 
-        pattern = os.path.join(self.path, "*%s" % vhdutil.FILE_EXTN_VHD)
+        pattern = os.path.join(self.path, "*%s" % VdiTypeExtension.VHD)
         try:
             self.vhds = vhdutil.getAllVHDs(pattern, FileVDI.extractUuid)
         except util.CommandException as inst:
@@ -302,8 +302,8 @@ class FileSR(SR.SR):
         # raw VDIs and CBT log files
         files = util.ioretry(lambda: util.listdir(self.path))
         for fn in files:
-            if fn.endswith(vhdutil.FILE_EXTN_RAW):
-                uuid = fn[:-(len(vhdutil.FILE_EXTN_RAW))]
+            if fn.endswith(VdiTypeExtension.RAW):
+                uuid = fn[:-(len(VdiTypeExtension.RAW))]
                 self.vdis[uuid] = self.vdi(uuid)
             elif fn.endswith(CBTLOG_TAG):
                 cbt_uuid = fn.split(".")[0]
@@ -477,7 +477,7 @@ class FileVDI(VDI.VDI):
                                 opterr='Invalid VDI type %s' % vdi_type)
                     self.vdi_type = self.VDI_TYPE[vdi_type]
             self.path = os.path.join(self.sr.path, "%s%s" %
-                (vdi_uuid, vhdutil.FILE_EXTN[self.vdi_type]))
+                (vdi_uuid, VDI_TYPE_TO_EXTENSION[self.vdi_type]))
         else:
             found = self._find_path_with_retries(vdi_uuid)
             if not found:
@@ -708,7 +708,7 @@ class FileVDI(VDI.VDI):
     def compose(self, sr_uuid, vdi1, vdi2) -> None:
         if self.vdi_type != VdiType.VHD:
             raise xs_errors.XenError('Unimplemented')
-        parent_fn = vdi1 + vhdutil.FILE_EXTN[VdiType.VHD]
+        parent_fn = vdi1 + VDI_TYPE_TO_EXTENSION[VdiType.VHD]
         parent_path = os.path.join(self.sr.path, parent_fn)
         assert(util.pathexists(parent_path))
         vhdutil.setParent(self.path, parent_path, False)
@@ -984,7 +984,7 @@ class FileVDI(VDI.VDI):
         parent = util.pread(cmd)
         parent = parent[:-1]
         ls = parent.split('/')
-        return ls[len(ls) - 1].replace(vhdutil.FILE_EXTN_VHD, '')
+        return ls[len(ls) - 1].replace(VdiTypeExtension.VHD, '')
 
     def _query_info(self, path, use_bkp_footer=False):
         diskinfo = {}
@@ -994,7 +994,7 @@ class FileVDI(VDI.VDI):
         cmd = [SR.TAPDISK_UTIL, "query", VdiType.VHD, qopts, path]
         txt = util.pread(cmd).split('\n')
         diskinfo['size'] = txt[0]
-        lst = [txt[1].split('/')[-1].replace(vhdutil.FILE_EXTN_VHD, "")]
+        lst = [txt[1].split('/')[-1].replace(VdiTypeExtension.VHD, "")]
         for val in filter(util.exactmatch_uuid, lst):
             diskinfo['parent'] = val
         diskinfo['hidden'] = txt[2].split()[1]
@@ -1015,7 +1015,7 @@ class FileVDI(VDI.VDI):
 
     def extractUuid(path):
         fileName = os.path.basename(path)
-        uuid = fileName.replace(vhdutil.FILE_EXTN_VHD, "")
+        uuid = fileName.replace(VdiTypeExtension.VHD, "")
         return uuid
     extractUuid = staticmethod(extractUuid)
 

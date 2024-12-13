@@ -51,7 +51,7 @@ from lvmanager import LVActivator
 from srmetadata import LVMMetadataHandler, VDI_TYPE_TAG
 from functools import reduce
 from time import monotonic as _time
-from vditype import VdiType
+from vditype import VdiType, VdiTypeExtension
 
 try:
     from linstorjournaler import LinstorJournaler
@@ -1138,20 +1138,20 @@ class FileVDI(VDI):
     @staticmethod
     def extractUuid(path):
         path = os.path.basename(path.strip())
-        if not (path.endswith(vhdutil.FILE_EXTN_VHD) or \
-                path.endswith(vhdutil.FILE_EXTN_RAW)):
+        if not (path.endswith(VdiTypeExtension.VHD) or \
+                path.endswith(VdiTypeExtension.RAW)):
             return None
-        uuid = path.replace(vhdutil.FILE_EXTN_VHD, "").replace( \
-                vhdutil.FILE_EXTN_RAW, "")
+        uuid = path.replace(VdiTypeExtension.VHD, "").replace( \
+                VdiTypeExtension.RAW, "")
         # TODO: validate UUID format
         return uuid
 
     def __init__(self, sr, uuid, raw):
         VDI.__init__(self, sr, uuid, raw)
         if self.raw:
-            self.fileName = "%s%s" % (self.uuid, vhdutil.FILE_EXTN_RAW)
+            self.fileName = "%s%s" % (self.uuid, VdiTypeExtension.RAW)
         else:
-            self.fileName = "%s%s" % (self.uuid, vhdutil.FILE_EXTN_VHD)
+            self.fileName = "%s%s" % (self.uuid, VdiTypeExtension.VHD)
 
     @override
     def load(self, info=None) -> None:
@@ -1172,13 +1172,13 @@ class FileVDI(VDI):
         self.hidden = info.hidden
         self.scanError = False
         self.path = os.path.join(self.sr.path, "%s%s" % \
-                (self.uuid, vhdutil.FILE_EXTN_VHD))
+                (self.uuid, VdiTypeExtension.VHD))
 
     @override
     def rename(self, uuid) -> None:
         oldPath = self.path
         VDI.rename(self, uuid)
-        self.fileName = "%s%s" % (self.uuid, vhdutil.FILE_EXTN_VHD)
+        self.fileName = "%s%s" % (self.uuid, VdiTypeExtension.VHD)
         self.path = os.path.join(self.sr.path, self.fileName)
         assert(not util.pathexists(self.path))
         Util.log("Renaming %s -> %s" % (oldPath, self.path))
@@ -2673,7 +2673,7 @@ class FileSR(SR):
                 self.vdis[uuid] = vdi
             vdi.load(vhdInfo)
         uuidsPresent = list(vhds.keys())
-        rawList = [x for x in os.listdir(self.path) if x.endswith(vhdutil.FILE_EXTN_RAW)]
+        rawList = [x for x in os.listdir(self.path) if x.endswith(VdiTypeExtension.RAW)]
         for rawName in rawList:
             uuid = FileVDI.extractUuid(rawName)
             uuidsPresent.append(uuid)
@@ -2779,7 +2779,7 @@ class FileSR(SR):
     def _scan(self, force):
         for i in range(SR.SCAN_RETRY_ATTEMPTS):
             error = False
-            pattern = os.path.join(self.path, "*%s" % vhdutil.FILE_EXTN_VHD)
+            pattern = os.path.join(self.path, "*%s" % VdiTypeExtension.VHD)
             vhds = vhdutil.getAllVHDs(pattern, FileVDI.extractUuid)
             for uuid, vhdInfo in vhds.items():
                 if vhdInfo.error:
@@ -2823,10 +2823,10 @@ class FileSR(SR):
         entries = self.journaler.getAll(VDI.JRN_LEAF)
         for uuid, parentUuid in entries.items():
             fileList = os.listdir(self.path)
-            childName = uuid + vhdutil.FILE_EXTN_VHD
-            tmpChildName = self.TMP_RENAME_PREFIX + uuid + vhdutil.FILE_EXTN_VHD
-            parentName1 = parentUuid + vhdutil.FILE_EXTN_VHD
-            parentName2 = parentUuid + vhdutil.FILE_EXTN_RAW
+            childName = uuid + VdiTypeExtension.VHD
+            tmpChildName = self.TMP_RENAME_PREFIX + uuid + VdiTypeExtension.VHD
+            parentName1 = parentUuid + VdiTypeExtension.VHD
+            parentName2 = parentUuid + VdiTypeExtension.RAW
             parentPresent = (parentName1 in fileList or parentName2 in fileList)
             if parentPresent or tmpChildName in fileList:
                 self._undoInterruptedCoalesceLeaf(uuid, parentUuid)

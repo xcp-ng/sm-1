@@ -37,13 +37,6 @@ VHD_FOOTER_SIZE = 512
 # lock to lock the entire SR for short ops
 LOCK_TYPE_SR = "sr"
 
-FILE_EXTN_VHD = ".vhd"
-FILE_EXTN_RAW = ".raw"
-FILE_EXTN = {
-        VdiType.VHD: FILE_EXTN_VHD,
-        VdiType.RAW: FILE_EXTN_RAW
-}
-
 
 class VHDInfo:
     uuid = ""

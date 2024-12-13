@@ -12,3 +12,6 @@ if not hasattr(typing, 'override'):
 
 if not hasattr(typing, 'Never'):
     Never = None # type: ignore
+
+if not hasattr(typing, 'Final'):
+    Final = None # type: ignore
