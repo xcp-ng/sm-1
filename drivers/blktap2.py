@@ -1672,13 +1672,13 @@ class VDI(object):
             # This is a fix for CA-155766
             if hasattr(self.target.vdi.sr, 'DRIVER_TYPE') and \
                self.target.vdi.sr.DRIVER_TYPE == 'lvhd' and \
-               vdi_type == VdiType.VHD:
+               VdiType.isCowImage(vdi_type):
                 lock = Lock("lvchange-p", lvhdutil.NS_PREFIX_LVM + sr_uuid)
                 lock.acquire()
 
             # When we attach a static VDI for HA, we cannot communicate with
             # xapi, because has not started yet. These VDIs are raw.
-            if vdi_type != VdiType.RAW:
+            if VdiType.isCowImage(vdi_type):
                 session = self.target.vdi.session
                 vdi_ref = session.xenapi.VDI.get_by_uuid(vdi_uuid)
                 # pylint: disable=used-before-assignment
@@ -1693,7 +1693,7 @@ class VDI(object):
 
             if hasattr(self.target.vdi.sr, 'DRIVER_TYPE') and \
                self.target.vdi.sr.DRIVER_TYPE == 'lvhd' and \
-               self.target.get_vdi_type() == VdiType.VHD:
+               VdiType.isCowImage(self.target.get_vdi_type()):
                 lock.release()
         except:
             util.SMlog("Exception in activate/attach")

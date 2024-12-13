@@ -492,7 +492,7 @@ class FileVDI(VDI.VDI):
                                          opterr="VDI %s not found" % vdi_uuid)
 
 
-        if self.vdi_type == VdiType.VHD and \
+        if VdiType.isCowImage(self.vdi_type) and \
                 self.sr.__dict__.get("vhds") and self.sr.vhds.get(vdi_uuid):
             # VHD info already preloaded: use it instead of querying directly
             vhdInfo = self.sr.vhds[vdi_uuid]
@@ -579,7 +579,7 @@ class FileVDI(VDI.VDI):
         if util.ioretry(lambda: util.pathexists(self.path)):
             raise xs_errors.XenError('VDIExists')
 
-        if self.vdi_type == VdiType.VHD:
+        if VdiType.isCowImage(self.vdi_type):
             try:
                 size = vhdutil.validate_and_round_vhd_size(int(size))
                 mb = 1024 * 1024
@@ -665,7 +665,7 @@ class FileVDI(VDI.VDI):
             raise xs_errors.XenError('VDIUnavailable', \
                   opterr='VDI %s unavailable %s' % (vdi_uuid, self.path))
 
-        if self.vdi_type != VdiType.VHD:
+        if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
         if self.hidden:
@@ -706,7 +706,7 @@ class FileVDI(VDI.VDI):
 
     @override
     def compose(self, sr_uuid, vdi1, vdi2) -> None:
-        if self.vdi_type != VdiType.VHD:
+        if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
         parent_fn = vdi1 + VDI_TYPE_TO_EXTENSION[VdiType.VHD]
         parent_path = os.path.join(self.sr.path, parent_fn)
@@ -722,7 +722,7 @@ class FileVDI(VDI.VDI):
         util.SMlog("VDI.compose: relinked %s->%s" % (vdi2, vdi1))
 
     def reset_leaf(self, sr_uuid, vdi_uuid):
-        if self.vdi_type != VdiType.VHD:
+        if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
         # safety check
@@ -746,7 +746,7 @@ class FileVDI(VDI.VDI):
         else:
             consistency_state = None
 
-        if self.vdi_type != VdiType.VHD:
+        if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
         if not blktap2.VDI.tap_pause(self.session, sr_uuid, vdi_uuid):

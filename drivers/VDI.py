@@ -581,7 +581,7 @@ class VDI(object):
         vdi_ref = self.sr.srcmd.params['vdi_ref']
 
         # Check if raw VDI or snapshot
-        if self.vdi_type == VdiType.RAW or \
+        if not VdiType.isCowImage(self.vdi_type) or \
             self.session.xenapi.VDI.get_is_a_snapshot(vdi_ref):
             raise xs_errors.XenError('VDIType',
                                      opterr='Raw VDI or snapshot not permitted')
@@ -811,7 +811,7 @@ class VDI(object):
         """ Get blocktracking status """
         if not uuid:
             uuid = self.uuid
-        if self.vdi_type == VdiType.RAW:
+        if not VdiType.isCowImage(self.vdi_type):
             return False
         elif 'VDI_CONFIG_CBT' not in util.sr_get_capability(self.sr.uuid):
             return False

@@ -129,7 +129,7 @@ def getVDIInfo(lvmCache):
 
     haveVHDs = False
     for uuid, lvInfo in lvs.items():
-        if lvInfo.vdiType == VdiType.VHD:
+        if VdiType.isCowImage(lvInfo.vdiType):
             haveVHDs = True
         vdiInfo = VDIInfo(uuid)
         vdiInfo.vdiType = lvInfo.vdiType
@@ -148,7 +148,7 @@ def getVDIInfo(lvmCache):
         uuids = vdis.keys()
         for uuid in uuids:
             vdi = vdis[uuid]
-            if vdi.vdiType == VdiType.VHD:
+            if VdiType.isCowImage(vdi.vdiType):
                 if not vhds.get(uuid):
                     lvmCache.refresh()
                     if lvmCache.checkLV(vdi.lvName):

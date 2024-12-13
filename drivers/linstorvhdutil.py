@@ -403,13 +403,13 @@ class LinstorVhdUtil:
 
     @classmethod
     def compute_volume_size(cls, virtual_size, image_type):
-        if image_type == VdiType.VHD:
+        if VdiType.isCowImage(image_type):
             # All LINSTOR VDIs have the metadata area preallocated for
             # the maximum possible virtual size (for fast online VDI.resize).
             meta_overhead = vhdutil.calcOverheadEmpty(cls.MAX_SIZE)
             bitmap_overhead = vhdutil.calcOverheadBitmap(virtual_size)
             virtual_size += meta_overhead + bitmap_overhead
-        elif image_type != VdiType.RAW:
+        else:
             raise Exception('Invalid image type: {}'.format(image_type))
 
         return LinstorVolumeManager.round_up_volume_size(virtual_size)

@@ -23,6 +23,10 @@ class VdiType(object):
     ISO = "iso"
     FILE = "file"
     CBTLOG = "cbtlog"
+    
+    @classmethod
+    def isCowImage(cls, vdi_type) -> bool:
+        return vdi_type in (cls.VHD)
 
 # TODO: Use StrEnum in python 3.11.
 class VdiTypeExtension(object):

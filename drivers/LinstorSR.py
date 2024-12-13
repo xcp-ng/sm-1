@@ -142,7 +142,7 @@ OPS_EXCLUSIVE = [
 def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
     volume_metadata = linstor.get_volume_metadata(vdi_uuid)
     image_type = volume_metadata.get(VDI_TYPE_TAG)
-    if image_type == VdiType.RAW:
+    if not VdiType.isCowImage(image_type):
         return
 
     device_path = linstor.get_device_path(vdi_uuid)
@@ -168,7 +168,7 @@ def attach_thin(session, journaler, linstor, sr_uuid, vdi_uuid):
 def detach_thin_impl(session, linstor, sr_uuid, vdi_uuid):
     volume_metadata = linstor.get_volume_metadata(vdi_uuid)
     image_type = volume_metadata.get(VDI_TYPE_TAG)
-    if image_type == VdiType.RAW:
+    if not VdiType.isCowImage(image_type):
         return
 
     def check_vbd_count():
@@ -1142,19 +1142,13 @@ class LinstorSR(SR.SR):
                     'vdi_type': vdi_type
                 }
 
-                if vdi_type == VdiType.RAW:
+                if not VdiType.isCowImage(vdi_type):
                     managed = not volume_metadata.get(HIDDEN_TAG)
-                elif vdi_type == VdiType.VHD:
+                else:
                     vhd_info = self._vhdutil.get_vhd_info(vdi_uuid)
                     managed = not vhd_info.hidden
                     if vhd_info.parentUuid:
                         sm_config['vhd-parent'] = vhd_info.parentUuid
-                else:
-                    util.SMlog(
-                        'Cannot introduce {} with invalid VDI type {}'
-                        .format(vdi_uuid, vdi_type)
-                    )
-                    continue
 
                 util.SMlog(
                     'Introducing VDI {} '.format(vdi_uuid) +
@@ -1203,7 +1197,7 @@ class LinstorSR(SR.SR):
             vdi = self.vdi(vdi_uuid)
             self.vdis[vdi_uuid] = vdi
 
-            if USE_KEY_HASH and vdi.vdi_type == VdiType.VHD:
+            if USE_KEY_HASH and VdiType.isCowImage(vdi.vdi_type):
                 # TODO: Replace pylint comment with this feature when possible:
                 # https://github.com/PyCQA/pylint/pull/2926
                 vdi.sm_config_override['key_hash'] = \
@@ -1288,7 +1282,7 @@ class LinstorSR(SR.SR):
             # If it's a RAW VDI, there is no parent.
             volume_metadata = self._linstor.get_volume_metadata(vdi_uuid)
             vdi_type = volume_metadata[VDI_TYPE_TAG]
-            if vdi_type == VdiType.RAW:
+            if not VdiType.isCowImage(vdi_type):
                 return (device_path, None)
 
             # Otherwise it's a VHD and a parent can exist.
@@ -1409,12 +1403,11 @@ class LinstorSR(SR.SR):
 
         # Un-hide the parent.
         self._linstor.update_volume_metadata(base_uuid, {READ_ONLY_TAG: False})
-        if base_type == VdiType.VHD:
+        if VdiType.isCowImage(base_type):
             vhd_info = self._vhdutil.get_vhd_info(base_uuid, False)
             if vhd_info.hidden:
                 self._vhdutil.set_hidden(base_path, False)
-        elif base_type == VdiType.RAW and \
-                base_metadata.get(HIDDEN_TAG):
+        elif base_metadata.get(HIDDEN_TAG):
             self._linstor.update_volume_metadata(
                 base_uuid, {HIDDEN_TAG: False}
             )
@@ -1453,7 +1446,7 @@ class LinstorSR(SR.SR):
         self._linstor.update_volume_uuid(base_uuid, vdi_uuid)
 
         # Inflate to the right size.
-        if base_type == VdiType.VHD:
+        if VdiType.isCowImage(base_type):
             vdi = self.vdi(vdi_uuid)
             volume_size = LinstorVhdUtil.compute_volume_size(vdi.size, vdi.vdi_type)
             self._vhdutil.inflate(
@@ -1642,7 +1635,7 @@ class LinstorVDI(VDI.VDI):
                                 'VDICreate',
                                 opterr='Invalid VDI type {}'.format(type)
                             )
-                    if self.vdi_type == VdiType.VHD:
+                    if VdiType.isCowImage(self.vdi_type):
                         self._key_hash = vdi_sm_config.get('key_hash')
 
                 # For the moment we don't have a path.
@@ -1699,7 +1692,7 @@ class LinstorVDI(VDI.VDI):
 
             self._update_device_name(volume_info.name)
 
-            if self.vdi_type == VdiType.RAW:
+            if not VdiType.isCowImage(self.vdi_type):
                 self.size = volume_info.virtual_size
             else:
                 self.sr._vhdutil.create(
@@ -1831,7 +1824,7 @@ class LinstorVDI(VDI.VDI):
             # than the VHD size + bitmap size.
             need_inflate = True
             if (
-                self.vdi_type == VdiType.RAW or
+                not VdiType.isCowImage(self.vdi_type) or
                 not writable or
                 self.capacity >= LinstorVhdUtil.compute_volume_size(self.size, self.vdi_type)
             ):
@@ -1873,7 +1866,7 @@ class LinstorVDI(VDI.VDI):
         if detach_from_config and self.path.startswith('/dev/http-nbd/'):
             return self._detach_using_http_nbd()
 
-        if self.vdi_type == VdiType.RAW:
+        if not VdiType.isCowImage(self.vdi_type):
             return
 
         # The VDI is already deflated if the VHD image size + metadata is
@@ -1957,7 +1950,7 @@ class LinstorVDI(VDI.VDI):
         if size == self.size:
             return VDI.VDI.get_params(self)
 
-        if self.vdi_type == VdiType.RAW:
+        if not VdiType.isCowImage(self.vdi_type):
             old_volume_size = self.size
             new_volume_size = LinstorVolumeManager.round_up_volume_size(size)
         else:
@@ -1973,7 +1966,7 @@ class LinstorVDI(VDI.VDI):
         self.sr._ensure_space_available(space_needed)
 
         old_size = self.size
-        if self.vdi_type == VdiType.RAW:
+        if not VdiType.isCowImage(self.vdi_type):
             self._linstor.resize(self.uuid, new_volume_size)
         else:
             if new_volume_size != old_volume_size:
@@ -2001,7 +1994,7 @@ class LinstorVDI(VDI.VDI):
     @override
     def compose(self, sr_uuid, vdi1, vdi2) -> None:
         util.SMlog('VDI.compose for {} -> {}'.format(vdi2, vdi1))
-        if self.vdi_type != VdiType.VHD:
+        if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
         parent_uuid = vdi1
@@ -2102,7 +2095,7 @@ class LinstorVDI(VDI.VDI):
         return ''
 
     def reset_leaf(self, sr_uuid, vdi_uuid):
-        if self.vdi_type != VdiType.VHD:
+        if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
         if not self.sr._vhdutil.has_parent(self.uuid):
@@ -2135,7 +2128,7 @@ class LinstorVDI(VDI.VDI):
         self.utilisation = volume_info.allocated_size
         self.capacity = volume_info.virtual_size
 
-        if self.vdi_type == VdiType.RAW:
+        if not VdiType.isCowImage(self.vdi_type):
             self.hidden = int(volume_metadata.get(HIDDEN_TAG) or 0)
             self.size = volume_info.virtual_size
             self.parent = ''
@@ -2158,7 +2151,7 @@ class LinstorVDI(VDI.VDI):
         if self.hidden == hidden:
             return
 
-        if self.vdi_type == VdiType.VHD:
+        if VdiType.isCowImage(self.vdi_type):
             self.sr._vhdutil.set_hidden(self.path, hidden)
         else:
             self._linstor.update_volume_metadata(self.uuid, {
@@ -2365,7 +2358,7 @@ class LinstorVDI(VDI.VDI):
         else:
             consistency_state = None
 
-        if self.vdi_type != VdiType.VHD:
+        if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
         if not blktap2.VDI.tap_pause(self.session, sr_uuid, vdi_uuid):
