@@ -38,7 +38,6 @@ import VDI
 import cleanup
 import lock
 import util
-import vhdutil
 import xs_errors
 
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE",
@@ -55,8 +54,8 @@ CONFIGURATION = [
 ]
 
 DRIVER_INFO = {
-    'name': 'MooseFS VHD',
-    'description': 'SR plugin which stores disks as VHD files on a MooseFS storage',
+    'name': 'MooseFS VHD and QCOW2',
+    'description': 'SR plugin which stores disks as VHD and QCOW2 files on a MooseFS storage',
     'vendor': 'Tappest sp. z o.o.',
     'copyright': '(C) 2021 Tappest sp. z o.o.',
     'driver_version': '1.0',

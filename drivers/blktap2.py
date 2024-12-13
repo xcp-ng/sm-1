@@ -47,7 +47,6 @@ from vditype import VdiType
 import nfs
 
 import resetvdis
-import vhdutil
 import lvhdutil
 
 import VDI as sm
@@ -668,7 +667,7 @@ class Blktap(ClassDevice):
 
 class Tapdisk(object):
 
-    TYPES = ['aio', 'vhd']
+    TYPES = ['aio', 'vhd', 'qcow2']
 
     def __init__(self, pid, minor, _type, path, state):
         self.pid = pid
@@ -1090,6 +1089,7 @@ class VDI(object):
         return {
             'raw': 'aio',
             'vhd': 'vhd',
+            'qcow2': 'qcow2',
             'iso': 'aio',  # for ISO SR
             'aio': 'aio',  # for LVHD
             'file': 'aio',
@@ -1120,7 +1120,8 @@ class VDI(object):
                       'aio': 'tap',  # for LVHD raw nodes
                       'iso': 'tap',  # for ISOSR
                       'file': 'tap',
-                      'vhd': 'tap'}
+                      'vhd': 'tap',
+                      'qcow2': 'tap'}
 
     def tap_wanted(self):
         # 1. Let the target vdi_type decide
@@ -1929,7 +1930,7 @@ class VDI(object):
         from lock import Lock
         from FileSR import FileVDI
 
-        parent_uuid = vhdutil.getParent(self.target.vdi.path,
+        parent_uuid = self._cowutil.getParent(self.target.vdi.path,
                 FileVDI.extractUuid)
         if not parent_uuid:
             util.SMlog("ERROR: VDI %s has no parent, not enabling" % \
@@ -1958,14 +1959,14 @@ class VDI(object):
                     read_cache_path)
         else:
             try:
-                vhdutil.snapshot(read_cache_path, shared_target.path, False)
+                self._cowutil.snapshot(read_cache_path, shared_target.path, False)
             except util.CommandException as e:
                 util.SMlog("Error creating parent cache: %s" % e)
                 self.alert_no_cache(session, vdi_uuid, local_sr_uuid, e.code)
                 return None
 
         # local write node
-        leaf_size = vhdutil.getSizeVirt(self.target.vdi.path)
+        leaf_size = self._cowutil.getSizeVirt(self.target.vdi.path)
         local_leaf_path = "%s/%s.vhdcache" % \
                 (local_sr.path, self.target.vdi.uuid)
         if util.pathexists(local_leaf_path):
@@ -1973,18 +1974,18 @@ class VDI(object):
                     local_leaf_path)
             os.unlink(local_leaf_path)
         try:
-            vhdutil.snapshot(local_leaf_path, read_cache_path, False,
+            self._cowutil.snapshot(local_leaf_path, read_cache_path, False,
                     msize=leaf_size // 1024 // 1024, checkEmpty=False)
         except util.CommandException as e:
             util.SMlog("Error creating leaf cache: %s" % e)
             self.alert_no_cache(session, vdi_uuid, local_sr_uuid, e.code)
             return None
 
-        local_leaf_size = vhdutil.getSizeVirt(local_leaf_path)
+        local_leaf_size = self._cowutil.getSizeVirt(local_leaf_path)
         if leaf_size > local_leaf_size:
             util.SMlog("Leaf size %d > local leaf cache size %d, resizing" %
                     (leaf_size, local_leaf_size))
-            vhdutil.setSizeVirtFast(local_leaf_path, leaf_size)
+            self._cowutil.setSizeVirtFast(local_leaf_path, leaf_size)
 
         vdi_type = self.target.get_vdi_type()
 
@@ -2076,7 +2077,7 @@ class VDI(object):
         from lock import Lock
         from FileSR import FileVDI
 
-        parent_uuid = vhdutil.getParent(self.target.vdi.path,
+        parent_uuid = self._cowutil.getParent(self.target.vdi.path,
                 FileVDI.extractUuid)
         if not parent_uuid:
             util.SMlog("ERROR: No parent for VDI %s, ignore" % \

@@ -37,7 +37,6 @@ import stat
 import XenAPI # pylint: disable=import-error
 import util
 import lvutil
-import vhdutil
 import lvhdutil
 import lvmcache
 import journaler
@@ -51,7 +50,9 @@ from lvmanager import LVActivator
 from srmetadata import LVMMetadataHandler, VDI_TYPE_TAG
 from functools import reduce
 from time import monotonic as _time
-from vditype import VdiType, VdiTypeExtension, VDI_TYPE_TO_EXTENSION
+
+from cowutil import CowUtil, getCowUtil
+from vditype import VdiType, VdiTypeExtension, VDI_COW_TYPES, VDI_TYPE_TO_EXTENSION
 
 try:
     from linstorjournaler import LinstorJournaler
@@ -548,6 +549,7 @@ class VDI(object):
         self.parent = None
         self.children = []
         self._vdiRef = None
+        self.cowutil = getCowUtil(vdi_type)
         self._clearRef()
 
     @staticmethod
@@ -770,10 +772,10 @@ class VDI(object):
         self._clear()
 
     def getParent(self) -> str:
-        return vhdutil.getParent(self.path, lambda x: x.strip())
+        return self.cowutil.getParent(self.path, lambda x: x.strip())
 
     def repair(self, parent) -> None:
-        vhdutil.repair(parent)
+        self.cowutil.repair(parent)
 
     @override
     def __str__(self) -> str:
@@ -798,7 +800,7 @@ class VDI(object):
                 strSizePhys, strSizeAllocated, strType)
 
     def validate(self, fast=False) -> None:
-        if not vhdutil.check(self.path, fast=fast):
+        if self.cowutil.check(self.path, fast=fast) != CowUtil.CheckResult.Success:
             raise util.SMException("VHD %s corrupted" % self)
 
     def _clear(self):
@@ -895,7 +897,7 @@ class VDI(object):
 
     def coalesce(self) -> int:
         # size is returned in sectors
-        return vhdutil.coalesce(self.path) * 512
+        return self.cowutil.coalesce(self.path) * 512
 
     @staticmethod
     def _doCoalesceCowImage(vdi):
@@ -1021,12 +1023,12 @@ class VDI(object):
             child._tagChildrenForRelink()
 
     def _loadInfoParent(self):
-        ret = vhdutil.getParent(self.path, lvhdutil.extractUuid)
+        ret = self.cowutil.getParent(self.path, lvhdutil.extractUuid)
         if ret:
             self.parentUuid = ret
 
     def _setParent(self, parent) -> None:
-        vhdutil.setParent(self.path, parent.path, False)
+        self.cowutil.setParent(self.path, parent.path, False)
         self.parent = parent
         self.parentUuid = parent.uuid
         parent.children.append(self)
@@ -1039,11 +1041,11 @@ class VDI(object):
                      (self.uuid, self.parentUuid))
 
     def _loadInfoHidden(self) -> None:
-        hidden = vhdutil.getHidden(self.path)
+        hidden = self.cowutil.getHidden(self.path)
         self.hidden = (hidden != 0)
 
     def _setHidden(self, hidden=True) -> None:
-        vhdutil.setHidden(self.path, hidden)
+        self.cowutil.setHidden(self.path, hidden)
         self.hidden = hidden
 
     def _increaseSizeVirt(self, size, atomic=True) -> None:
@@ -1058,9 +1060,9 @@ class VDI(object):
         Util.log("  Expanding VHD virt size for VDI %s: %s -> %s" % \
                 (self, Util.num2str(self.sizeVirt), Util.num2str(size)))
 
-        msize = vhdutil.getMaxResizeSize(self.path) * 1024 * 1024
+        msize = self.cowutil.getMaxResizeSize(self.path)
         if (size <= msize):
-            vhdutil.setSizeVirtFast(self.path, size)
+            self.cowutil.setSizeVirtFast(self.path, size)
         else:
             if atomic:
                 vdiList = self._getAllSubtree()
@@ -1076,17 +1078,17 @@ class VDI(object):
             else:
                 self._setSizeVirt(size)
 
-        self.sizeVirt = vhdutil.getSizeVirt(self.path)
+        self.sizeVirt = self.cowutil.getSizeVirt(self.path)
 
     def _setSizeVirt(self, size) -> None:
         """WARNING: do not call this method directly unless all VDIs in the
         subtree are guaranteed to be unplugged (and remain so for the duration
         of the operation): this operation is only safe for offline VHDs"""
         jFile = os.path.join(self.sr.path, self.uuid)
-        vhdutil.setSizeVirt(self.path, size, jFile)
+        self.cowutil.setSizeVirt(self.path, size, jFile)
 
     def _queryVHDBlocks(self) -> bytes:
-        return vhdutil.getBlockBitmap(self.path)
+        return self.cowutil.getBlockBitmap(self.path)
 
     def _getCoalescedSizeData(self):
         """Get the data size of the resulting VHD if we coalesce self onto
@@ -1100,14 +1102,14 @@ class VDI(object):
         blocksParent = self.parent.getVDIBlocks()
         numBlocks = Util.countBits(blocksChild, blocksParent)
         Util.log("Num combined blocks = %d" % numBlocks)
-        sizeData = numBlocks * vhdutil.VHD_BLOCK_SIZE
+        sizeData = numBlocks * self.cowutil.getBlockSize(self.path)
         assert(sizeData <= self.sizeVirt)
         return sizeData
 
     def _calcExtraSpaceForCoalescing(self) -> int:
         sizeData = self._getCoalescedSizeData()
-        sizeCoalesced = sizeData + vhdutil.calcOverheadBitmap(sizeData) + \
-                vhdutil.calcOverheadEmpty(self.sizeVirt)
+        sizeCoalesced = sizeData + self.cowutil.calcOverheadBitmap(sizeData) + \
+                self.cowutil.calcOverheadEmpty(self.sizeVirt)
         Util.log("Coalesced size = %s" % Util.num2str(sizeCoalesced))
         return sizeCoalesced - self.parent.getSizePhys()
 
@@ -1121,7 +1123,7 @@ class VDI(object):
         """How much extra space in the SR will be required to
         snapshot-coalesce this VDI"""
         return self._calcExtraSpaceForCoalescing() + \
-                vhdutil.calcOverheadEmpty(self.sizeVirt)  # extra snap leaf
+                self.cowutil.calcOverheadEmpty(self.sizeVirt)  # extra snap leaf
 
     def _getAllSubtree(self):
         """Get self and all VDIs in the subtree of self as a flat list"""
@@ -1136,14 +1138,8 @@ class FileVDI(VDI):
 
     @staticmethod
     def extractUuid(path):
-        path = os.path.basename(path.strip())
-        if not (path.endswith(VdiTypeExtension.VHD) or \
-                path.endswith(VdiTypeExtension.RAW)):
-            return None
-        uuid = path.replace(VdiTypeExtension.VHD, "").replace( \
-                VdiTypeExtension.RAW, "")
-        # TODO: validate UUID format
-        return uuid
+        fileName = os.path.basename(path)
+        return os.path.splitext(fileName)[0]
 
     def __init__(self, sr, uuid, vdi_type):
         VDI.__init__(self, sr, uuid, vdi_type)
@@ -1155,7 +1151,7 @@ class FileVDI(VDI):
             if not util.pathexists(self.path):
                 raise util.SMException("%s not found" % self.path)
             try:
-                info = vhdutil.getVHDInfo(self.path, self.extractUuid)
+                info = self.cowutil.getInfo(self.path, self.extractUuid)
             except util.SMException:
                 Util.log(" [VDI %s: failed to read VHD metadata]" % self.uuid)
                 return
@@ -1168,13 +1164,13 @@ class FileVDI(VDI):
         self.hidden = info.hidden
         self.scanError = False
         self.path = os.path.join(self.sr.path, "%s%s" % \
-                (self.uuid, VdiTypeExtension.VHD))
+                (self.uuid, VDI_TYPE_TO_EXTENSION[self.vdi_type]))
 
     @override
     def rename(self, uuid) -> None:
         oldPath = self.path
         VDI.rename(self, uuid)
-        self.fileName = "%s%s" % (self.uuid, VdiTypeExtension.VHD)
+        self.fileName = "%s%s" % (self.uuid, VDI_TYPE_TO_EXTENSION[self.vdi_type])
         self.path = os.path.join(self.sr.path, self.fileName)
         assert(not util.pathexists(self.path))
         Util.log("Renaming %s -> %s" % (oldPath, self.path))
@@ -1199,7 +1195,7 @@ class FileVDI(VDI):
     @override
     def getAllocatedSize(self) -> int:
         if self._sizeAllocated == -1:
-            self._sizeAllocated = vhdutil.getAllocatedSize(self.path)
+            self._sizeAllocated = self.cowutil.getAllocatedSize(self.path)
         return self._sizeAllocated
 
 
@@ -1325,7 +1321,7 @@ class LVMVDI(VDI):
         if not VdiType.isCowImage(self.vdi_type):
             return
         self._activate()
-        self._sizePhys = vhdutil.getSizePhys(self.path)
+        self._sizePhys = self.cowutil.getSizePhys(self.path)
         if self._sizePhys <= 0:
             raise util.SMException("phys size of %s = %d" % \
                     (self, self._sizePhys))
@@ -1343,7 +1339,7 @@ class LVMVDI(VDI):
         if not VdiType.isCowImage(self.vdi_type):
             return
         self._activate()
-        self._sizeAllocated = vhdutil.getAllocatedSize(self.path)
+        self._sizeAllocated = self.cowutil.getAllocatedSize(self.path)
 
     @override
     def _loadInfoHidden(self) -> None:
@@ -1409,7 +1405,7 @@ class LVMVDI(VDI):
             self.sr.lvmCache.setReadonly(self.fileName, False)
 
         try:
-            vhdutil.setParent(self.path, parent.path, parent.vdi_type == VdiType.RAW)
+            self.cowutil.setParent(self.path, parent.path, parent.vdi_type == VdiType.RAW)
         finally:
             if self.lvReadonly:
                 self.sr.lvmCache.setReadonly(self.fileName, True)
@@ -1480,8 +1476,7 @@ class LVMVDI(VDI):
         subtree are guaranteed to be unplugged (and remain so for the duration
         of the operation): this operation is only safe for offline VHDs"""
         self._activate()
-        jFile = lvhdutil.createVHDJournalLV(self.sr.lvmCache, self.uuid,
-                vhdutil.MAX_VHD_JOURNAL_SIZE)
+        jFile = lvhdutil.createVHDJournalLV(self.sr.lvmCache, self.uuid, self.cowutil.getResizeJournalSize())
         try:
             lvhdutil.setSizeVirt(self.sr.journaler, self.sr.uuid, self.uuid,
                     size, jFile)
@@ -1546,6 +1541,7 @@ class LinstorVDI(VDI):
         self.drbd_size = -1
         self.hidden = info.hidden
         self.scanError = False
+
         self.vdi_type = VdiType.VHD
 
     @override
@@ -1624,7 +1620,7 @@ class LinstorVDI(VDI):
 
     @override
     def validate(self, fast=False) -> None:
-        if VdiType.isCowImage(self.vdi_type) and not self.sr._vhdutil.check(self.uuid, fast=fast):
+        if VdiType.isCowImage(self.vdi_type) and self.cowutil.check(self.uuid, fast=fast) != CowUtil.CheckResult.Success:
             raise util.SMException('VHD {} corrupted'.format(self))
 
     @override
@@ -1729,7 +1725,7 @@ class LinstorVDI(VDI):
     def _setSizeVirt(self, size) -> None:
         jfile = self.uuid + '-jvhd'
         self.sr._linstor.create_volume(
-            jfile, vhdutil.MAX_VHD_JOURNAL_SIZE, persistent=False, volume_name=jfile
+            jfile, self.cowutil.getResizeJournalSize(), persistent=False, volume_name=jfile
         )
         try:
             self.inflate(LinstorVhdUtil.compute_volume_size(size, self.vdi_type))
@@ -2651,15 +2647,20 @@ class FileSR(SR):
     def scan(self, force=False) -> None:
         if not util.pathexists(self.path):
             raise util.SMException("directory %s not found!" % self.uuid)
-        vhds = self._scan(force)
-        for uuid, vhdInfo in vhds.items():
-            vdi = self.getVDI(uuid)
-            if not vdi:
-                self.logFilter.logNewVDI(uuid)
-                vdi = FileVDI(self, uuid, VdiType.VHD)
-                self.vdis[uuid] = vdi
-            vdi.load(vhdInfo)
-        uuidsPresent = list(vhds.keys())
+
+        uuidsPresent: list[str] = []
+
+        for vdi_type in VDI_COW_TYPES:
+            scan_result = self._scan(vdi_type, force)
+            for uuid, image_info in scan_result.items():
+                vdi = self.getVDI(uuid)
+                if not vdi:
+                    self.logFilter.logNewVDI(uuid)
+                    vdi = FileVDI(self, uuid, vdi_type)
+                    self.vdis[uuid] = vdi
+                vdi.load(image_info)
+            uuidsPresent.extend(scan_result.keys())
+
         rawList = [x for x in os.listdir(self.path) if x.endswith(VdiTypeExtension.RAW)]
         for rawName in rawList:
             uuid = FileVDI.extractUuid(rawName)
@@ -2763,20 +2764,20 @@ class FileSR(SR):
         return (len(name) == Util.UUID_LEN + len(self.CACHE_FILE_EXT)) and \
                 name.endswith(self.CACHE_FILE_EXT)
 
-    def _scan(self, force):
+    def _scan(self, vdi_type, force):
         for i in range(SR.SCAN_RETRY_ATTEMPTS):
             error = False
-            pattern = os.path.join(self.path, "*%s" % VdiTypeExtension.VHD)
-            vhds = vhdutil.getAllVHDs(pattern, FileVDI.extractUuid)
-            for uuid, vhdInfo in vhds.items():
+            pattern = os.path.join(self.path, "*%s" % VDI_TYPE_TO_EXTENSION[vdi_type])
+            scan_result = getCowUtil(vdi_type).getAllInfoFromVG(pattern, FileVDI.extractUuid)
+            for uuid, vhdInfo in scan_result.items():
                 if vhdInfo.error:
                     error = True
                     break
             if not error:
-                return vhds
+                return scan_result
             Util.log("Scan error on attempt %d" % i)
         if force:
-            return vhds
+            return scan_result
         raise util.SMException("Scan error")
 
     @override
@@ -2846,7 +2847,7 @@ class FileSR(SR):
             child.rename(childUuid)
             Util.log("Updating the VDI record")
             child.setConfig(VDI.DB_VDI_PARENT, parentUuid)
-            child.setConfig(VDI.DB_VDI_TYPE, VdiType.VHD)
+            child.setConfig(VDI.DB_VDI_TYPE, child.vdi_type)
             util.fistpoint.activate("LVHDRT_coaleaf_undo_after_rename2", self.uuid)
 
         if child.hidden:
@@ -3066,7 +3067,7 @@ class LVMSR(SR):
             child.rename(childUuid)
             Util.log("Updating the VDI record")
             child.setConfig(VDI.DB_VDI_PARENT, parentUuid)
-            child.setConfig(VDI.DB_VDI_TYPE, VdiType.VHD)
+            child.setConfig(VDI.DB_VDI_TYPE, child.vdi_type)
             util.fistpoint.activate("LVHDRT_coaleaf_undo_after_rename2", self.uuid)
 
             # refcount (best effort - assume that it had succeeded if the
@@ -3431,7 +3432,7 @@ class LinstorSR(SR):
             child.rename(childUuid)
             Util.log('Updating the VDI record')
             child.setConfig(VDI.DB_VDI_PARENT, parentUuid)
-            child.setConfig(VDI.DB_VDI_TYPE, VdiType.VHD)
+            child.setConfig(VDI.DB_VDI_TYPE, child.vdi_type)
 
         # TODO: Maybe deflate here.
 

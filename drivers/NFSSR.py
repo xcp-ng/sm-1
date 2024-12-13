@@ -33,7 +33,6 @@ import xmlrpc.client
 import xs_errors
 import lock
 import nfs
-import vhdutil
 import cleanup
 
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_CACHING",
@@ -48,8 +47,8 @@ CONFIGURATION = [['server', 'hostname or IP address of NFS server (required)'],
                  nfs.NFS_VERSION]
 
 DRIVER_INFO = {
-    'name': 'NFS VHD',
-    'description': 'SR plugin which stores disks as VHD files on a remote NFS filesystem',
+    'name': 'NFS VHD and QCOW2',
+    'description': 'SR plugin which stores disks as VHD and QCOW2 files on a remote NFS filesystem',
     'vendor': 'Citrix Systems Inc',
     'copyright': '(C) 2008 Citrix Systems Inc',
     'driver_version': '1.0',

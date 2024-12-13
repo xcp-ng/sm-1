@@ -15,7 +15,10 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
-"""Helper functions for LVHD SR. This module knows about RAW and VHD VDI's 
+# TODO: Must be a class
+# TODO: CHECK ALL CALLS TO LVHDUTIL FUNCTIONS, USE SELF.
+
+"""Helper functions for LVHD SR. This module knows about RAW and VHD VDI's
 that live in LV's."""
 import os
 import sys
@@ -26,7 +29,9 @@ import util
 import vhdutil
 
 from refcounter import RefCounter
-from vditype import VdiType
+
+from cowutil import getCowUtil
+from vditype import VdiType, VDI_COW_TYPES
 
 MSIZE_MB = 2 * 1024 * 1024  # max virt size for fast resize
 MSIZE = int(MSIZE_MB * 1024 * 1024)
@@ -36,10 +41,13 @@ VG_PREFIX = "VG_XenStorage-"
 LVM_SIZE_INCREMENT = 4 * 1024 * 1024
 
 LV_PREFIX = {
-        VdiType.VHD: "VHD-",
-        VdiType.RAW: "LV-",
+    VdiType.RAW: "LV-",
+    VdiType.VHD: "VHD-",
+    VdiType.QCOW2: "QCOW2-",
 }
-VDI_TYPES = [VdiType.VHD, VdiType.RAW]
+VDI_TYPES = [VdiType.RAW, VdiType.VHD, VdiType.QCOW2]
+
+LV_PREFIX_TO_VDI_TYPE = {v: k for k, v in LV_PREFIX.items()}
 
 JRN_INFLATE = "inflate"
 
@@ -72,8 +80,7 @@ class VDIInfo:
 def matchLV(lvName):
     """given LV name, return the VDI type and the UUID, or (None, None)
     if the name doesn't match any known type"""
-    for vdiType in VDI_TYPES:
-        prefix = LV_PREFIX[vdiType]
+    for vdiType, prefix in LV_PREFIX.items():
         if lvName.startswith(prefix):
             return (vdiType, lvName.replace(prefix, ""))
     return (None, None)
@@ -85,9 +92,9 @@ def extractUuid(path):
         # we are dealing with realpath
         uuid = uuid.replace("--", "-")
         uuid.replace(VG_PREFIX, "")
-    for t in VDI_TYPES:
-        if uuid.find(LV_PREFIX[t]) != -1:
-            uuid = uuid.split(LV_PREFIX[t])[-1]
+    for prefix in LV_PREFIX.values():
+        if uuid.find(prefix) != -1:
+            uuid = uuid.split(prefix)[-1]
             uuid = uuid.strip()
             # TODO: validate UUID format
             return uuid
@@ -98,16 +105,16 @@ def calcSizeLV(sizeVHD):
     return util.roundup(LVM_SIZE_INCREMENT, sizeVHD)
 
 
-def calcSizeVHDLV(sizeVirt):
+def calcSizeVHDLV(self, sizeVirt):
     # all LVHD VDIs have the metadata area preallocated for the maximum
     # possible virtual size (for fast online VDI.resize)
-    metaOverhead = vhdutil.calcOverheadEmpty(MSIZE)
-    bitmapOverhead = vhdutil.calcOverheadBitmap(sizeVirt)
+    metaOverhead = self._cowutil.calcOverheadEmpty(MSIZE)
+    bitmapOverhead = self._cowutil.calcOverheadBitmap(sizeVirt)
     return calcSizeLV(sizeVirt + metaOverhead + bitmapOverhead)
 
 
 def getLVInfo(lvmCache, lvName=None):
-    """Load LV info for all LVs in the VG or an individual LV. 
+    """Load LV info for all LVs in the VG or an individual LV.
     This is a wrapper for lvutil.getLVInfo that filters out LV's that
     are not LVHD VDI's and adds the vdi_type information"""
     allLVs = lvmCache.getLVInfo(lvName)
@@ -127,10 +134,10 @@ def getVDIInfo(lvmCache):
     vdis = {}
     lvs = getLVInfo(lvmCache)
 
-    haveVHDs = False
+    hasCowVdis = False
     for uuid, lvInfo in lvs.items():
         if VdiType.isCowImage(lvInfo.vdiType):
-            haveVHDs = True
+            hasCowVdis = True
         vdiInfo = VDIInfo(uuid)
         vdiInfo.vdiType = lvInfo.vdiType
         vdiInfo.lvName = lvInfo.name
@@ -142,14 +149,17 @@ def getVDIInfo(lvmCache):
         vdiInfo.hidden = lvInfo.hidden
         vdis[uuid] = vdiInfo
 
-    if haveVHDs:
-        pattern = "%s*" % LV_PREFIX[VdiType.VHD]
-        vhds = vhdutil.getAllVHDs(pattern, extractUuid, lvmCache.vgName)
+    if not hasCowVdis:
+        return vdis
+
+    for vdi_type in VDI_COW_TYPES:
+        pattern = "%s*" % LV_PREFIX[vdi_type]
+        vdis = getCowUtil(vdi_type).getAllInfoFromVG(pattern, extractUuid, lvmCache.vgName)
         uuids = vdis.keys()
         for uuid in uuids:
             vdi = vdis[uuid]
             if VdiType.isCowImage(vdi.vdiType):
-                if not vhds.get(uuid):
+                if not vdis.get(uuid):
                     lvmCache.refresh()
                     if lvmCache.checkLV(vdi.lvName):
                         util.SMlog("*** VHD info missing: %s" % uuid)
@@ -157,17 +167,17 @@ def getVDIInfo(lvmCache):
                     else:
                         util.SMlog("LV disappeared since last scan: %s" % uuid)
                         del vdis[uuid]
-                elif vhds[uuid].error:
+                elif vdis[uuid].error:
                     util.SMlog("*** vhd-scan error: %s" % uuid)
                     vdis[uuid].scanError = True
                 else:
-                    vdis[uuid].sizeVirt = vhds[uuid].sizeVirt
-                    vdis[uuid].parentUuid = vhds[uuid].parentUuid
-                    vdis[uuid].hidden = vhds[uuid].hidden
+                    vdis[uuid].sizeVirt = vdis[uuid].sizeVirt
+                    vdis[uuid].parentUuid = vdis[uuid].parentUuid
+                    vdis[uuid].hidden = vdis[uuid].hidden
     return vdis
 
 
-def inflate(journaler, srUuid, vdiUuid, size):
+def inflate(self, journaler, srUuid, vdiUuid, size):
     """Expand a VDI LV (and its VHD) to 'size'. If the LV is already bigger
     than that, it's a no-op. Does not change the virtual size of the VDI"""
     lvName = LV_PREFIX[VdiType.VHD] + vdiUuid
@@ -187,13 +197,13 @@ def inflate(journaler, srUuid, vdiUuid, size):
             vhdutil.VHD_FOOTER_SIZE):
         raise Exception('failed to zero out VHD footer')
     util.fistpoint.activate("LVHDRT_inflate_after_zeroOut", srUuid)
-    vhdutil.setSizePhys(path, newSize, False)
+    self._cowutil.setSizePhys(path, newSize, False)
     util.fistpoint.activate("LVHDRT_inflate_after_setSizePhys", srUuid)
     journaler.remove(JRN_INFLATE, vdiUuid)
 
 
-def deflate(lvmCache, lvName, size):
-    """Shrink the LV and the VHD on it to 'size'. Does not change the 
+def deflate(self, lvmCache, lvName, size):
+    """Shrink the LV and the VHD on it to 'size'. Does not change the
     virtual size of the VDI"""
     currSizeLV = lvmCache.getSize(lvName)
     newSize = calcSizeLV(size)
@@ -201,18 +211,18 @@ def deflate(lvmCache, lvName, size):
         return
     path = os.path.join(VG_LOCATION, lvmCache.vgName, lvName)
     # no undo necessary if this fails at any point between now and the end
-    vhdutil.setSizePhys(path, newSize)
+    self._cowutil.setSizePhys(path, newSize)
     lvmCache.setSize(lvName, newSize)
 
 
-def setSizeVirt(journaler, srUuid, vdiUuid, size, jFile):
+def setSizeVirt(self, journaler, srUuid, vdiUuid, size, jFile):
     """When resizing the VHD virtual size, we might have to inflate the LV in
     case the metadata size increases"""
     lvName = LV_PREFIX[VdiType.VHD] + vdiUuid
     vgName = VG_PREFIX + srUuid
     path = os.path.join(VG_LOCATION, vgName, lvName)
     inflate(journaler, srUuid, vdiUuid, calcSizeVHDLV(size))
-    vhdutil.setSizeVirt(path, size, jFile)
+    self._cowutil.setSizeVirt(path, size, jFile)
 
 
 def _tryAcquire(lock):
@@ -227,7 +237,7 @@ def _tryAcquire(lock):
     raise util.SRBusyException()
 
 
-def attachThin(journaler, srUuid, vdiUuid):
+def attachThin(self, journaler, srUuid, vdiUuid):
     """Ensure that the VDI LV is expanded to the fully-allocated size"""
     lvName = LV_PREFIX[VdiType.VHD] + vdiUuid
     vgName = VG_PREFIX + srUuid
@@ -235,7 +245,7 @@ def attachThin(journaler, srUuid, vdiUuid):
     lvmCache = journaler.lvmCache
     _tryAcquire(sr_lock)
     lvmCache.refresh()
-    vhdInfo = vhdutil.getVHDInfoLVM(lvName, extractUuid, vgName)
+    vhdInfo = self._cowutil.getInfoFromLVM(lvName, extractUuid, vgName)
     newSize = calcSizeVHDLV(vhdInfo.sizeVirt)
     currSizeLV = lvmCache.getSize(lvName)
     if newSize <= currSizeLV:

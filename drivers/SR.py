@@ -28,14 +28,16 @@ import copy
 import os
 import traceback
 
+from cowutil import ImageFormat, parseImageFormats
+
 MOUNT_BASE = '/var/run/sr-mount'
 DEFAULT_TAP = "vhd,qcow2"
-TAPDISK_UTIL = '/usr/sbin/td-util'
 MASTER_LVM_CONF = '/etc/lvm/master'
 
 # LUN per VDI key for XenCenter
 LUNPERVDI = "LUNperVDI"
 
+DEFAULT_IMAGE_FORMATS = [ImageFormat.VHD, ImageFormat.QCOW2]
 
 
 
@@ -518,6 +520,11 @@ class SR(object):
 
         return missing_keys
 
+    def init_preferred_image_formats(self):
+        self.preferred_image_formats = parseImageFormats(
+            self.dconf and self.dconf.get('preferred-image-formats'),
+            DEFAULT_IMAGE_FORMATS
+        )
 
 class ScanRecord:
     def __init__(self, sr):

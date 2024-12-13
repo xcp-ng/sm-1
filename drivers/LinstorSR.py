@@ -305,6 +305,8 @@ class LinstorSR(SR.SR):
     # SR methods.
     # --------------------------------------------------------------------------
 
+    _linstor: Optional[LinstorVolumeManager] = None
+
     @override
     @staticmethod
     def handles(type) -> bool:
@@ -1286,7 +1288,7 @@ class LinstorSR(SR.SR):
                 return (device_path, None)
 
             # Otherwise it's a VHD and a parent can exist.
-            if not self._vhdutil.check(vdi_uuid):
+            if self._cowutil.check(vdi_uuid) != cowutil.CheckResult.Success:
                 return (None, None)
 
             vhd_info = self._vhdutil.get_vhd_info(vdi_uuid)
@@ -1660,8 +1662,10 @@ class LinstorVDI(VDI.VDI):
         assert self.ty
         assert self.vdi_type
 
+        self._cowutil = None # TODO
+
         # 2. Compute size and check space available.
-        size = vhdutil.validate_and_round_vhd_size(int(size))
+        size = self._cowutil.validateAndRoundImageSize(int(size))
         volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
         util.SMlog(
             'LinstorVDI.create: type={}, vhd-size={}, volume-size={}'
@@ -1692,16 +1696,18 @@ class LinstorVDI(VDI.VDI):
 
             self._update_device_name(volume_info.name)
 
+            self.cowutil = None # TODO
+
             if not VdiType.isCowImage(self.vdi_type):
                 self.size = volume_info.virtual_size
             else:
-                self.sr._vhdutil.create(
+                self._cowutil.create(
                     self.path, size, False, self.MAX_METADATA_VIRT_SIZE
                 )
-                self.size = self.sr._vhdutil.get_size_virt(self.uuid)
+                self.size = self._cowutil.get_size_virt(self.uuid)
 
             if self._key_hash:
-                self.sr._vhdutil.set_key(self.path, self._key_hash)
+                self._cowutil.set_key(self.path, self._key_hash) # TODO: Check supported before call
 
             # Because vhdutil commands modify the volume data,
             # we must retrieve a new time the utilization size.
@@ -1933,7 +1939,7 @@ class LinstorVDI(VDI.VDI):
             raise xs_errors.XenError('VDIUnavailable', opterr='hidden VDI')
 
         # Compute the virtual VHD and DRBD volume size.
-        size = vhdutil.validate_and_round_vhd_size(int(size))
+        size = self._cowutil.validateAndRoundImageSize(int(size))
         volume_size = LinstorVhdUtil.compute_volume_size(size, self.vdi_type)
         util.SMlog(
             'LinstorVDI.resize: type={}, vhd-size={}, volume-size={}'
@@ -2286,12 +2292,12 @@ class LinstorVDI(VDI.VDI):
 
         # 2. Write the snapshot content.
         is_raw = (self.vdi_type == VdiType.RAW)
-        self.sr._vhdutil.snapshot(
+        self._cowutil.snapshot(
             snap_path, self.path, is_raw, self.MAX_METADATA_VIRT_SIZE
         )
 
         # 3. Get snapshot parent.
-        snap_parent = self.sr._vhdutil.get_parent(snap_uuid)
+        snap_parent = self._cowutil.get_parent(snap_uuid)
 
         # 4. Update metadata.
         util.SMlog('Set VDI {} metadata of snapshot'.format(snap_uuid))
@@ -2384,7 +2390,7 @@ class LinstorVDI(VDI.VDI):
                 'VDIUnavailable',
                 opterr='failed to get VHD depth'
             )
-        elif depth >= vhdutil.MAX_CHAIN_SIZE:
+        elif depth >= self._cowutil.getMaxChainLength():
             raise xs_errors.XenError('SnapshotChainTooLong')
 
         # Ensure we have a valid path if we don't have a local diskful.

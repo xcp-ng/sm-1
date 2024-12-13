@@ -399,7 +399,7 @@ def check(session, args):
         raise
 
 
-def get_vhd_info(session, args):
+def get_vhd_info(session, args): # TODO: rename
     try:
         device_path = args['devicePath']
         group_name = args['groupName']
@@ -411,16 +411,19 @@ def get_vhd_info(session, args):
             logger=util.SMlog
         )
 
+        # TODO
+        cowutil = None
+
         def extract_uuid(device_path):
             # TODO: Remove new line in the vhdutil module. Not here.
             return linstor.get_volume_uuid_from_device_path(
                 device_path.rstrip('\n')
             )
 
-        vhd_info = vhdutil.getVHDInfo(
+        cow_info = cowutil.getInfo(
             device_path, extract_uuid, include_parent, False
         )
-        return json.dumps(vhd_info.__dict__)
+        return json.dumps(cow_info.__dict__)
     except Exception as e:
         util.SMlog('linstor-manager:get_vhd_info error: {}'.format(e))
         raise
@@ -429,7 +432,8 @@ def get_vhd_info(session, args):
 def has_parent(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.hasParent(device_path))
+        cowutil = None
+        return str(cowutil.hasParent(device_path))
     except Exception as e:
         util.SMlog('linstor-manager:has_parent error: {}'.format(e))
         raise
@@ -446,13 +450,15 @@ def get_parent(session, args):
             logger=util.SMlog
         )
 
+        cowutil = None # TODO
+
         def extract_uuid(device_path):
             # TODO: Remove new line in the vhdutil module. Not here.
             return linstor.get_volume_uuid_from_device_path(
                 device_path.rstrip('\n')
             )
 
-        return vhdutil.getParent(device_path, extract_uuid)
+        return cowutil.getParent(device_path, extract_uuid)
     except Exception as e:
         util.SMlog('linstor-manager:get_parent error: {}'.format(e))
         raise
@@ -461,7 +467,8 @@ def get_parent(session, args):
 def get_size_virt(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.getSizeVirt(device_path))
+        cowutil = None # TODO
+        return str(cowutil.getSizeVirt(device_path))
     except Exception as e:
         util.SMlog('linstor-manager:get_size_virt error: {}'.format(e))
         raise
@@ -479,7 +486,8 @@ def get_size_phys(session, args):
 def get_allocated_size(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.getAllocatedSize(device_path))
+        cowutil = None
+        return str(cowutil.getAllocatedSize(device_path))
     except Exception as e:
         util.SMlog('linstor-manager:get_allocated_size error: {}'.format(e))
         raise
@@ -488,7 +496,8 @@ def get_allocated_size(session, args):
 def get_depth(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.getDepth(device_path))
+        cowutil = None
+        return str(cowutil.getDepth(device_path))
     except Exception as e:
         util.SMlog('linstor-manager:get_depth error: {}'.format(e))
         raise
@@ -497,7 +506,8 @@ def get_depth(session, args):
 def get_key_hash(session, args):
     try:
         device_path = args['devicePath']
-        return vhdutil.getKeyHash(device_path) or ''
+        cowutil = None
+        return cowutil.getKeyHash(device_path) or ''
     except Exception as e:
         util.SMlog('linstor-manager:get_key_hash error: {}'.format(e))
         raise
@@ -506,7 +516,8 @@ def get_key_hash(session, args):
 def get_block_bitmap(session, args):
     try:
         device_path = args['devicePath']
-        return base64.b64encode(vhdutil.getBlockBitmap(device_path)).decode('ascii')
+        cowutil = None
+        return base64.b64encode(cowutil.getBlockBitmap(device_path)).decode('ascii')
     except Exception as e:
         util.SMlog('linstor-manager:get_block_bitmap error: {}'.format(e))
         raise
@@ -528,7 +539,8 @@ def set_parent(session, args):
     try:
         device_path = args['devicePath']
         parent_path = args['parentPath']
-        vhdutil.setParent(device_path, parent_path, False)
+        cowutil = None # TODO
+        cowutil.setParent(device_path, parent_path, False)
         return ''
     except Exception as e:
         util.SMlog('linstor-manager:set_parent error: {}'.format(e))
@@ -538,7 +550,8 @@ def set_parent(session, args):
 def coalesce(session, args):
     try:
         device_path = args['devicePath']
-        return str(vhdutil.coalesce(device_path))
+        cowutil = None
+        return str(cowutil.coalesce(device_path))
     except Exception as e:
         util.SMlog('linstor-manager:coalesce error: {}'.format(e))
         raise

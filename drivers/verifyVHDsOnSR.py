@@ -54,8 +54,11 @@ def activateVdiChainAndCheck(vhd_info, vg_name):
         return activated_list
 
     activated_list.append([vhd_info.uuid, vhd_path])
+
+    cowutil = None # TODO
+
     # Do a vhdutil check with -i option, to ignore error in primary
-    if not vhdutil.check(vhd_path, True):
+    if cowutil.check(vhd_path, True) != cowutil.CheckResult.Success:
         util.SMlog("VHD check for %s failed, continuing with the rest!" % vg_name)
         VHDs_failed += 1
     else:
@@ -115,7 +118,7 @@ def checkAllVHD(sr_uuid):
     pattern = "%s*" % lvhdutil.LV_PREFIX[VdiType.VHD]
 
     # Do a vhd scan and gets all the VHDs
-    vhds = vhdutil.getAllVHDs(pattern, lvhdutil.extractUuid, vg_name)
+    vhds = CowUtil.getAllInfoFromVG(pattern, lvhdutil.extractUuid, vg_name)
     VHDs_total = len(vhds)
 
     # Build VHD chain, that way it will be easier to activate all the VHDs

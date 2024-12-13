@@ -2,13 +2,13 @@
 #
 # Copyright (C) Citrix Systems Inc.
 #
-# This program is free software; you can redistribute it and/or modify 
-# it under the terms of the GNU Lesser General Public License as published 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published
 # by the Free Software Foundation; version 2.1 only.
 #
-# This program is distributed in the hope that it will be useful, 
-# but WITHOUT ANY WARRANTY; without even the implied warranty of 
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU Lesser General Public License for more details.
 #
 # You should have received a copy of the GNU Lesser General Public License
@@ -26,8 +26,8 @@ from lock import Lock
 import xs_errors
 import XenAPI
 import lvhdutil
-import vhdutil
 import lvmcache
+from cowutil import getCowUtil
 from vditype import VdiType
 
 try:
@@ -88,13 +88,13 @@ def tapPause(session, args):
 def tapUnpause(session, args):
     tap = Tapdisk(session, args)
     return tap.Unpause()
-    
+
 def tapRefresh(session, args):
     tap = Tapdisk(session, args)
     if tap.Pause() != "True":
         return str(False)
     return tap.Unpause()
-    
+
 
 class Tapdisk:
     def __init__(self, session, args):
@@ -124,20 +124,19 @@ class Tapdisk:
             realpath = os.readlink(self.phypath)
         except OSError as e:
             util.SMlog("Phypath %s does not exist" % self.phypath)
-            return            
+            return
         util.SMlog("Realpath: %s" % realpath)
         if realpath.startswith("/dev/VG_XenStorage-") and \
                 not os.path.exists(realpath):
             util.SMlog("Path inconsistent")
             pfx = "/dev/VG_XenStorage-%s/" % self.sr_uuid
-            for ty in ["LV","VHD"]:
-                p = pfx + ty + "-" + self.vdi_uuid
+            for ty in lvhdutil.LV_PREFIX.values():
+                p = pfx + ty + self.vdi_uuid
                 util.SMlog("Testing path: %s" % p)
                 if os.path.exists(p):
                     _mkphylink(self.sr_uuid, self.vdi_uuid, p)
                     self.realpath = p
-                    if ty == "LV": self.vdi_type = VdiType.RAW
-                    else: self.vdi_type = VdiType.VHD
+                    self.vdi_type = LV_PREFIX_TO_VDI_TYPE[ty]
         elif realpath.startswith('/dev/drbd/by-res/xcp-volume-'):
             if not LINSTOR_AVAILABLE:
                 raise util.SMException(
@@ -203,25 +202,26 @@ class Tapdisk:
             util.SMlog("No %s: nothing to unpause" % self.path)
             return str(True)
         self._pathRefresh()
-        self.major, self.minor = _getDevMajor_minor(self.path)    
+        self.major, self.minor = _getDevMajor_minor(self.path)
         if self.major != blktap2.Tapdisk.major():
             util.SMlog("Non-tap major number: %d" % self.major)
             return str(False)
+
+        import VDI
+        vdi = VDI.VDI.from_uuid(self.session, self.vdi_uuid)
+
         if self.activate_parents:
             util.SMlog("Activating parents of %s" % self.vdi_uuid)
             vg_name = lvhdutil.VG_PREFIX + self.sr_uuid
             ns = lvhdutil.NS_PREFIX_LVM + self.sr_uuid
             lvm_cache = lvmcache.LVMCache(vg_name)
-            lv_name = lvhdutil.LV_PREFIX[VdiType.VHD] + self.vdi_uuid
-            vdi_list = vhdutil.getParentChain(lv_name,
-                    lvhdutil.extractUuid, vg_name)
+            lv_name = lvhdutil.LV_PREFIX[vdi.vdi_type] + self.vdi_uuid
+            vdi_list = getCowUtil(vdi.vdi_type).getParentChain(lv_name, lvhdutil.extractUuid, vg_name)
             for uuid, lv_name in vdi_list.items():
                 if uuid == self.vdi_uuid:
                     continue
                 lvm_cache.activate(ns, uuid, lv_name, False)
 
-        import VDI
-        vdi = VDI.VDI.from_uuid(self.session, self.vdi_uuid)
         # Check if CBT is enabled on disk we are about to unpause
         if vdi._get_blocktracking_status():
             logname = vdi._get_cbt_logname(self.vdi_uuid)

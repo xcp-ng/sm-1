@@ -33,8 +33,8 @@ import atexit
 USAGE_STRING = \
     """Usage: %s -u/--uuid <UUID of VM whose VDIs should be leaf-coalesced>
 This will coalesce each VDI attached to the given VM that consists of a pair
-of VHD files into a single VHD file.
-Only LVM SRs will be considered, and only VDIs whose VHD chain length equals 2.
+of COW files into a single COW file.
+Only LVM SRs will be considered, and only VDIs whose COW chain length equals 2.
 Note that the VM will be suspended during the operation. DO NOT
 start/resume/unpause the VM during the operation."""
 

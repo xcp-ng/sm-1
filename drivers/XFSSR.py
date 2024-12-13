@@ -32,7 +32,6 @@ import scsiutil
 import lock
 import os
 import xs_errors
-import vhdutil
 from constants import EXT_PREFIX
 
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING", \
@@ -45,8 +44,8 @@ CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING", \
 CONFIGURATION = [['device', 'local device path (required) (e.g. /dev/sda3)']]
 
 DRIVER_INFO = {
-    'name': 'Local XFS VHD',
-    'description': 'SR plugin which represents disks as VHD files stored on a local XFS filesystem, created inside an LVM volume',
+    'name': 'Local XFS VHD and QCOW2',
+    'description': 'SR plugin which represents disks as VHD and QCOW2 files stored on a local XFS filesystem, created inside an LVM volume',
     'vendor': 'Vates SAS',
     'copyright': '(C) 2019 Vates SAS',
     'driver_version': '1.0',

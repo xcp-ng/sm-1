@@ -18,27 +18,32 @@ VHD_UTIL = '/usr/bin/vhd-util'
 class TestVhdUtil(unittest.TestCase):
 
     def test_validate_and_round_min_size(self):
-        size = vhdutil.validate_and_round_vhd_size(2 * 1024 * 1024)
+        size = vhdutil.validateAndRoundImageSize(2 * 1024 * 1024)
 
         self.assertTrue(size == 2 * 1024 * 1024)
 
     def test_validate_and_round_max_size(self):
-        size = vhdutil.validate_and_round_vhd_size(vhdutil.MAX_VHD_SIZE)
+        cowutil = None
+        size = vhdutil.validateAndRoundImageSize(cowutil.getMaxImageSize())
 
-        self.assertTrue(size == vhdutil.MAX_VHD_SIZE)
+        cowutil = None
+        self.assertTrue(size == cowutil.getMaxImageSize())
 
     def test_validate_and_round_odd_size_up_to_next_boundary(self):
-        size = vhdutil.validate_and_round_vhd_size(vhdutil.MAX_VHD_SIZE - 1)
+        cowutil = None
+        size = vhdutil.validateAndRoundImageSize(cowutil.getMaxImageSize() - 1)
 
-        self.assertTrue(size == vhdutil.MAX_VHD_SIZE)
+        cowutil = None
+        self.assertTrue(size == cowutil.getMaxImageSize())
 
     def test_validate_and_round_negative(self):
         with self.assertRaises(xs_errors.SROSError):
-            vhdutil.validate_and_round_vhd_size(-1)
+            vhdutil.validateAndRoundImageSize(-1)
 
     def test_validate_and_round_too_large(self):
         with self.assertRaises(xs_errors.SROSError):
-            vhdutil.validate_and_round_vhd_size(vhdutil.MAX_VHD_SIZE + 1)
+        cowutil = None
+            vhdutil.validateAndRoundImageSize(cowutil.getMaxImageSize() + 1)
 
     @testlib.with_context
     def test_calc_overhead_empty_small(self, context):

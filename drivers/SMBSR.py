@@ -29,7 +29,6 @@ import os
 import xmlrpc.client
 import xs_errors
 import lock
-import vhdutil
 import cleanup
 import cifutils
 
@@ -45,8 +44,8 @@ CONFIGURATION = [['server', 'Full path to share root on SMB server (required)'],
                   ['password', 'The password to be used during SMB authentication']]
 
 DRIVER_INFO = {
-    'name': 'SMB VHD',
-    'description': 'SR plugin which stores disks as VHD files on a remote SMB filesystem',
+    'name': 'SMB VHD and QCOW2',
+    'description': 'SR plugin which stores disks as VHD and QCOW2 files on a remote SMB filesystem',
     'vendor': 'Citrix Systems Inc',
     'copyright': '(C) 2015 Citrix Systems Inc',
     'driver_version': '1.0',

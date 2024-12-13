@@ -24,10 +24,10 @@ class VdiType(object):
     ISO = "iso"
     FILE = "file"
     CBTLOG = "cbtlog"
-    
+
     @classmethod
     def isCowImage(cls, vdi_type) -> bool:
-        return vdi_type in (cls.VHD)
+        return vdi_type in VDI_COW_TYPES
 
 # TODO: Use StrEnum in python 3.11.
 class VdiTypeExtension(object):
@@ -37,6 +37,8 @@ class VdiTypeExtension(object):
     ISO = ".iso"
     FILE = ".file"
     CBTLOG = ".cbtlog"
+
+VDI_COW_TYPES: Final = (VdiType.VHD, VdiType.QCOW2)
 
 VDI_TYPE_TO_EXTENSION: Final = {
     VdiType.RAW: VdiTypeExtension.RAW,

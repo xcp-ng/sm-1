@@ -35,7 +35,6 @@ import VDI
 import cleanup
 import lock
 import util
-import vhdutil
 import xs_errors
 
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE",
@@ -50,8 +49,8 @@ CONFIGURATION = [['server', 'Full path to share on gluster server (required, ex:
                  ]
 
 DRIVER_INFO = {
-    'name': 'GlusterFS VHD',
-    'description': 'SR plugin which stores disks as VHD files on a GlusterFS storage',
+    'name': 'GlusterFS VHD and QCOW2',
+    'description': 'SR plugin which stores disks as VHD and QCOW2 files on a GlusterFS storage',
     'vendor': 'Vates SAS',
     'copyright': '(C) 2020 Vates SAS',
     'driver_version': '1.0',

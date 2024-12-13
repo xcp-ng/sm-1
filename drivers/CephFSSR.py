@@ -39,7 +39,6 @@ import VDI
 import cleanup
 import lock
 import util
-import vhdutil
 import xs_errors
 
 CAPABILITIES = ["SR_PROBE", "SR_UPDATE",
@@ -56,8 +55,8 @@ CONFIGURATION = [
 ]
 
 DRIVER_INFO = {
-    'name': 'CephFS VHD',
-    'description': 'SR plugin which stores disks as VHD files on a CephFS storage',
+    'name': 'CephFS VHD and QCOW2',
+    'description': 'SR plugin which stores disks as VHD and QCOW2 files on a CephFS storage',
     'vendor': 'Vates SAS',
     'copyright': '(C) 2020 Vates SAS',
     'driver_version': '1.0',

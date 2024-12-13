@@ -48,9 +48,9 @@ CONFIGURATION = [
 ]
 
 DRIVER_INFO = {
-    'name': 'Local ZFS VHD',
+    'name': 'Local ZFS VHD and QCOW2',
     'description':
-        'SR plugin which represents disks as VHD files stored on a ZFS disk',
+        'SR plugin which represents disks as VHD and QCOW2 files stored on a ZFS disk',
     'vendor': 'Vates SAS',
     'copyright': '(C) 2020 Vates SAS',
     'driver_version': '1.0',

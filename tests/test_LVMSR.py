@@ -265,6 +265,9 @@ class TestLVMVDI(unittest.TestCase, Stubs):
         vhdutil_patcher = mock.patch('LVMSR.vhdutil', autospec=True)
         self.mock_vhdutil = vhdutil_patcher.start()
         self.mock_vhdutil.MAX_CHAIN_SIZE = vhdutil.MAX_CHAIN_SIZE
+
+        # TODO: self._cowutil.getMaxChainLength()
+
         lvutil_patcher = mock.patch('LVMSR.lvutil', autospec=True)
         self.mock_lvutil = lvutil_patcher.start()
         vdi_util_patcher = mock.patch('VDI.util', autospec=True)
