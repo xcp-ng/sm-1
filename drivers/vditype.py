@@ -20,6 +20,7 @@ from sm_typing import Final
 class VdiType(object):
     RAW = "aio"
     VHD = "vhd"
+    QCOW2 = "qcow2"
     ISO = "iso"
     FILE = "file"
     CBTLOG = "cbtlog"
@@ -32,6 +33,7 @@ class VdiType(object):
 class VdiTypeExtension(object):
     RAW = ".raw"
     VHD = ".vhd"
+    QCOW2 = ".qcow2"
     ISO = ".iso"
     FILE = ".file"
     CBTLOG = ".cbtlog"
@@ -39,6 +41,7 @@ class VdiTypeExtension(object):
 VDI_TYPE_TO_EXTENSION: Final = {
     VdiType.RAW: VdiTypeExtension.RAW,
     VdiType.VHD: VdiTypeExtension.VHD,
+    VdiType.QCOW2: VdiTypeExtension.QCOW2,
     VdiType.ISO: VdiTypeExtension.ISO,
     VdiType.FILE: VdiTypeExtension.FILE,
     VdiType.CBTLOG: VdiTypeExtension.CBTLOG
