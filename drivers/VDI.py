@@ -511,7 +511,7 @@ class VDI(object):
         # List of sm-config keys that should not be modifed by db_update
         smconfig_protected_keys = [
             cleanup.VDI.DB_VDI_PAUSED,
-            cleanup.VDI.DB_VHD_BLOCKS,
+            cleanup.VDI.DB_VDI_BLOCKS,
             cleanup.VDI.DB_VDI_RELINKING,
             cleanup.VDI.DB_VDI_ACTIVATING]
 

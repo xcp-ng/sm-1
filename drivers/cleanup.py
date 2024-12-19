@@ -492,7 +492,7 @@ class VDI(object):
     # config keys & values
     DB_VDI_PARENT = "vhd-parent"
     DB_VDI_TYPE = "vdi_type"
-    DB_VHD_BLOCKS = "vhd-blocks"
+    DB_VDI_BLOCKS = "vhd-blocks"
     DB_VDI_PAUSED = "paused"
     DB_VDI_RELINKING = "relinking"
     DB_VDI_ACTIVATING = "activating"
@@ -512,7 +512,7 @@ class VDI(object):
     CONFIG_TYPE = {
             DB_VDI_PARENT: XAPI.CONFIG_SM,
             DB_VDI_TYPE: XAPI.CONFIG_SM,
-            DB_VHD_BLOCKS: XAPI.CONFIG_SM,
+            DB_VDI_BLOCKS: XAPI.CONFIG_SM,
             DB_VDI_PAUSED: XAPI.CONFIG_SM,
             DB_VDI_RELINKING: XAPI.CONFIG_SM,
             DB_VDI_ACTIVATING: XAPI.CONFIG_SM,
@@ -749,7 +749,7 @@ class VDI(object):
 
     def updateBlockInfo(self) -> Optional[str]:
         val = base64.b64encode(self._queryVHDBlocks()).decode()
-        self.setConfig(VDI.DB_VHD_BLOCKS, val)
+        self.setConfig(VDI.DB_VDI_BLOCKS, val)
         return val
 
     def rename(self, uuid) -> None:
@@ -1095,7 +1095,7 @@ class VDI(object):
         upper bound)"""
         # make sure we don't use stale BAT info from vdi_rec since the child
         # was writable all this time
-        self.delConfig(VDI.DB_VHD_BLOCKS)
+        self.delConfig(VDI.DB_VDI_BLOCKS)
         blocksChild = self.getVHDBlocks()
         blocksParent = self.parent.getVHDBlocks()
         numBlocks = Util.countBits(blocksChild, blocksParent)
@@ -2205,7 +2205,7 @@ class SR(object):
         for vdi in self.vdis.values():
             if vdi.scanError or len(vdi.children) == 0:
                 continue
-            if not vdi.getConfig(vdi.DB_VHD_BLOCKS):
+            if not vdi.getConfig(vdi.DB_VDI_BLOCKS):
                 return True
         return False
 
@@ -2213,7 +2213,7 @@ class SR(object):
         for vdi in self.vdis.values():
             if vdi.scanError or len(vdi.children) == 0:
                 continue
-            if not vdi.getConfig(vdi.DB_VHD_BLOCKS):
+            if not vdi.getConfig(vdi.DB_VDI_BLOCKS):
                 vdi.updateBlockInfo()
 
     def cleanupCoalesceJournals(self):
@@ -2544,7 +2544,7 @@ class SR(object):
         vdi.parent.delConfig(VDI.DB_VDI_PARENT)
         if vdi.parent.vdi_type == VdiType.RAW:
             vdi.parent.setConfig(VDI.DB_VDI_TYPE, VdiType.RAW)
-        vdi.parent.delConfig(VDI.DB_VHD_BLOCKS)
+        vdi.parent.delConfig(VDI.DB_VDI_BLOCKS)
         util.fistpoint.activate("LVHDRT_coaleaf_after_vdirec", self.uuid)
 
         self._updateNode(vdi)
@@ -2918,7 +2918,7 @@ class LVHDSR(SR):
         for vdi in self.vdis.values():
             if vdi.scanError or not VdiType.isCowImage(vdi.vdi_type) or len(vdi.children) == 0:
                 continue
-            if not vdi.getConfig(vdi.DB_VHD_BLOCKS):
+            if not vdi.getConfig(vdi.DB_VDI_BLOCKS):
                 return True
         return False
 
@@ -2928,7 +2928,7 @@ class LVHDSR(SR):
         for vdi in self.vdis.values():
             if vdi.scanError or not VdiType.isCowImage(vdi.vdi_type) or len(vdi.children) == 0:
                 continue
-            if not vdi.getConfig(vdi.DB_VHD_BLOCKS):
+            if not vdi.getConfig(vdi.DB_VDI_BLOCKS):
                 vdi.updateBlockInfo()
                 numUpdated += 1
         if numUpdated:
