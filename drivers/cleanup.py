@@ -542,7 +542,7 @@ class VDI(object):
         self.fileName = ""
         self.parentUuid = ""
         self.sizeVirt = -1
-        self._sizeVHD = -1
+        self._sizePhys = -1
         self._sizeAllocated = -1
         self.hidden = False
         self.parent = None
@@ -711,8 +711,8 @@ class VDI(object):
             vdiList.append(self)
         return vdiList
 
-    def getSizeVHD(self) -> int:
-        return self._sizeVHD
+    def getSizePhys(self) -> int:
+        return self._sizePhys
 
     def getAllocatedSize(self) -> int:
         return self._sizeAllocated
@@ -783,19 +783,19 @@ class VDI(object):
         strSizeVirt = "?"
         if self.sizeVirt > 0:
             strSizeVirt = Util.num2str(self.sizeVirt)
-        strSizeVHD = "?"
-        if self._sizeVHD > 0:
-            strSizeVHD = "/%s" % Util.num2str(self._sizeVHD)
+        strSizePhys = "?"
+        if self._sizePhys > 0:
+            strSizePhys = "/%s" % Util.num2str(self._sizePhys)
         strSizeAllocated = "?"
         if self._sizeAllocated >= 0:
             strSizeAllocated = "/%s" % Util.num2str(self._sizeAllocated)
         strType = ""
         if self.vdi_type == VdiType.RAW:
             strType = "[RAW]"
-            strSizeVHD = ""
+            strSizePhys = ""
 
         return "%s%s(%s%s%s)%s" % (strHidden, self.uuid[0:8], strSizeVirt,
-                strSizeVHD, strSizeAllocated, strType)
+                strSizePhys, strSizeAllocated, strType)
 
     def validate(self, fast=False) -> None:
         if not vhdutil.check(self.path, fast=fast):
@@ -1109,7 +1109,7 @@ class VDI(object):
         sizeCoalesced = sizeData + vhdutil.calcOverheadBitmap(sizeData) + \
                 vhdutil.calcOverheadEmpty(self.sizeVirt)
         Util.log("Coalesced size = %s" % Util.num2str(sizeCoalesced))
-        return sizeCoalesced - self.parent.getSizeVHD()
+        return sizeCoalesced - self.parent.getSizePhys()
 
     def _calcExtraSpaceForLeafCoalescing(self) -> int:
         """How much extra space in the SR will be required to
@@ -1163,7 +1163,7 @@ class FileVDI(VDI):
         self.children = []
         self.parentUuid = info.parentUuid
         self.sizeVirt = info.sizeVirt
-        self._sizeVHD = info.sizePhys
+        self._sizePhys = info.sizePhys
         self._sizeAllocated = info.sizeAllocated
         self.hidden = info.hidden
         self.scanError = False
@@ -1214,7 +1214,7 @@ class LVHDVDI(VDI):
         assert info, "No info given to LVHDVDI.load"
         self.parent = None
         self.children = []
-        self._sizeVHD = -1
+        self._sizePhys = -1
         self._sizeAllocated = -1
         self.scanError = info.scanError
         self.sizeLV = info.sizeLV
@@ -1243,7 +1243,7 @@ class LVHDVDI(VDI):
         finally:
             self.sr.unlock()
         self.sizeLV = self.sr.lvmCache.getSize(self.fileName)
-        self._sizeVHD = -1
+        self._sizePhys = -1
         self._sizeAllocated = -1
 
     def deflate(self):
@@ -1253,11 +1253,11 @@ class LVHDVDI(VDI):
         self._activate()
         self.sr.lock()
         try:
-            lvhdutil.deflate(self.sr.lvmCache, self.fileName, self.getSizeVHD())
+            lvhdutil.deflate(self.sr.lvmCache, self.fileName, self.getSizePhys())
         finally:
             self.sr.unlock()
         self.sizeLV = self.sr.lvmCache.getSize(self.fileName)
-        self._sizeVHD = -1
+        self._sizePhys = -1
         self._sizeAllocated = -1
 
     def inflateFully(self):
@@ -1312,12 +1312,12 @@ class LVHDVDI(VDI):
         VDI.delete(self)
 
     @override
-    def getSizeVHD(self) -> int:
-        if self._sizeVHD == -1:
-            self._loadInfoSizeVHD()
-        return self._sizeVHD
+    def getSizePhys(self) -> int:
+        if self._sizePhys == -1:
+            self._loadInfoSizePhys()
+        return self._sizePhys
 
-    def _loadInfoSizeVHD(self):
+    def _loadInfoSizePhys(self):
         """Get the physical utilization of the VHD file. We do it individually
         (and not using the VHD batch scanner) as an optimization: this info is
         relatively expensive and we need it only for VDI's involved in
@@ -1325,10 +1325,10 @@ class LVHDVDI(VDI):
         if not VdiType.isCowImage(self.vdi_type):
             return
         self._activate()
-        self._sizeVHD = vhdutil.getSizePhys(self.path)
-        if self._sizeVHD <= 0:
+        self._sizePhys = vhdutil.getSizePhys(self.path)
+        if self._sizePhys <= 0:
             raise util.SMException("phys size of %s = %d" % \
-                    (self, self._sizeVHD))
+                    (self, self._sizePhys))
 
     @override
     def getAllocatedSize(self) -> int:
@@ -1368,9 +1368,9 @@ class LVHDVDI(VDI):
         strHidden = ""
         if self.hidden:
             strHidden = "*"
-        strSizeVHD = ""
-        if self._sizeVHD > 0:
-            strSizeVHD = Util.num2str(self._sizeVHD)
+        strSizePhys = ""
+        if self._sizePhys > 0:
+            strSizePhys = Util.num2str(self._sizePhys)
         strSizeAllocated = ""
         if self._sizeAllocated >= 0:
             strSizeAllocated = Util.num2str(self._sizeAllocated)
@@ -1380,7 +1380,7 @@ class LVHDVDI(VDI):
         if self.lvOpen:
             strActive += "o"
         return "%s%s[%s](%s/%s/%s/%s|%s)" % (strHidden, self.uuid[0:8], strType,
-                Util.num2str(self.sizeVirt), strSizeVHD, strSizeAllocated,
+                Util.num2str(self.sizeVirt), strSizePhys, strSizeAllocated,
                 Util.num2str(self.sizeLV), strActive)
 
     @override
@@ -1398,7 +1398,7 @@ class LVHDVDI(VDI):
             self.inflateParentForCoalesce()
             VDI._doCoalesce(self)
         finally:
-            self.parent._loadInfoSizeVHD()
+            self.parent._loadInfoSizePhys()
             self.parent.deflate()
             self.sr.lvmCache.setReadonly(self.parent.fileName, True)
 
@@ -1506,13 +1506,13 @@ class LVHDVDI(VDI):
         """How much extra space in the SR will be required to
         [live-]leaf-coalesce this VDI"""
         # we can deflate the leaf to minimize the space requirements
-        deflateDiff = self.sizeLV - lvhdutil.calcSizeLV(self.getSizeVHD())
+        deflateDiff = self.sizeLV - lvhdutil.calcSizeLV(self.getSizePhys())
         return self._calcExtraSpaceForCoalescing() - deflateDiff
 
     @override
     def _calcExtraSpaceForSnapshotCoalescing(self) -> int:
         return self._calcExtraSpaceForCoalescing() + \
-                lvhdutil.calcSizeLV(self.getSizeVHD())
+                lvhdutil.calcSizeLV(self.getSizePhys())
 
 
 class LinstorVDI(VDI):
@@ -1541,7 +1541,7 @@ class LinstorVDI(VDI):
 
         self.parentUuid = info.parentUuid
         self.sizeVirt = info.sizeVirt
-        self._sizeVHD = -1
+        self._sizePhys = -1
         self._sizeAllocated = -1
         self.drbd_size = -1
         self.hidden = info.hidden
@@ -1549,10 +1549,10 @@ class LinstorVDI(VDI):
         self.vdi_type = VdiType.VHD
 
     @override
-    def getSizeVHD(self, fetch=False) -> int:
-        if self._sizeVHD < 0 or fetch:
-            self._sizeVHD = self.sr._vhdutil.get_size_phys(self.uuid)
-        return self._sizeVHD
+    def getSizePhys(self, fetch=False) -> int:
+        if self._sizePhys < 0 or fetch:
+            self._sizePhys = self.sr._vhdutil.get_size_phys(self.uuid)
+        return self._sizePhys
 
     def getDrbdSize(self, fetch=False):
         if self.drbd_size < 0 or fetch:
@@ -1578,7 +1578,7 @@ class LinstorVDI(VDI):
         finally:
             self.sr.unlock()
         self.drbd_size = -1
-        self._sizeVHD = -1
+        self._sizePhys = -1
         self._sizeAllocated = -1
 
     def deflate(self):
@@ -1588,12 +1588,12 @@ class LinstorVDI(VDI):
         try:
             # Ensure we use the real sizes and not the cached info.
             self.drbd_size = self.getDrbdSize(fetch=True)
-            self._sizeVHD = self.getSizeVHD(fetch=True)
-            self.sr._vhdutil.force_deflate(self.path, self._sizeVHD, self.drbd_size, zeroize=False)
+            self._sizePhys = self.getSizePhys(fetch=True)
+            self.sr._vhdutil.force_deflate(self.path, self._sizePhys, self.drbd_size, zeroize=False)
         finally:
             self.sr.unlock()
         self.drbd_size = -1
-        self._sizeVHD = -1
+        self._sizePhys = -1
         self._sizeAllocated = -1
 
     def inflateFully(self):
@@ -1765,16 +1765,16 @@ class LinstorVDI(VDI):
     @override
     def _calcExtraSpaceForLeafCoalescing(self) -> int:
         assert self.getDrbdSize() > 0
-        assert self.getSizeVHD() > 0
-        deflate_diff = self.getDrbdSize() - LinstorVolumeManager.round_up_volume_size(self.getSizeVHD())
+        assert self.getSizePhys() > 0
+        deflate_diff = self.getDrbdSize() - LinstorVolumeManager.round_up_volume_size(self.getSizePhys())
         assert deflate_diff >= 0
         return self._calcExtraSpaceForCoalescing() - deflate_diff
 
     @override
     def _calcExtraSpaceForSnapshotCoalescing(self) -> int:
-        assert self.getSizeVHD() > 0
+        assert self.getSizePhys() > 0
         return self._calcExtraSpaceForCoalescing() + \
-            LinstorVolumeManager.round_up_volume_size(self.getSizeVHD())
+            LinstorVolumeManager.round_up_volume_size(self.getSizePhys())
 
 ################################################################################
 #
@@ -2359,10 +2359,10 @@ class SR(object):
         that alter leaf-coalescibility of vdi"""
         tracker = self.CoalesceTracker(self)
         while not vdi.canLiveCoalesce(self.getStorageSpeed()):
-            prevSizeVHD = vdi.getSizeVHD()
+            prevSizePhys = vdi.getSizePhys()
             if not self._snapshotCoalesce(vdi):
                 return False
-            if tracker.abortCoalesce(prevSizeVHD, vdi.getSizeVHD()):
+            if tracker.abortCoalesce(prevSizePhys, vdi.getSizePhys()):
                 tracker.printReasoning()
                 raise util.SMException("VDI {uuid} could not be coalesced"
                                        .format(uuid=vdi.uuid))
@@ -2464,7 +2464,7 @@ class SR(object):
             return False
         Util.log("Coalescing parent %s" % tempSnap)
         util.fistpoint.activate("LVHDRT_coaleaf_delay_2", self.uuid)
-        vhdSize = vdi.getSizeVHD()
+        sizePhys = vdi.getSizePhys()
         self._coalesce(tempSnap)
         if not vdi.isLeafCoalesceable():
             Util.log("The VDI tree appears to have been altered since")
@@ -2574,7 +2574,7 @@ class SR(object):
 
     def _calcExtraSpaceNeeded(self, child, parent) -> int:
         assert(VdiType.isCowImage(parent.vdi_type))
-        extra = child.getSizeVHD() - parent.getSizeVHD()
+        extra = child.getSizePhys() - parent.getSizePhys()
         if extra < 0:
             extra = 0
         return extra

@@ -571,7 +571,7 @@ class TestSR(unittest.TestCase):
 
     @mock.patch('cleanup.VDI.canLiveCoalesce',
                 autospec=True, return_value=False)
-    @mock.patch('cleanup.VDI.getSizeVHD',
+    @mock.patch('cleanup.VDI.getSizePhys',
                 autospec=True, return_value=1024)
     @mock.patch('cleanup.Util.log')
     @mock.patch('cleanup.SR._snapshotCoalesce',
@@ -596,7 +596,7 @@ class TestSR(unittest.TestCase):
 
     @mock.patch('cleanup.VDI.canLiveCoalesce', autospec=True,
                 return_value=False)
-    @mock.patch('cleanup.VDI.getSizeVHD', autospec=True)
+    @mock.patch('cleanup.VDI.getSizePhys', autospec=True)
     @mock.patch('cleanup.SR._snapshotCoalesce', autospec=True,
                 return_value=True)
     @mock.patch('cleanup.Util.log')
@@ -622,7 +622,7 @@ class TestSR(unittest.TestCase):
                       str(exc.exception))
 
     @mock.patch('cleanup.VDI.canLiveCoalesce', autospec=True)
-    @mock.patch('cleanup.VDI.getSizeVHD', autospec=True)
+    @mock.patch('cleanup.VDI.getSizePhys', autospec=True)
     @mock.patch('cleanup.SR._snapshotCoalesce', autospec=True,
                 return_value=True)
     @mock.patch('cleanup.SR._liveLeafCoalesce', autospec=True,
