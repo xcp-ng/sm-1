@@ -637,7 +637,7 @@ class VDI(object):
         return util.is_attached_rw(
                 self.sr.xapi.session.xenapi.VDI.get_sm_config(self.getRef()))
 
-    def getVHDBlocks(self):
+    def getVDIBlocks(self):
         val = self.updateBlockInfo()
         bitmap = zlib.decompress(base64.b64decode(val))
         return bitmap
@@ -1096,8 +1096,8 @@ class VDI(object):
         # make sure we don't use stale BAT info from vdi_rec since the child
         # was writable all this time
         self.delConfig(VDI.DB_VDI_BLOCKS)
-        blocksChild = self.getVHDBlocks()
-        blocksParent = self.parent.getVHDBlocks()
+        blocksChild = self.getVDIBlocks()
+        blocksParent = self.parent.getVDIBlocks()
         numBlocks = Util.countBits(blocksChild, blocksParent)
         Util.log("Num combined blocks = %d" % numBlocks)
         sizeData = numBlocks * vhdutil.VHD_BLOCK_SIZE
