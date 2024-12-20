@@ -664,13 +664,13 @@ class VDI(object):
         feasibleSize = False
         allowedDownTime = \
                 self.TIMEOUT_SAFETY_MARGIN * self.LIVE_LEAF_COALESCE_TIMEOUT
-        vhd_size = self.getAllocatedSize()
+        allocated_size = self.getAllocatedSize()
         if speed:
             feasibleSize = \
-                vhd_size // speed < allowedDownTime
+                allocated_size // speed < allowedDownTime
         else:
             feasibleSize = \
-                vhd_size < self.LIVE_LEAF_COALESCE_MAX_SIZE
+                allocated_size < self.LIVE_LEAF_COALESCE_MAX_SIZE
 
         return (feasibleSize or
                 self.getConfig(self.DB_LEAFCLSC) == self.LEAFCLSC_FORCE)
@@ -901,7 +901,7 @@ class VDI(object):
     def _doCoalesceVHD(vdi):
         try:
             startTime = time.time()
-            vhdSize = vdi.getAllocatedSize()
+            allocated_size = vdi.getAllocatedSize()
             coalesced_size = vdi.coalesce()
             endTime = time.time()
             vdi.sr.recordStorageSpeed(startTime, endTime, coalesced_size)
