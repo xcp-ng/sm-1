@@ -820,7 +820,7 @@ class VDI(object):
         self.parent.validate(True)
         self.parent._increaseSizeVirt(self.sizeVirt)
         self.sr._updateSlavesOnResize(self.parent)
-        self._coalesceVHD(0)
+        self._coalesceCowImage(0)
         self.parent.validate(True)
         #self._verifyContents(0)
         self.parent.updateBlockInfo()
@@ -898,7 +898,7 @@ class VDI(object):
         return vhdutil.coalesce(self.path) * 512
 
     @staticmethod
-    def _doCoalesceVHD(vdi):
+    def _doCoalesceCowImage(vdi):
         try:
             startTime = time.time()
             allocated_size = vdi.getAllocatedSize()
@@ -925,14 +925,14 @@ class VDI(object):
         uuid = self.extractUuid(vdi_path)
         return self.sr.vdis[uuid].vdi_type == VdiType.RAW
 
-    def _coalesceVHD(self, timeOut):
+    def _coalesceCowImage(self, timeOut):
         Util.log("  Running VHD coalesce on %s" % self)
         abortTest = lambda: IPCFlag(self.sr.uuid).test(FLAG_TYPE_ABORT)
         try:
             util.fistpoint.activate_custom_fn(
                 "cleanup_coalesceVHD_inject_failure",
                 util.inject_failure)
-            Util.runAbortable(lambda: VDI._doCoalesceVHD(self), None,
+            Util.runAbortable(lambda: VDI._doCoalesceCowImage(self), None,
                     self.sr.uuid, abortTest, VDI.POLL_INTERVAL, timeOut)
         except:
             #exception at this phase could indicate a failure in vhd coalesce
@@ -2522,7 +2522,7 @@ class SR(object):
         if vdi.getConfig(vdi.DB_LEAFCLSC) == vdi.LEAFCLSC_FORCE:
             Util.log("Leaf-coalesce forced, will not use timeout")
             timeout = 0
-        vdi._coalesceVHD(timeout)
+        vdi._coalesceCowImage(timeout)
         util.fistpoint.activate("LVHDRT_coaleaf_after_coalesce", self.uuid)
         vdi.parent.validate(True)
         #vdi._verifyContents(timeout / 2)
