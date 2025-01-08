@@ -167,8 +167,7 @@ class LVHDSR(SR.SR):
         self.provision = self.PROVISIONING_DEFAULT
 
         self.other_conf = None
-        has_sr_ref = self.srcmd.params.get("sr_ref")
-        if has_sr_ref:
+        if self.srcmd.params.get("sr_ref"):
             self.other_conf = self.session.xenapi.SR.get_other_config(self.sr_ref)
 
         self.lvm_conf = None
@@ -182,7 +181,7 @@ class LVHDSR(SR.SR):
                         opterr='Failed to initialise the LVMCache')
         self.lvActivator = LVActivator(self.uuid, self.lvmCache)
         self.journaler = Journaler(self.lvmCache)
-        if not has_sr_ref:
+        if not self.other_conf:
             return  # must be a probe call
         # Test for thick vs thin provisioning conf parameter
         if 'allocation' in self.dconf:
