@@ -224,7 +224,7 @@ class LargeBlockSR(EXTSR.EXTSR):
         util.SMlog("Reconnecting VG {} to use emulated device".format(self.vgname))
         try:
             lvutil.setActiveVG(self.vgname, False)
-            lvutil.setActiveVG(self.vgname, True, config="devices{ global_filter = [ \"r|^/dev/nvme.*|\", \"a|/dev/loop.*|\" ] }")
+            lvutil.setActiveVG(self.vgname, True, config="devices{ global_filter = [ \"a|/dev/loop.*|\", \"r|.*|\" ] }")
         except util.CommandException as e:
             xs_errors.XenError("LargeBlockVGReconnectFailed", opterr="Failed to reconnect the VolumeGroup {}, error: {}".format(self.vgname, e))
 
