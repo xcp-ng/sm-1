@@ -610,7 +610,7 @@ def zeroOut(path, fromByte, bytes):
             bytesBefore = bytes
         bytes -= bytesBefore
         cmd = [CMD_DD, "if=/dev/zero", "of=%s" % path, "bs=1",
-               "seek=%s" % fromByte, "count=%s" % bytesBefore]
+               "seek=%s" % fromByte, "count=%s" % bytesBefore, "conv=fsync"]
         try:
             pread2(cmd)
         except CommandException:
@@ -621,7 +621,7 @@ def zeroOut(path, fromByte, bytes):
     fromByte = (fromBlock + blocks) * blockSize
     if blocks:
         cmd = [CMD_DD, "if=/dev/zero", "of=%s" % path, "bs=%s" % blockSize,
-               "seek=%s" % fromBlock, "count=%s" % blocks]
+               "seek=%s" % fromBlock, "count=%s" % blocks, "conv=fsync"]
         try:
             pread2(cmd)
         except CommandException:
@@ -629,7 +629,7 @@ def zeroOut(path, fromByte, bytes):
 
     if bytes:
         cmd = [CMD_DD, "if=/dev/zero", "of=%s" % path, "bs=1",
-               "seek=%s" % fromByte, "count=%s" % bytes]
+               "seek=%s" % fromByte, "count=%s" % bytes, "conv=fsync"]
         try:
             pread2(cmd)
         except CommandException:
