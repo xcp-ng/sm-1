@@ -41,7 +41,7 @@ IMAGE_FORMAT_TO_STR: Final = {
     ImageFormat.QCOW2: "qcow2"
 }
 
-STR_TO_IMAGE_FORMAT = {v: k for k, v in IMAGE_FORMAT_TO_STR.items()}
+STR_TO_IMAGE_FORMAT: Final = {v: k for k, v in IMAGE_FORMAT_TO_STR.items()}
 
 # ------------------------------------------------------------------------------
 
@@ -99,7 +99,11 @@ class CowUtil(ABC):
         pass
 
     @abstractmethod
-    def getFooterSize(self, path: str) -> int:
+    def getFooterSize(self) -> int:
+        pass
+
+    @abstractmethod
+    def getDefaultPreallocationSizeVirt(self) -> int:
         pass
 
     @abstractmethod

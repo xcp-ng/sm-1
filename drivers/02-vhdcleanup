@@ -21,7 +21,7 @@
 . /etc/init.d/functions
 
 CLEANUP_SCRIPT="/opt/xensource/sm/cleanup.py"
-LVHD_UTIL_SCRIPT="/opt/xensource/sm/lvhdutil.py"
+LVM_COW_UTIL_SCRIPT="/opt/xensource/sm/lvmcowutil.py"
 
 start() {
     echo -n $"Fixing refcounts on new master: "
@@ -31,7 +31,7 @@ start() {
         srUuids=`xe sr-list type=$type params=uuid --minimal | sed "s/,/ /g"`
         for uuid in $srUuids; do
             echo -n "Fixing $type"
-            python $LVHD_UTIL_SCRIPT fixrefcounts $uuid
+            python $LVM_COW_UTIL_SCRIPT fixrefcounts $uuid
         done
     done
 	echo -n $"OK"

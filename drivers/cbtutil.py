@@ -14,7 +14,7 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# Helper functions pertaining to VHD operations
+# Helper functions pertaining to COW image operations
 #
 
 import util

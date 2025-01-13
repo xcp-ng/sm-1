@@ -6,7 +6,6 @@ import testlib
 import unittest
 import uuid
 import VDI
-import vhdutil
 import xs_errors
 import util
 import errno

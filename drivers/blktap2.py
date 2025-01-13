@@ -43,11 +43,11 @@ import XenAPI # pylint: disable=import-error
 import scsiutil
 from syslog import openlog, syslog
 from stat import *  # S_ISBLK(), ...
+from lvmcowutil import NS_PREFIX_LVM
 from vditype import VdiType
 import nfs
 
 import resetvdis
-import lvhdutil
 
 import VDI as sm
 
@@ -1117,7 +1117,7 @@ class VDI(object):
 
     VDI_PLUG_TYPE = {'phy': 'phy',  # for NETAPP
                       'raw': 'phy',
-                      'aio': 'tap',  # for LVHD raw nodes
+                      'aio': 'tap',  # for LVM raw nodes
                       'iso': 'tap',  # for ISOSR
                       'file': 'tap',
                       'vhd': 'tap',
@@ -1672,7 +1672,7 @@ class VDI(object):
             if hasattr(self.target.vdi.sr, 'DRIVER_TYPE') and \
                self.target.vdi.sr.DRIVER_TYPE == 'lvhd' and \
                VdiType.isCowImage(vdi_type):
-                lock = Lock("lvchange-p", lvhdutil.NS_PREFIX_LVM + sr_uuid)
+                lock = Lock("lvchange-p", NS_PREFIX_LVM + sr_uuid)
                 lock.acquire()
 
             # When we attach a static VDI for HA, we cannot communicate with
@@ -1975,7 +1975,7 @@ class VDI(object):
             os.unlink(local_leaf_path)
         try:
             self._cowutil.snapshot(local_leaf_path, read_cache_path, False,
-                    msize=leaf_size // 1024 // 1024, checkEmpty=False)
+                    msize=leaf_size, checkEmpty=False)
         except util.CommandException as e:
             util.SMlog("Error creating leaf cache: %s" % e)
             self.alert_no_cache(session, vdi_uuid, local_sr_uuid, e.code)

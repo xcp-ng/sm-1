@@ -21,8 +21,8 @@
 import sys
 import XenAPIPlugin
 sys.path.append("/opt/xensource/sm/")
+import lvmcowutil
 import util
-import lvhdutil
 from lvmcache import LVMCache
 from journaler import Journaler
 import lvutil
@@ -33,11 +33,11 @@ def attach(session, args):
         os.environ['LVM_SYSTEM_DIR'] = lvutil.MASTER_LVM_CONF
     srUuid = args["srUuid"]
     vdiUuid = args["vdiUuid"]
-    vgName = "%s%s" % (lvhdutil.VG_PREFIX, srUuid)
+    vgName = "%s%s" % (lvmcowutil.VG_PREFIX, srUuid)
     lvmCache = LVMCache(vgName)
     journaler = Journaler(lvmCache)
     try:
-        lvhdutil.attachThin(journaler, srUuid, vdiUuid)
+        lvcowutil.attachThin(journaler, srUuid, vdiUuid, vdiType)
         return str(True)
     except Exception as e:
         util.logException("lvhd-thin:attach %s" % e)
@@ -48,10 +48,10 @@ def detach(session, args):
         os.environ['LVM_SYSTEM_DIR'] = lvutil.MASTER_LVM_CONF
     srUuid = args["srUuid"]
     vdiUuid = args["vdiUuid"]
-    vgName = "%s%s" % (lvhdutil.VG_PREFIX, srUuid)
+    vgName = "%s%s" % (lvmcowutil.VG_PREFIX, srUuid)
     lvmCache = LVMCache(vgName)
     try:
-        lvhdutil.detachThin(session, lvmCache, args["srUuid"], args["vdiUuid"])
+        lvcowutil.detachThin(session, lvmCache, srUuid, vdiUuid, vdiType)
         return str(True)
     except Exception as e:
         util.logException("lvhd-thin:detach %s" % e)

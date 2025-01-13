@@ -338,7 +338,7 @@ class MetadataHandler:
     #   snapshot_of, if snapshot status is true
     #   snapshot time
     #   type (system, user or metadata etc)
-    #   vdi_type: raw or vhd
+    #   vdi_type: raw, vhd or qcow2
     #   read_only
     #   location
     #   managed

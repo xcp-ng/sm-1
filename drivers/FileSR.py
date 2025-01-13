@@ -609,8 +609,8 @@ class FileVDI(VDI.VDI):
         if util.ioretry(lambda: util.pathexists(self.path)):
             raise xs_errors.XenError('VDIExists')
 
+        self.cowutil = getCowUtil(self.vdi_type)
         if VdiType.isCowImage(self.vdi_type):
-            self.cowutil = getCowUtil(self.vdi_type)
             try:
                 size = self.cowutil.validateAndRoundImageSize(int(size))
                 util.ioretry(lambda: self._create(size, self.path))

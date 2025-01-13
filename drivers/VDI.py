@@ -22,7 +22,6 @@ import SR
 import xmlrpc.client
 import xs_errors
 import util
-import vhdutil
 import cbtutil
 import os
 import base64

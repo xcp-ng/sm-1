@@ -48,7 +48,7 @@ CONFIGURATION = [['SCSIid', 'The scsi_id of the destination LUN'], \
 
 DRIVER_INFO = {
     'name': 'LVM over FC',
-    'description': 'SR plugin which represents disks as VHDs on Logical Volumes within a Volume Group created on an HBA LUN, e.g. hardware-based iSCSI or FC support',
+    'description': 'SR plugin which represents disks as VHDs and QCOW2s on Logical Volumes within a Volume Group created on an HBA LUN, e.g. hardware-based iSCSI or FC support',
     'vendor': 'Citrix Systems Inc',
     'copyright': '(C) 2008 Citrix Systems Inc',
     'driver_version': '1.0',

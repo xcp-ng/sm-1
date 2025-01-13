@@ -18,8 +18,8 @@
 
 import time
 import util
-import lvhdutil
 
+from lvmcowutil import NS_PREFIX_LVM
 
 class LVManagerException(util.SMException):
     pass
@@ -42,7 +42,7 @@ class LVActivator:
     PERSISTENT = True
 
     def __init__(self, srUuid, lvmCache):
-        self.ns = lvhdutil.NS_PREFIX_LVM + srUuid
+        self.ns = NS_PREFIX_LVM + srUuid
         self.lvmCache = lvmCache
         self.lvActivations = dict()
         self.openFiles = dict()

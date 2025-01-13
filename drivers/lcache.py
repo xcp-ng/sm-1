@@ -22,6 +22,8 @@ import blktap2
 import glob
 from stat import *  # S_ISBLK(), ...
 
+from vditype import VdiType
+
 SECTOR_SHIFT = 9
 
 
@@ -33,7 +35,7 @@ class CachingTap(object):
 
     @classmethod
     def from_tapdisk(cls, tapdisk, stats):
-        # pick the last image. if it's a VHD, we got a parent
+        # pick the last image. if it's a COW, we got a parent
         # cache. the leaf case is an aio node sitting on a
         # parent-caching tapdev. always checking the complementary
         # case, so we bail on unexpected chains.
@@ -47,7 +49,7 @@ class CachingTap(object):
             if not cond:
                 raise cls.NotACachingTapdisk(tapdisk, stats)
 
-        if _type == 'vhd':
+        if VdiType.isCowImage(_type):
             # parent
 
             return ParentCachingTap(tapdisk, stats)

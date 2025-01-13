@@ -2293,7 +2293,7 @@ class LinstorVDI(VDI.VDI):
         # 2. Write the snapshot content.
         is_raw = (self.vdi_type == VdiType.RAW)
         self._cowutil.snapshot(
-            snap_path, self.path, is_raw, self.MAX_METADATA_VIRT_SIZE
+            snap_path, self.path, is_raw, max(self.size, cowutil.getDefaultPreallocationSizeVirt())
         )
 
         # 3. Get snapshot parent.

@@ -21,9 +21,9 @@ import os
 import time
 import util
 import lock
-import lvhdutil
-import vhdutil
 import lvutil
+
+from lvmcowutil import VG_LOCATION, VG_PREFIX
 
 TRIM_LV_TAG = "_trim_lv"
 TRIM_CAP = "SR_TRIM"
@@ -37,11 +37,11 @@ MASTER_LVM_CONF = '/etc/lvm/master'
 
 
 def _vg_by_sr_uuid(sr_uuid):
-    return lvhdutil.VG_PREFIX + sr_uuid
+    return VG_PREFIX + sr_uuid
 
 
 def _lvpath_by_vg_lv_name(vg_name, lv_name):
-    return os.path.join(lvhdutil.VG_LOCATION, vg_name, lv_name)
+    return os.path.join(VG_LOCATION, vg_name, lv_name)
 
 
 def to_xml(d):

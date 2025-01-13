@@ -25,9 +25,10 @@ import blktap2, util
 from lock import Lock
 import xs_errors
 import XenAPI
-import lvhdutil
 import lvmcache
+
 from cowutil import getCowUtil
+from lvmcowutil import LV_PREFIX, LV_PREFIX_TO_VDI_TYPE, NS_PREFIX_LVM, VG_PREFIX
 from vditype import VdiType
 
 try:
@@ -130,7 +131,7 @@ class Tapdisk:
                 not os.path.exists(realpath):
             util.SMlog("Path inconsistent")
             pfx = "/dev/VG_XenStorage-%s/" % self.sr_uuid
-            for ty in lvhdutil.LV_PREFIX.values():
+            for ty in LV_PREFIX.values():
                 p = pfx + ty + self.vdi_uuid
                 util.SMlog("Testing path: %s" % p)
                 if os.path.exists(p):
@@ -212,11 +213,11 @@ class Tapdisk:
 
         if self.activate_parents:
             util.SMlog("Activating parents of %s" % self.vdi_uuid)
-            vg_name = lvhdutil.VG_PREFIX + self.sr_uuid
-            ns = lvhdutil.NS_PREFIX_LVM + self.sr_uuid
+            vg_name = VG_PREFIX + self.sr_uuid
+            ns = NS_PREFIX_LVM + self.sr_uuid
             lvm_cache = lvmcache.LVMCache(vg_name)
-            lv_name = lvhdutil.LV_PREFIX[vdi.vdi_type] + self.vdi_uuid
-            vdi_list = getCowUtil(vdi.vdi_type).getParentChain(lv_name, lvhdutil.extractUuid, vg_name)
+            lv_name = LV_PREFIX[vdi.vdi_type] + self.vdi_uuid
+            vdi_list = getCowUtil(vdi.vdi_type).getParentChain(lv_name, LvmCowUtil.extractUuid, vg_name)
             for uuid, lv_name in vdi_list.items():
                 if uuid == self.vdi_uuid:
                     continue

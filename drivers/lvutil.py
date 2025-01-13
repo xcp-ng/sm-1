@@ -26,7 +26,7 @@ from fairlock import Fairlock
 import util
 import xs_errors
 import xml.dom.minidom
-from lvhdutil import VG_LOCATION, VG_PREFIX
+from lvmcowutil import VG_LOCATION, VG_PREFIX
 from constants import EXT_PREFIX
 import lvmcache
 import srmetadata
@@ -114,6 +114,9 @@ def extract_vgname(str_in):
 LVM_RETRY_ERRORS = [
     "Incorrect checksum in metadata area header"
 ]
+
+def calcSizeLV(size: int) -> int:
+    return util.roundup(LVM_SIZE_INCREMENT, size)
 
 
 def lvmretry(func):

@@ -25,21 +25,25 @@ import os
 import re
 import zlib
 
-from cowutil import CowImageInfo, CowUtil
 import util
 import XenAPI # pylint: disable=import-error
 import xs_errors
+
+from cowutil import CowImageInfo, CowUtil, ImageFormat
 
 # ------------------------------------------------------------------------------
 
 MIN_VHD_SIZE: Final = 2 * 1024 * 1024
 MAX_VHD_SIZE: Final = 2040 * 1024 * 1024 * 1024
+VHD_MAX_VOLUME_SIZE: Final = 2 * 1024 * 1024 * 1024 * 1024
 
 MAX_VHD_JOURNAL_SIZE: Final = 6 * 1024 * 1024  # 2MB VHD block size, max 2TB VHD size.
 
 VHD_BLOCK_SIZE: Final = 2 * 1024 * 1024
 
 VHD_FOOTER_SIZE: Final = 512
+
+VHD_SECTOR_SIZE: Final = 512
 
 MAX_VHD_CHAIN_LENGTH: Final = 30
 
@@ -63,8 +67,12 @@ class VhdUtil(CowUtil):
         return VHD_BLOCK_SIZE
 
     @override
-    def getFooterSize(self, path: str) -> int:
+    def getFooterSize(self) -> int:
         return VHD_FOOTER_SIZE
+
+    @override
+    def getDefaultPreallocationSizeVirt(self) -> int:
+        return VHD_MAX_VOLUME_SIZE
 
     @override
     def getMaxChainLength(self) -> int:
@@ -323,23 +331,22 @@ class VhdUtil(CowUtil):
     @override
     def coalesce(self, path: str) -> int:
         """
-        Coalesce the VHD, on success it returns the number of sectors coalesced.
+        Coalesce the VHD, on success it returns the number of bytes coalesced.
         """
         text = cast(str, self._ioretry([VHD_UTIL, "coalesce", OPT_LOG_ERR, "-n", path]))
         match = re.match(r"^Coalesced (\d+) sectors", text)
         if match:
-            return int(match.group(1))
+            return int(match.group(1)) * VHD_SECTOR_SIZE
         return 0
 
     @override
     def create(self, path: str, size: int, static: bool, msize: int = 0) -> None:
-        size_mb = size // (1024 * 1024)
-        cmd = [VHD_UTIL, "create", OPT_LOG_ERR, "-n", path, "-s", str(size_mb)]
+        cmd = [VHD_UTIL, "create", OPT_LOG_ERR, "-n", path, "-s", str(size // (1024 * 1024))]
         if static:
             cmd.append("-r")
         if msize:
             cmd.append("-S")
-            cmd.append(str(msize))
+            cmd.append(str(max(msize, size) // (1024 * 1024)))
         self._ioretry(cmd)
 
     @override
@@ -356,7 +363,7 @@ class VhdUtil(CowUtil):
             cmd.append("-m")
         if msize:
             cmd.append("-S")
-            cmd.append(str(msize))
+            cmd.append(str(msize // (1024 * 1024)))
         if not checkEmpty:
             cmd.append("-e")
         self._ioretry(cmd)
@@ -448,7 +455,7 @@ class VhdUtil(CowUtil):
 
         if key != "vhd":
             return None
- 
+
         uuid = extractUuidFunction(val)
         if not uuid:
             util.SMlog("***** malformed output, no UUID: %s" % valueMap)

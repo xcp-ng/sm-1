@@ -420,10 +420,10 @@ def get_vhd_info(session, args): # TODO: rename
                 device_path.rstrip('\n')
             )
 
-        cow_info = cowutil.getInfo(
+        image_info = cowutil.getInfo(
             device_path, extract_uuid, include_parent, False
         )
-        return json.dumps(cow_info.__dict__)
+        return json.dumps(image_info.__dict__)
     except Exception as e:
         util.SMlog('linstor-manager:get_vhd_info error: {}'.format(e))
         raise
