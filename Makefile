@@ -35,6 +35,7 @@ SM_LIBS += verifyVHDsOnSR
 SM_LIBS += scsiutil
 SM_LIBS += scsi_host_rescan
 SM_LIBS += cowutil
+SM_LIBS += qcow2util
 SM_LIBS += vhdutil
 SM_LIBS += linstorjournaler
 SM_LIBS += linstorvhdutil
