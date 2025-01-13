@@ -39,27 +39,6 @@ SNAPSHOT_INTERNAL = 3  # SNAPSHOT_SINGLE but don't update SR's virtual allocatio
 CBT_BLOCK_SIZE = (64 * 1024)
 
 
-def VDIMetadataSize(type, virtualsize):
-    size = 0
-    if type == 'vhd':
-        size_mb = virtualsize // (1024 * 1024)
-        #Footer + footer copy + header + possible CoW parent locator fields
-        size = 3 * 1024
-
-        # BAT 4 Bytes per block segment
-        size += (size_mb // 2) * 4
-        size = util.roundup(512, size)
-
-        # BATMAP 1 bit per block segment
-        size += (size_mb // 2) // 8
-        size = util.roundup(4096, size)
-
-        # Segment bitmaps + Page align offsets
-        size += (size_mb // 2) * 4096
-
-    return size
-
-
 class VDI(object):
     """Virtual Disk Instance descriptor.
 
