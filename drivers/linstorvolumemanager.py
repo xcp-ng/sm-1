@@ -46,6 +46,8 @@ DRBD_BY_RES_PATH = '/dev/drbd/by-res/'
 PLUGIN = 'linstor-manager'
 
 
+PATH_NAME = "xostor"
+
 # ==============================================================================
 
 def get_local_volume_openers(resource_name, volume):
@@ -1619,6 +1621,50 @@ class LinstorVolumeManager(object):
             raise LinstorVolumeManagerError(
                 'Failed to set preferred node interface on `{}`: {}'.format(node_name, error_str)
             )
+
+    def list_node_path(self):
+        result = self._linstor.node_conn_list()
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
+            raise LinstorVolumeManagerError(
+                'Failed to list node connection: {}'.format(error_str)
+            )
+        return result
+
+    def get_node_path(self, hostname1, hostname2):
+        result = self._linstor.node_conn_list_specific_pair(node_a=hostname1, node_b=hostname2)
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
+            raise LinstorVolumeManagerError(
+                'Failed to get node connection for `{}` <-> `{}`: {}'.format(hostname1, hostname2, error_str)
+            )
+        return result
+
+    def set_node_path(self, hostname1, hostname2, network_name):
+        property_name1 = "Paths/{netname}/{node_name}".format(netname=PATH_NAME, node_name=hostname1)
+        property_name2 = "Paths/{netname}/{node_name}".format(netname=PATH_NAME, node_name=hostname2)
+        result = self._linstor.node_conn_modify(hostname1, hostname2, property_dict={property_name1: network_name, property_name2: network_name}, delete_props=None)
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
+            raise LinstorVolumeManagerError(
+                'Failed to set node connection `{}` <-> `{}`: {}'.format(hostname1, hostname2, error_str)
+            )
+        return result
+
+    def destroy_node_path(self, hostname1, hostname2):
+        property_name1 = "Paths/{netname}/{node_name}".format(netname=PATH_NAME, node_name=hostname1)
+        property_name2 = "Paths/{netname}/{node_name}".format(netname=PATH_NAME, node_name=hostname2)
+        result = self._linstor.node_conn_modify(hostname1, hostname2, property_dict=None, delete_props=[property_name1, property_name2])
+        errors = self._filter_errors(result)
+        if errors:
+            error_str = self._get_error_str(errors)
+            raise LinstorVolumeManagerError(
+                'Failed to destroy node connection `{}` <-> `{}`: {}'.format(hostname1, hostname2, error_str)
+            )
+        return result
 
     def get_nodes_info(self):
         """

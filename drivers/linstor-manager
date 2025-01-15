@@ -1183,6 +1183,77 @@ def set_node_preferred_interface(session, args):
         raise XenAPIPlugin.Failure('-1', [str(e)])
     return str(True)
 
+def list_network_path(session, args):
+    group_name = args["groupName"]
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        return str(linstor.list_node_path())
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+
+def get_network_path(session, args):
+    group_name = args["groupName"]
+    node1 = args["node1"]
+    node2 = args["node2"]
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    try:
+        return str(linstor.get_node_path(node1, node2))
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+
+def set_network_path(session, args):
+    group_name = args["groupName"]
+    hostname1 = args["node1"]
+    hostname2 = args["node2"]
+    network_name = args["network"]
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    ret_list = []
+    try:
+        list_resp = linstor.set_node_path(hostname1, hostname2, network_name)
+        for resp in list_resp:
+            if(resp.is_error()):
+                raise XenAPIPlugin.Failure('-1', [str(resp)])
+            ret_list.append(str(resp))
+
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(ret_list)
+
+def destroy_network_path(session, args):
+    group_name = args["groupName"]
+    hostname1 = args["node1"]
+    hostname2 = args["node2"]
+
+    linstor = LinstorVolumeManager(
+        get_controller_uri(),
+        group_name,
+        logger=util.SMlog
+    )
+    ret_list = []
+    try:
+        list_resp = linstor.destroy_node_path(hostname1, hostname2)
+        for resp in list_resp:
+            if(resp.is_error()):
+                raise XenAPIPlugin.Failure('-1', [str(resp)])
+            ret_list.append(str(resp))
+    except Exception as e:
+        raise XenAPIPlugin.Failure('-1', [str(e)])
+    return str(ret_list)
 
 if __name__ == '__main__':
     XenAPIPlugin.dispatch({
@@ -1238,5 +1309,10 @@ if __name__ == '__main__':
         'modifyNodeInterface': modify_node_interface,
         'listNodeInterfaces': list_node_interfaces,
         'getNodePreferredInterface': get_node_preferred_interface,
-        'setNodePreferredInterface': set_node_preferred_interface
+        'setNodePreferredInterface': set_node_preferred_interface,
+
+        'listNetworkPath': list_network_path,
+        'getNetworkPath': get_network_path,
+        'setNetworkPath': set_network_path,
+        'destroyNetworkPath': destroy_network_path
     })
