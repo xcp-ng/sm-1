@@ -792,10 +792,7 @@ class VDI(object):
         strSizeAllocated = "?"
         if self._sizeAllocated >= 0:
             strSizeAllocated = "/%s" % Util.num2str(self._sizeAllocated)
-        strType = ""
-        if self.vdi_type == VdiType.RAW:
-            strType = "[RAW]"
-            strSizePhys = ""
+        strType = "[{}]".format(self.vdi_type)
 
         return "%s%s(%s%s%s)%s" % (strHidden, self.uuid[0:8], strSizeVirt,
                 strSizePhys, strSizeAllocated, strType)
