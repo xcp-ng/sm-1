@@ -1,7 +1,7 @@
 from sm_typing import override
 
 import unittest.mock as mock
-import LVHDoHBASR
+import LVMoHBASR
 import unittest
 import xmlrpc.client
 import SRCommand
@@ -15,11 +15,11 @@ def mock_init(self, sr, sr_uuid):
     self.sr_uuid = sr_uuid
 
 
-class TestLVHDoHBAVDI(unittest.TestCase):
+class TestLVMoHBAVDI(unittest.TestCase):
 
-    @mock.patch('LVHDoHBASR.LVHDoHBASR', autospec=True)
-    @mock.patch('LVHDoHBASR.LVHDoHBAVDI.__init__', mock_init)
-    @mock.patch('LVHDoHBASR.lvutil._checkLV', autospec=True)
+    @mock.patch('LVMoHBASR.LVMoHBASR', autospec=True)
+    @mock.patch('LVMoHBASR.LVMoHBAVDI.__init__', mock_init)
+    @mock.patch('LVMoHBASR.lvutil._checkLV', autospec=True)
     def test_generate_config(self,
                              mock_checkLV,
                              mock_SR):
@@ -34,7 +34,7 @@ class TestLVHDoHBAVDI(unittest.TestCase):
         sr.mpathhandle = mpath_handle
         sr.lock = "blah"
 
-        vdi = LVHDoHBASR.LVHDoHBAVDI(sr, sr_uuid)
+        vdi = LVMoHBASR.LVMoHBAVDI(sr, sr_uuid)
         vdi.path = "blahblah"
         stuff = vdi.generate_config(sr_uuid, vdi_uuid)
 
@@ -48,9 +48,9 @@ class TestLVHDoHBAVDI(unittest.TestCase):
         self.assertEqual(load_object[0][0]["device_config"]["multipathhandle"],
                          mpath_handle)
 
-    @mock.patch('LVHDoHBASR.LVHDoHBASR', autospec=True)
-    @mock.patch('LVHDoHBASR.LVHDoHBAVDI.__init__', mock_init)
-    @mock.patch('LVHDoHBASR.lvutil._checkLV', autospec=True)
+    @mock.patch('LVMoHBASR.LVMoHBASR', autospec=True)
+    @mock.patch('LVMoHBASR.LVMoHBAVDI.__init__', mock_init)
+    @mock.patch('LVMoHBASR.lvutil._checkLV', autospec=True)
     def test_generate_config_bad_path_assert(self,
                                              mock_checkLV,
                                              mock_SR):
@@ -64,7 +64,7 @@ class TestLVHDoHBAVDI(unittest.TestCase):
         sr.mpath = mpathing
         sr.mpathhandle = mpath_handle
 
-        vdi = LVHDoHBASR.LVHDoHBAVDI(sr, sr_uuid)
+        vdi = LVMoHBASR.LVMoHBAVDI(sr, sr_uuid)
         vdi.path = "blahblah"
 
         with self.assertRaises(xs_errors.SROSError) as cm:
@@ -73,7 +73,7 @@ class TestLVHDoHBAVDI(unittest.TestCase):
         self.assertEqual(str(cm.exception), "The VDI is not available")
 
 
-class TestLVHDoHBASR(unittest.TestCase):
+class TestLVMoHBASR(unittest.TestCase):
     @override
     def setUp(self) -> None:
         self.host_ref = str(uuid4())
@@ -84,9 +84,9 @@ class TestLVHDoHBASR(unittest.TestCase):
 
         lock_patcher = mock.patch('LVMSR.lock.Lock', autospec=True)
         self.mock_lock = lock_patcher.start()
-        lvmsr_patcher = mock.patch('LVHDoHBASR.LVMSR')
+        lvmsr_patcher = mock.patch('LVMoHBASR.LVMSR')
         self.mock_lvmsr = lvmsr_patcher.start()
-        util_patcher = mock.patch('LVHDoHBASR.util', autospec=True)
+        util_patcher = mock.patch('LVMoHBASR.util', autospec=True)
         self.mock_util = util_patcher.start()
         lc_patcher = mock.patch('LVMSR.lvmcache.lvutil.Fairlock', autospec=True)
         self.mock_lc = lc_patcher.start()
@@ -126,12 +126,12 @@ class TestLVHDoHBASR(unittest.TestCase):
         return srcmd
 
     @mock.patch("builtins.open", new_callable=mock.mock_open())
-    @mock.patch('LVHDoHBASR.glob.glob', autospec=True)
+    @mock.patch('LVMoHBASR.glob.glob', autospec=True)
     def test_sr_delete_no_multipath(self, mock_glob, mock_open):
         # Arrange
         srcmd = self.create_sr_cmd("sr_delete")
 
-        sr = LVHDoHBASR.LVHDoHBASR(srcmd, self.sr_uuid)
+        sr = LVMoHBASR.LVMoHBASR(srcmd, self.sr_uuid)
 
         mock_glob.return_value = ['/dev/sdd', '/dev/sde',
                                   '/dev/sdi', '/dev/sdh']

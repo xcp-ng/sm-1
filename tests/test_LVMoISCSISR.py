@@ -9,7 +9,7 @@ import traceback
 from uuid import uuid4
 
 import SR
-import LVHDoISCSISR
+import LVMoISCSISR
 import iscsilib
 from BaseISCSI import BaseISCSISR
 import SRCommand
@@ -27,10 +27,10 @@ class RandomError(Exception):
     pass
 
 
-class NonInitingLVHDoISCSISR(LVHDoISCSISR.LVHDoISCSISR):
+class NonInitingLVMoISCSISR(LVMoISCSISR.LVMoISCSISR):
 
     """
-    Helper class; Creates dummy LVHDoISCSISR object.
+    Helper class; Creates dummy LVMoISCSISR object.
     Add attributes/methods as appropriate.
     """
 
@@ -58,10 +58,10 @@ class NonInitingLVHDoISCSISR(LVHDoISCSISR.LVHDoISCSISR):
         self.srcmd.params.update(extra_params or {})
 
 
-class TestLVHDoISCSISR_load(unittest.TestCase):
+class TestLVMoISCSISR_load(unittest.TestCase):
 
     """
-    Tests for 'LVHDoISCSISR.load()'
+    Tests for 'LVMoISCSISR.load()'
     """
 
     @override
@@ -78,7 +78,7 @@ class TestLVHDoISCSISR_load(unittest.TestCase):
         for patcher in patchers:
             patcher.start()
 
-        self.lvhd_o_iscsi_sr = NonInitingLVHDoISCSISR(
+        self.lvhd_o_iscsi_sr = NonInitingLVMoISCSISR(
             {'targetIQN': '*'},
             {'command': 'sr_create'}
         )
@@ -123,24 +123,24 @@ class TestLVHDoISCSISR_load(unittest.TestCase):
         )
 
 
-class TestLVHDoISCSISR(ISCSITestCase):
+class TestLVMoISCSISR(ISCSITestCase):
 
-    TEST_CLASS = 'LVHDoISCSISR'
+    TEST_CLASS = 'LVMoISCSISR'
 
     @override
     def setUp(self) -> None:
-        util_patcher = mock.patch('LVHDoISCSISR.util', autospec=True)
+        util_patcher = mock.patch('LVMoISCSISR.util', autospec=True)
         self.mock_util = util_patcher.start()
         # self.mock_util.SMlog.side_effect = print
         self.mock_util.isVDICommand = util.isVDICommand
         self.mock_util.sessions_less_than_targets = util.sessions_less_than_targets
 
         self.base_srs: Set[BaseISCSISR] = set()
-        baseiscsi_patcher = mock.patch('LVHDoISCSISR.BaseISCSI.BaseISCSISR',
+        baseiscsi_patcher = mock.patch('LVMoISCSISR.BaseISCSI.BaseISCSISR',
                                        autospec=True)
         patched_baseiscsi = baseiscsi_patcher.start()
         patched_baseiscsi.side_effect = self.baseiscsi
-        lvmsr_patcher = mock.patch ('LVHDoISCSISR.LVMSR')
+        lvmsr_patcher = mock.patch ('LVMoISCSISR.LVMSR')
 
         self.mock_lvmsr = lvmsr_patcher.start()
         self.mock_session = mock.MagicMock()
@@ -148,7 +148,7 @@ class TestLVHDoISCSISR(ISCSITestCase):
         mock_xenapi = xenapi_patcher.start()
         mock_xenapi.xapi_local.return_value = self.mock_session
 
-        copy_patcher = mock.patch('LVHDoISCSISR.SR.copy.deepcopy')
+        copy_patcher = mock.patch('LVMoISCSISR.SR.copy.deepcopy')
         self.mock_copy = copy_patcher.start()
 
         def deepcopy(to_copy):
@@ -194,7 +194,7 @@ class TestLVHDoISCSISR(ISCSITestCase):
 
     def create_test_sr(self, sr_cmd):
         self.sr_uuid = str(uuid4())
-        self.subject = LVHDoISCSISR.LVHDoISCSISR(
+        self.subject = LVMoISCSISR.LVMoISCSISR(
             sr_cmd, self.sr_uuid)
 
     def test_check_sr_pbd_not_found(self):

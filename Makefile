@@ -10,11 +10,11 @@ SM_DRIVERS += ISO
 SM_DRIVERS += HBA
 SM_DRIVERS += Linstor
 SM_DRIVERS += LVM
-SM_DRIVERS += LVHDoISCSI
-SM_DRIVERS += LVHDoHBA
+SM_DRIVERS += LVMoISCSI
+SM_DRIVERS += LVMoHBA
 SM_DRIVERS += SHM
 SM_DRIVERS += SMB
-SM_DRIVERS += LVHDoFCoE
+SM_DRIVERS += LVMoFCoE
 SM_DRIVERS += CephFS
 SM_DRIVERS += GlusterFS
 SM_DRIVERS += XFS
@@ -205,9 +205,9 @@ install: build
 	rm $(SM_STAGING)$(SM_DEST)/SHMSR
 	cd $(SM_STAGING)$(SM_DEST) && rm -f LVMSR && ln -sf LVMSR.py LVHDSR
 	cd $(SM_STAGING)$(SM_DEST) && rm -f RawISCSISR && ln -sf RawISCSISR.py ISCSISR
-	cd $(SM_STAGING)$(SM_DEST) && rm -f LVHDoISCSISR && ln -sf LVHDoISCSISR.py LVMoISCSISR
-	cd $(SM_STAGING)$(SM_DEST) && rm -f LVHDoHBASR && ln -sf LVHDoHBASR.py LVMoHBASR
-	cd $(SM_STAGING)$(SM_DEST) && rm -f LVHDoFCoESR && ln -sf LVHDoFCoESR.py LVMoFCoESR
+	cd $(SM_STAGING)$(SM_DEST) && rm -f LVMoISCSISR && ln -sf LVMoISCSISR.py LVMoISCSISR
+	cd $(SM_STAGING)$(SM_DEST) && rm -f LVMoHBASR && ln -sf LVMoHBASR.py LVMoHBASR
+	cd $(SM_STAGING)$(SM_DEST) && rm -f LVMoFCoESR && ln -sf LVMoFCoESR.py LVMoFCoESR
 	ln -sf $(SM_DEST)mpathutil.py $(SM_STAGING)/sbin/mpathutil
 	install -m 755 drivers/02-vhdcleanup $(SM_STAGING)$(MASTER_SCRIPT_DEST)
 	install -m 755 drivers/linstor-manager $(SM_STAGING)$(PLUGIN_SCRIPT_DEST)

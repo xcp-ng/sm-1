@@ -15,7 +15,7 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# LVHDoISCSISR: LVHD over Hardware HBA LUN driver, e.g. Fibre Channel or
+# LVMoISCSISR: LVM over Hardware HBA LUN driver, e.g. Fibre Channel or
 # hardware based iSCSI
 #
 
@@ -47,7 +47,7 @@ CONFIGURATION = [['SCSIid', 'The scsi_id of the destination LUN'], \
                   ['allocation', 'Valid values are thick or thin (optional, defaults to thick)']]
 
 DRIVER_INFO = {
-    'name': 'LVHD over FC',
+    'name': 'LVM over FC',
     'description': 'SR plugin which represents disks as VHDs on Logical Volumes within a Volume Group created on an HBA LUN, e.g. hardware-based iSCSI or FC support',
     'vendor': 'Citrix Systems Inc',
     'copyright': '(C) 2008 Citrix Systems Inc',
@@ -58,8 +58,8 @@ DRIVER_INFO = {
     }
 
 
-class LVHDoHBASR(LVMSR.LVMSR):
-    """LVHD over HBA storage repository"""
+class LVMoHBASR(LVMSR.LVMSR):
+    """LVM over HBA storage repository"""
 
     @override
     @staticmethod
@@ -111,14 +111,14 @@ class LVHDoHBASR(LVMSR.LVMSR):
                 raise xs_errors.XenError('ConfigSCSIid')
 
         self.SCSIid = self.dconf['SCSIid']
-        super(LVHDoHBASR, self).load(sr_uuid)
+        super(LVMoHBASR, self).load(sr_uuid)
 
     @override
     def create(self, sr_uuid, size) -> None:
         self.hbasr.attach(sr_uuid)
         if self.mpath == "true":
             self.mpathmodule.refresh(self.SCSIid, 0)
-        self._pathrefresh(LVHDoHBASR)
+        self._pathrefresh(LVMoHBASR)
         try:
             LVMSR.LVMSR.create(self, sr_uuid, size)
         finally:
@@ -137,7 +137,7 @@ class LVHDoHBASR(LVMSR.LVMSR):
             for file in os.listdir(path):
                 self.block_setscheduler('%s/%s' % (path, file))
 
-        self._pathrefresh(LVHDoHBASR)
+        self._pathrefresh(LVMoHBASR)
         if not os.path.exists(self.dconf['device']):
             # Force a rescan on the bus
             self.hbasr._init_hbadict()
@@ -156,10 +156,10 @@ class LVHDoHBASR(LVMSR.LVMSR):
             if 'device' not in self.dconf or not os.path.exists(self.dconf['device']):
                 util.SMlog("@@@@@ path does not exists")
                 self.mpathmodule.refresh(self.SCSIid, 0)
-                self._pathrefresh(LVHDoHBASR)
+                self._pathrefresh(LVMoHBASR)
                 self._setMultipathableFlag(SCSIid=self.SCSIid)
         else:
-                self._pathrefresh(LVHDoHBASR)
+                self._pathrefresh(LVMoHBASR)
         LVMSR.LVMSR.scan(self, sr_uuid)
 
     @override
@@ -180,7 +180,7 @@ class LVHDoHBASR(LVMSR.LVMSR):
             self.mpathmodule.refresh(self.SCSIid, 0)
 
         try:
-            self._pathrefresh(LVHDoHBASR)
+            self._pathrefresh(LVMoHBASR)
             result = LVMSR.LVMSR.probe(self)
             if self.mpath == "true":
                 self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
@@ -217,7 +217,7 @@ class LVHDoHBASR(LVMSR.LVMSR):
 
     @override
     def delete(self, sr_uuid) -> None:
-        self._pathrefresh(LVHDoHBASR)
+        self._pathrefresh(LVMoHBASR)
         try:
             LVMSR.LVMSR.delete(self, sr_uuid)
         finally:
@@ -227,13 +227,13 @@ class LVHDoHBASR(LVMSR.LVMSR):
 
     @override
     def vdi(self, uuid) -> VDI.VDI:
-        return LVHDoHBAVDI(self, uuid)
+        return LVMoHBAVDI(self, uuid)
 
 
-class LVHDoHBAVDI(LVMSR.LVMVDI):
+class LVMoHBAVDI(LVMSR.LVMVDI):
     @override
     def generate_config(self, sr_uuid, vdi_uuid) -> str:
-        util.SMlog("LVHDoHBAVDI.generate_config")
+        util.SMlog("LVMoHBAVDI.generate_config")
         if not lvutil._checkLV(self.path):
             raise xs_errors.XenError('VDIUnavailable')
         dict = {}
@@ -250,14 +250,14 @@ class LVHDoHBAVDI(LVMSR.LVMVDI):
 
     @override
     def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
-        util.SMlog("LVHDoHBAVDI.attach_from_config")
+        util.SMlog("LVMoHBAVDI.attach_from_config")
         self.sr.hbasr.attach(sr_uuid)
         if self.sr.mpath == "true":
             self.sr.mpathmodule.refresh(self.sr.SCSIid, 0)
         try:
             return self.attach(sr_uuid, vdi_uuid)
         except:
-            util.logException("LVHDoHBAVDI.attach_from_config")
+            util.logException("LVMoHBAVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable', \
                         opterr='Unable to attach the heartbeat disk')
 
@@ -267,6 +267,6 @@ def match_scsidev(s):
     return regex.search(s, 0)
 
 if __name__ == '__main__':
-    SRCommand.run(LVHDoHBASR, DRIVER_INFO)
+    SRCommand.run(LVMoHBASR, DRIVER_INFO)
 else:
-    SR.registerSR(LVHDoHBASR)
+    SR.registerSR(LVMoHBASR)

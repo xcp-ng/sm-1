@@ -449,7 +449,7 @@ class LVMSR(SR.SR):
         Return true if all paths/devices agree on the same size.
         """
         if hasattr(self, 'SCSIid'):
-            # LVHDoHBASR, LVHDoISCSISR
+            # LVMoHBASR, LVMoISCSISR
             return scsiutil.refresh_lun_size_by_SCSIid(getattr(self, 'SCSIid'))
         else:
             # LVMSR
@@ -473,7 +473,7 @@ class LVMSR(SR.SR):
         if totaldevicesize >= (currentvgsize + resizethreshold):
             try:
                 if hasattr(self, 'SCSIid'):
-                    # LVHDoHBASR, LVHDoISCSISR might have slaves
+                    # LVMoHBASR, LVMoISCSISR might have slaves
                     scsiutil.refresh_lun_size_by_SCSIid_on_slaves(self.session,
                                                        getattr(self, 'SCSIid'))
                 util.SMlog("LVMSR._expand_size for %s will resize the pv." %

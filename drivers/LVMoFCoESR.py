@@ -15,14 +15,14 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# LVHDoFCoESR: LVHD over Fibre Channel over Ethernet driver
+# LVMoFCoESR: LVM over Fibre Channel over Ethernet driver
 #
 
 from sm_typing import override
 
 import SR
 import VDI
-import LVHDoHBASR
+import LVMoHBASR
 import LVMSR
 import SRCommand
 import sys
@@ -41,8 +41,8 @@ CONFIGURATION = [['SCSIid', 'The scsi_id of the destination LUN'],
                  defaults to thick)']]
 
 DRIVER_INFO = {
-    'name': 'LVHD over FCoE',
-    'description': 'SR plugin which represents disks as VHDs on Logical \
+    'name': 'LVM over FCoE',
+    'description': 'SR plugin which represents disks as VHDs and QCOW2 on Logical \
     Volumes within a Volume Group created on a FCoE LUN',
     'vendor': 'Citrix Systems Inc',
     'copyright': '(C) 2015 Citrix Systems Inc',
@@ -53,9 +53,9 @@ DRIVER_INFO = {
 }
 
 
-class LVHDoFCoESR(LVHDoHBASR.LVHDoHBASR):
+class LVMoFCoESR(LVMoHBASR.LVMoHBASR):
 
-    """LVHD over FCoE storage repository"""
+    """LVM over FCoE storage repository"""
 
     @override
     @staticmethod
@@ -93,13 +93,13 @@ class LVHDoFCoESR(LVHDoHBASR.LVHDoHBASR):
 
     @override
     def vdi(self, uuid) -> VDI.VDI:
-        return LVHDoFCoEVDI(self, uuid)
+        return LVMoFCoEVDI(self, uuid)
 
 
-class LVHDoFCoEVDI(LVHDoHBASR.LVHDoHBAVDI):
+class LVMoFCoEVDI(LVMoHBASR.LVMoHBAVDI):
     pass
 
 if __name__ == '__main__':
-    SRCommand.run(LVHDoFCoESR, DRIVER_INFO)
+    SRCommand.run(LVMoFCoESR, DRIVER_INFO)
 else:
-    SR.registerSR(LVHDoFCoESR)
+    SR.registerSR(LVMoFCoESR)

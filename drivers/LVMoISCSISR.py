@@ -15,7 +15,7 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# LVHDoISCSISR: LVHD over ISCSI software initiator SR driver
+# LVMoISCSISR: LVM over ISCSI software initiator SR driver
 #
 
 from sm_typing import override
@@ -60,7 +60,7 @@ CONFIGURATION = [['SCSIid', 'The scsi_id of the destination LUN'], \
                   ['allocation', 'Valid values are thick or thin (optional, defaults to thick)']]
 
 DRIVER_INFO = {
-    'name': 'LVHD over iSCSI',
+    'name': 'LVM over iSCSI',
     'description': 'SR plugin which represents disks as Logical Volumes within a Volume Group created on an iSCSI LUN',
     'vendor': 'Citrix Systems Inc',
     'copyright': '(C) 2008 Citrix Systems Inc',
@@ -71,8 +71,8 @@ DRIVER_INFO = {
     }
 
 
-class LVHDoISCSISR(LVMSR.LVMSR):
-    """LVHD over ISCSI storage repository"""
+class LVMoISCSISR(LVMSR.LVMSR):
+    """LVM over ISCSI storage repository"""
 
     @override
     @staticmethod
@@ -178,7 +178,7 @@ class LVHDoISCSISR(LVMSR.LVMSR):
                     dconf['multiSession'] = IQNstring
                     self.session.xenapi.PBD.set_device_config(pbd, dconf)
             except Exception as exc:
-                util.logException("LVHDoISCSISR.load")
+                util.logException("LVMoISCSISR.load")
                 saved_exc = exc
         try:
             self.iscsi = self.iscsiSRs[0]
@@ -440,7 +440,7 @@ class LVHDoISCSISR(LVMSR.LVMSR):
         self.iscsi.attach(sr_uuid)
         try:
             self.iscsi._attach_LUN_bySCSIid(self.SCSIid)
-            self._pathrefresh(LVHDoISCSISR)
+            self._pathrefresh(LVMoISCSISR)
             LVMSR.LVMSR.create(self, sr_uuid, size)
         except Exception as inst:
             self.iscsi.detach(sr_uuid)
@@ -449,7 +449,7 @@ class LVHDoISCSISR(LVMSR.LVMSR):
 
     @override
     def delete(self, sr_uuid) -> None:
-        self._pathrefresh(LVHDoISCSISR)
+        self._pathrefresh(LVMoISCSISR)
         LVMSR.LVMSR.delete(self, sr_uuid)
         for i in self.iscsiSRs:
             i.detach(sr_uuid)
@@ -485,7 +485,7 @@ class LVHDoISCSISR(LVMSR.LVMSR):
                 for a in self.iscsi.adapter:
                     scsiutil.rescan([self.iscsi.adapter[a]])
 
-            self._pathrefresh(LVHDoISCSISR)
+            self._pathrefresh(LVMoISCSISR)
             LVMSR.LVMSR.attach(self, sr_uuid)
         except Exception as inst:
             for i in self.iscsiSRs:
@@ -501,7 +501,7 @@ class LVHDoISCSISR(LVMSR.LVMSR):
 
     @override
     def scan(self, sr_uuid) -> None:
-        self._pathrefresh(LVHDoISCSISR)
+        self._pathrefresh(LVMoISCSISR)
         if self.mpath == "true":
             for i in self.iscsiSRs:
                 try:
@@ -529,7 +529,7 @@ class LVHDoISCSISR(LVMSR.LVMSR):
 
         self.iscsi.attach(self.uuid)
         self.iscsi._attach_LUN_bySCSIid(self.SCSIid)
-        self._pathrefresh(LVHDoISCSISR)
+        self._pathrefresh(LVMoISCSISR)
         out = LVMSR.LVMSR.probe(self)
         self.iscsi.detach(self.uuid)
         return out
@@ -550,13 +550,13 @@ class LVHDoISCSISR(LVMSR.LVMSR):
 
     @override
     def vdi(self, uuid) -> VDI.VDI:
-        return LVHDoISCSIVDI(self, uuid)
+        return LVMoISCSIVDI(self, uuid)
 
 
-class LVHDoISCSIVDI(LVMSR.LVMVDI):
+class LVMoISCSIVDI(LVMSR.LVMVDI):
     @override
     def generate_config(self, sr_uuid, vdi_uuid) -> str:
-        util.SMlog("LVHDoISCSIVDI.generate_config")
+        util.SMlog("LVMoISCSIVDI.generate_config")
         if not lvutil._checkLV(self.path):
             raise xs_errors.XenError('VDIUnavailable')
         dict = {}
@@ -578,18 +578,18 @@ class LVHDoISCSIVDI(LVMSR.LVMVDI):
 
     @override
     def attach_from_config(self, sr_uuid, vdi_uuid) -> str:
-        util.SMlog("LVHDoISCSIVDI.attach_from_config")
+        util.SMlog("LVMoISCSIVDI.attach_from_config")
         try:
             self.sr.iscsi.attach(sr_uuid)
             self.sr.iscsi._attach_LUN_bySCSIid(self.sr.SCSIid)
             return LVMSR.LVMVDI.attach(self, sr_uuid, vdi_uuid)
         except:
-            util.logException("LVHDoISCSIVDI.attach_from_config")
+            util.logException("LVMoISCSIVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable', \
                         opterr='Unable to attach the heartbeat disk')
 
 
 if __name__ == '__main__':
-    SRCommand.run(LVHDoISCSISR, DRIVER_INFO)
+    SRCommand.run(LVMoISCSISR, DRIVER_INFO)
 else:
-    SR.registerSR(LVHDoISCSISR)
+    SR.registerSR(LVMoISCSISR)

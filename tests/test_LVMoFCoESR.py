@@ -1,11 +1,11 @@
 import unittest.mock as mock
-import LVHDoFCoESR
+import LVMoFCoESR
 import unittest
 import testlib
 import xs_errors
 
 
-class FakeFCoESR(LVHDoFCoESR.LVHDoFCoESR):
+class FakeFCoESR(LVMoFCoESR.LVMoFCoESR):
     uuid = None
     sr_ref = None
     session = None
@@ -40,7 +40,7 @@ class TestFCoESR(unittest.TestCase):
 
     @mock.patch('SR.driver', autospec=True)
     @mock.patch('util.find_my_pbd', autospec=True)
-    @mock.patch('LVHDoFCoESR.LVHDoHBASR.HBASR.HBASR.print_devs', autospec=True)
+    @mock.patch('LVMoFCoESR.LVMoHBASR.HBASR.HBASR.print_devs', autospec=True)
     def test_load_no_scsiid(self, print_devs, find_my_pbd, driver):
         find_my_pbd.return_value = ['pbd_ref', 'pbd']
         parameters = {}
@@ -51,7 +51,7 @@ class TestFCoESR(unittest.TestCase):
     @mock.patch('SR.driver', autospec=True)
     @mock.patch('util.find_my_pbd', autospec=True)
     @mock.patch('SR.SR._pathrefresh', autospec=True)
-    @mock.patch('LVHDoFCoESR.LVMSR.LVMSR.load', autospec=True)
+    @mock.patch('LVMoFCoESR.LVMSR.LVMSR.load', autospec=True)
     def test_load_scsiid(self, lvmsrload, pathrefresh, find_my_pbd, driver):
         find_my_pbd.return_value = ['pbd_ref', 'pbd']
         parameters = {}
@@ -61,7 +61,7 @@ class TestFCoESR(unittest.TestCase):
     @mock.patch('SR.driver', autospec=True)
     @mock.patch('util.find_my_pbd', autospec=True)
     @mock.patch('SR.SR._pathrefresh', autospec=True)
-    @mock.patch('LVHDoFCoESR.LVMSR.LVMSR.load', autospec=True)
+    @mock.patch('LVMoFCoESR.LVMSR.LVMSR.load', autospec=True)
     def test_load_pbd_exception(self, lvmsrload, pathrefresh, find_my_pbd, driver):
         find_my_pbd.side_effect = Exception('exception raised')
         parameters = {}
@@ -71,7 +71,7 @@ class TestFCoESR(unittest.TestCase):
     @mock.patch('SR.driver', autospec=True)
     @mock.patch('util.find_my_pbd', autospec=True)
     @mock.patch('SR.SR._pathrefresh', autospec=True)
-    @mock.patch('LVHDoFCoESR.LVMSR.LVMSR.load', autospec=True)
+    @mock.patch('LVMoFCoESR.LVMSR.LVMSR.load', autospec=True)
     def test_vdi(self, lvmsrload, pathrefresh, find_my_pbd, driver):
         sr_uuid = 'bsr_uuid'
         find_my_pbd.return_value = ['pbd_ref', 'pbd']
@@ -81,5 +81,5 @@ class TestFCoESR(unittest.TestCase):
 
         def mock_init(self, sr, sr_uuid):
             pass
-        with mock.patch('LVHDoFCoESR.LVHDoHBASR.LVHDoHBAVDI.__init__', new=mock_init):
+        with mock.patch('LVMoFCoESR.LVMoHBASR.LVMoHBAVDI.__init__', new=mock_init):
             fcoesr.vdi(sr_uuid)
