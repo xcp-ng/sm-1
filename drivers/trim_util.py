@@ -93,7 +93,7 @@ def _log_last_triggered(session, sr_uuid):
 
 
 def do_trim(session, args):
-    """Attempt to trim the given LVHDSR"""
+    """Attempt to trim the given LVMSR"""
     util.SMlog("do_trim: %s" % args)
     sr_uuid = args["sr_uuid"]
     os.environ['LVM_SYSTEM_DIR'] = MASTER_LVM_CONF

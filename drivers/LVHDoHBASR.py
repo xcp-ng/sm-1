@@ -22,7 +22,7 @@
 from sm_typing import override
 
 import SR
-import LVHDSR
+import LVMSR
 import SRCommand
 import VDI
 import lvutil
@@ -58,7 +58,7 @@ DRIVER_INFO = {
     }
 
 
-class LVHDoHBASR(LVHDSR.LVHDSR):
+class LVHDoHBASR(LVMSR.LVMSR):
     """LVHD over HBA storage repository"""
 
     @override
@@ -120,7 +120,7 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
             self.mpathmodule.refresh(self.SCSIid, 0)
         self._pathrefresh(LVHDoHBASR)
         try:
-            LVHDSR.LVHDSR.create(self, sr_uuid, size)
+            LVMSR.LVMSR.create(self, sr_uuid, size)
         finally:
             if self.mpath == "true":
                 self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
@@ -144,7 +144,7 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
             # Must re-initialise the multipath node
             if self.mpath == "true":
                 self.mpathmodule.refresh(self.SCSIid, 0)
-        LVHDSR.LVHDSR.attach(self, sr_uuid)
+        LVMSR.LVMSR.attach(self, sr_uuid)
         self._setMultipathableFlag(SCSIid=self.SCSIid)
 
     @override
@@ -160,7 +160,7 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
                 self._setMultipathableFlag(SCSIid=self.SCSIid)
         else:
                 self._pathrefresh(LVHDoHBASR)
-        LVHDSR.LVHDSR.scan(self, sr_uuid)
+        LVMSR.LVMSR.scan(self, sr_uuid)
 
     @override
     def probe(self) -> str:
@@ -181,7 +181,7 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
 
         try:
             self._pathrefresh(LVHDoHBASR)
-            result = LVHDSR.LVHDSR.probe(self)
+            result = LVMSR.LVMSR.probe(self)
             if self.mpath == "true":
                 self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
             return result
@@ -192,7 +192,7 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
 
     @override
     def detach(self, sr_uuid) -> None:
-        LVHDSR.LVHDSR.detach(self, sr_uuid)
+        LVMSR.LVMSR.detach(self, sr_uuid)
         self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
         try:
             pbdref = util.find_my_pbd(self.session, self.host_ref, self.sr_ref)
@@ -219,7 +219,7 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
     def delete(self, sr_uuid) -> None:
         self._pathrefresh(LVHDoHBASR)
         try:
-            LVHDSR.LVHDSR.delete(self, sr_uuid)
+            LVMSR.LVMSR.delete(self, sr_uuid)
         finally:
             if self.mpath == "true":
                 self.mpathmodule.reset(self.SCSIid, explicit_unmap=True)
@@ -230,7 +230,7 @@ class LVHDoHBASR(LVHDSR.LVHDSR):
         return LVHDoHBAVDI(self, uuid)
 
 
-class LVHDoHBAVDI(LVHDSR.LVHDVDI):
+class LVHDoHBAVDI(LVMSR.LVMVDI):
     @override
     def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("LVHDoHBAVDI.generate_config")

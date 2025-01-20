@@ -6,7 +6,7 @@ import unittest.mock as mock
 
 import uuid
 
-import LVHDSR
+import LVMSR
 import lvhdutil
 import lvutil
 import vhdutil
@@ -36,7 +36,7 @@ class Stubs(object):
             patcher.stop()
 
 
-class TestLVHDSR(unittest.TestCase, Stubs):
+class TestLVMSR(unittest.TestCase, Stubs):
     @override
     def setUp(self) -> None:
         self.init_stubs()
@@ -45,7 +45,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
     def tearDown(self) -> None:
         self.remove_stubs()
 
-    def create_LVHDSR(self, master=False, command='foo', sr_uuid=None):
+    def create_LVMSR(self, master=False, command='foo', sr_uuid=None):
         srcmd = mock.Mock()
         srcmd.dconf = {'device': '/dev/bar'}
         if master:
@@ -56,18 +56,18 @@ class TestLVHDSR(unittest.TestCase, Stubs):
             'sr_ref': 'test_sr_ref'}
         if sr_uuid is None:
             sr_uuid = str(uuid.uuid4())
-        return LVHDSR.LVHDSR(srcmd, sr_uuid)
+        return LVMSR.LVMSR(srcmd, sr_uuid)
 
     @mock.patch('lvutil.Fairlock', autospec=True)
     @mock.patch('lvhdutil.getVDIInfo', autospec=True)
-    @mock.patch('LVHDSR.lock.Lock', autospec=True)
+    @mock.patch('LVMSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_loadvids(self, mock_xenapi, mock_lock, mock_getVDIInfo, mock_lvlock):
         """sr.allVDIs populated by _loadvdis"""
 
         vdi_uuid = 'some VDI UUID'
         mock_getVDIInfo.return_value = {vdi_uuid: lvhdutil.VDIInfo(vdi_uuid)}
-        sr = self.create_LVHDSR()
+        sr = self.create_LVMSR()
 
         sr._loadvdis()
 
@@ -76,7 +76,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
     @mock.patch('lvhdutil.lvRefreshOnAllSlaves', autospec=True)
     @mock.patch('lvhdutil.getVDIInfo', autospec=True)
     @mock.patch('journaler.Journaler.getAll', autospec=True)
-    @mock.patch('LVHDSR.lock.Lock', autospec=True)
+    @mock.patch('LVMSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_undoAllInflateJournals(
             self,
@@ -98,14 +98,14 @@ class TestLVHDSR(unittest.TestCase, Stubs):
         mock_getAll.return_value = {vdi_uuid: '0'}
         mock_getVDIInfo.return_value = {vdi_uuid: lvhdutil.VDIInfo(vdi_uuid)}
 
-        sr = self.create_LVHDSR()
+        sr = self.create_LVMSR()
 
         sr._undoAllInflateJournals()
         self.assertEqual(0, mock_lvhdutil_lvRefreshOnAllSlaves.call_count)
 
-    @mock.patch('LVHDSR.cleanup', autospec=True)
-    @mock.patch('LVHDSR.IPCFlag', autospec=True)
-    @mock.patch('LVHDSR.lock.Lock', autospec=True)
+    @mock.patch('LVMSR.cleanup', autospec=True)
+    @mock.patch('LVMSR.IPCFlag', autospec=True)
+    @mock.patch('LVMSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     @testlib.with_context
     def test_srlifecycle_success(self,
@@ -189,7 +189,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
             lambda x: get_vdi_data('sm-config', x))
         mock_session.xenapi.VDI.get_by_uuid.side_effect = get_vdi_by_uuid
 
-        sr = self.create_LVHDSR(master=True, command='sr_attach',
+        sr = self.create_LVMSR(master=True, command='sr_attach',
                                 sr_uuid=sr_uuid)
         os.makedirs(sr.path)
 
@@ -198,13 +198,13 @@ class TestLVHDSR(unittest.TestCase, Stubs):
         sr.attach(sr.uuid)
 
         # Arrange (2)
-        sr = self.create_LVHDSR(master=True, command='sr_detach',
+        sr = self.create_LVMSR(master=True, command='sr_detach',
                                 sr_uuid=sr_uuid)
 
         # Arrange for detach
-        self.stubout('LVHDSR.Fairlock')
+        self.stubout('LVMSR.Fairlock')
         mock_remove_device = self.stubout(
-            'LVHDSR.lvutil.removeDevMapperEntry')
+            'LVMSR.lvutil.removeDevMapperEntry')
         mock_glob = self.stubout('glob.glob')
         mock_vdi_uuid = "72101dbd-bd62-4a14-a03c-afca8cceec86"
         mock_filepath = os.path.join(
@@ -213,7 +213,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
             f'{mock_vdi_uuid.replace("-", "--")}')
         mock_glob.return_value = [mock_filepath]
         mock_open_handles = self.stubout(
-            'LVHDSR.util.doesFileHaveOpenHandles')
+            'LVMSR.util.doesFileHaveOpenHandles')
 
         # Act (Detach)
         with self.assertRaises(Exception):
@@ -230,7 +230,7 @@ class TestLVHDSR(unittest.TestCase, Stubs):
 
         # Create new SR
         mock_lvm_cache.return_value.checkLV.return_value = True
-        sr = self.create_LVHDSR(master=True, command='sr_attach',
+        sr = self.create_LVMSR(master=True, command='sr_attach',
                                 sr_uuid=sr_uuid)
 
         # Act (2)
@@ -252,24 +252,24 @@ class TestLVHDSR(unittest.TestCase, Stubs):
         sr.scan(sr.uuid)
 
 
-class TestLVHDVDI(unittest.TestCase, Stubs):
+class TestLVMVDI(unittest.TestCase, Stubs):
     @override
     def setUp(self) -> None:
         self.init_stubs()
 
-        lvhdutil_patcher = mock.patch('LVHDSR.lvhdutil', autospec=True)
+        lvhdutil_patcher = mock.patch('LVMSR.lvhdutil', autospec=True)
         self.mock_lvhdutil = lvhdutil_patcher.start()
         self.mock_lvhdutil.VG_LOCATION = lvhdutil.VG_LOCATION
         self.mock_lvhdutil.VG_PREFIX = lvhdutil.VG_PREFIX
         self.mock_lvhdutil.LV_PREFIX = lvhdutil.LV_PREFIX
-        vhdutil_patcher = mock.patch('LVHDSR.vhdutil', autospec=True)
+        vhdutil_patcher = mock.patch('LVMSR.vhdutil', autospec=True)
         self.mock_vhdutil = vhdutil_patcher.start()
         self.mock_vhdutil.MAX_CHAIN_SIZE = vhdutil.MAX_CHAIN_SIZE
-        lvutil_patcher = mock.patch('LVHDSR.lvutil', autospec=True)
+        lvutil_patcher = mock.patch('LVMSR.lvutil', autospec=True)
         self.mock_lvutil = lvutil_patcher.start()
         vdi_util_patcher = mock.patch('VDI.util', autospec=True)
         self.mock_vdi_util = vdi_util_patcher.start()
-        sr_util_patcher = mock.patch('LVHDSR.util', autospec=True)
+        sr_util_patcher = mock.patch('LVMSR.util', autospec=True)
         self.mock_sr_util = sr_util_patcher.start()
         self.mock_sr_util.gen_uuid.side_effect = str(uuid.uuid4())
         xmlrpclib_patcher = mock.patch('VDI.xmlrpc.client', autospec=True)
@@ -280,12 +280,12 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         self.mock_doexec = doexec_patcher.start()
 
         self.stubout('lvmcache.LVMCache')
-        self.stubout('LVHDSR.LVHDSR._ensureSpaceAvailable')
+        self.stubout('LVMSR.LVMSR._ensureSpaceAvailable')
         self.stubout('journaler.Journaler.create')
         self.stubout('journaler.Journaler.remove')
-        self.stubout('LVHDSR.RefCounter.set')
-        self.stubout('LVHDSR.RefCounter.put')
-        self.stubout('LVHDSR.LVMMetadataHandler')
+        self.stubout('LVMSR.RefCounter.set')
+        self.stubout('LVMSR.RefCounter.put')
+        self.stubout('LVMSR.LVMMetadataHandler')
 
         self.addCleanup(mock.patch.stopall)
 
@@ -293,11 +293,11 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
     def tearDown(self) -> None:
         self.remove_stubs()
 
-    def create_LVHDSR(self):
+    def create_LVMSR(self):
         srcmd = mock.Mock()
         srcmd.dconf = {'device': '/dev/bar'}
         srcmd.params = {'command': 'foo', 'session_ref': 'some session ref'}
-        return LVHDSR.LVHDSR(srcmd, "some SR UUID")
+        return LVMSR.LVMSR(srcmd, "some SR UUID")
 
     def get_dummy_vdi(self, vdi_uuid):
         self.mock_lvhdutil.getVDIInfo.return_value = {
@@ -319,7 +319,7 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         test_vhdInfo.hidden = hidden
         self.mock_vhdutil.getVHDInfo.return_value = test_vhdInfo
 
-    @mock.patch('LVHDSR.lock.Lock', autospec=True)
+    @mock.patch('LVMSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_clone_success(self, mock_xenapi, mock_lock):
         """
@@ -333,7 +333,7 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         mock_lv = self.get_dummy_vdi(vdi_uuid)
         self.get_dummy_vhd(vdi_uuid, False)
 
-        sr = self.create_LVHDSR()
+        sr = self.create_LVMSR()
         sr.isMaster = True
         sr.legacyMode = False
         sr.srcmd.params = {'vdi_ref': 'test ref'}
@@ -349,11 +349,11 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         # Assert
         self.assertIsNotNone(clone)
 
-    @mock.patch('LVHDSR.lock.Lock', autospec=True)
+    @mock.patch('LVMSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_snapshot_attached_success(self, mock_xenapi, mock_lock):
         """
-        LVHDSR.snapshot, attached on host, no CBT
+        LVMSR.snapshot, attached on host, no CBT
         """
         # Arrange
         xapi_session = mock_xenapi.xapi_local.return_value
@@ -363,7 +363,7 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         mock_lv = self.get_dummy_vdi(vdi_uuid)
         self.get_dummy_vhd(vdi_uuid, False)
 
-        sr = self.create_LVHDSR()
+        sr = self.create_LVMSR()
         sr.isMaster = True
         sr.legacyMode = False
         sr.srcmd.params = {
@@ -386,11 +386,11 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         # Assert
         self.assertIsNotNone(snap)
 
-    @mock.patch('LVHDSR.lock.Lock', autospec=True)
+    @mock.patch('LVMSR.lock.Lock', autospec=True)
     @mock.patch('SR.XenAPI')
     def test_snapshot_attached_cbt_success(self, mock_xenapi, mock_lock):
         """
-        LVHDSR.snapshot, attached on host, with CBT
+        LVMSR.snapshot, attached on host, with CBT
         """
         # Arrange
         xapi_session = mock_xenapi.xapi_local.return_value
@@ -400,7 +400,7 @@ class TestLVHDVDI(unittest.TestCase, Stubs):
         mock_lv = self.get_dummy_vdi(vdi_uuid)
         self.get_dummy_vhd(vdi_uuid, False)
 
-        sr = self.create_LVHDSR()
+        sr = self.create_LVMSR()
         sr.isMaster = True
         sr.legacyMode = False
         sr.srcmd.params = {

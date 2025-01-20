@@ -140,9 +140,9 @@ class TestLVHDoISCSISR(ISCSITestCase):
                                        autospec=True)
         patched_baseiscsi = baseiscsi_patcher.start()
         patched_baseiscsi.side_effect = self.baseiscsi
-        lvhdsr_patcher = mock.patch ('LVHDoISCSISR.LVHDSR')
+        lvmsr_patcher = mock.patch ('LVHDoISCSISR.LVMSR')
 
-        self.mock_lvhdsr = lvhdsr_patcher.start()
+        self.mock_lvmsr = lvmsr_patcher.start()
         self.mock_session = mock.MagicMock()
         xenapi_patcher = mock.patch('SR.XenAPI')
         mock_xenapi = xenapi_patcher.start()
@@ -156,9 +156,9 @@ class TestLVHDoISCSISR(ISCSITestCase):
 
         self.mock_copy.side_effect = deepcopy
 
-        lock_patcher = mock.patch('LVHDSR.lock.Lock')
+        lock_patcher = mock.patch('LVMSR.lock.Lock')
         self.mock_lock = lock_patcher.start()
-        lvlock_patcher = mock.patch('LVHDSR.lvutil.Fairlock')
+        lvlock_patcher = mock.patch('LVMSR.lvutil.Fairlock')
         self.mock_lvlock = lvlock_patcher.start()
 
         self.addCleanup(mock.patch.stopall)

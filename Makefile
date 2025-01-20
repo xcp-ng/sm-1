@@ -9,7 +9,7 @@ SM_DRIVERS += udev
 SM_DRIVERS += ISO
 SM_DRIVERS += HBA
 SM_DRIVERS += Linstor
-SM_DRIVERS += LVHD
+SM_DRIVERS += LVM
 SM_DRIVERS += LVHDoISCSI
 SM_DRIVERS += LVHDoHBA
 SM_DRIVERS += SHM
@@ -203,7 +203,7 @@ install: build
 	  ln -sf $$i"SR.py" $$i"SR"; \
 	done
 	rm $(SM_STAGING)$(SM_DEST)/SHMSR
-	cd $(SM_STAGING)$(SM_DEST) && rm -f LVHDSR && ln -sf LVHDSR.py LVMSR
+	cd $(SM_STAGING)$(SM_DEST) && rm -f LVMSR && ln -sf LVMSR.py LVHDSR
 	cd $(SM_STAGING)$(SM_DEST) && rm -f RawISCSISR && ln -sf RawISCSISR.py ISCSISR
 	cd $(SM_STAGING)$(SM_DEST) && rm -f LVHDoISCSISR && ln -sf LVHDoISCSISR.py LVMoISCSISR
 	cd $(SM_STAGING)$(SM_DEST) && rm -f LVHDoHBASR && ln -sf LVHDoHBASR.py LVMoHBASR

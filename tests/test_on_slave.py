@@ -21,7 +21,7 @@ class Test_on_slave_is_open(unittest.TestCase):
         'SR',
         'NFSSR',
         'EXTSR',
-        'LVHDSR',
+        'LVMSR',
         'LinstorSR',
         'blktap2'
     ]

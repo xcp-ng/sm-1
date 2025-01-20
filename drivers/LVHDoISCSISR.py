@@ -22,7 +22,7 @@ from sm_typing import override
 
 import SR
 import VDI
-import LVHDSR
+import LVMSR
 import BaseISCSI
 import SRCommand
 import util
@@ -71,7 +71,7 @@ DRIVER_INFO = {
     }
 
 
-class LVHDoISCSISR(LVHDSR.LVHDSR):
+class LVHDoISCSISR(LVMSR.LVMSR):
     """LVHD over ISCSI storage repository"""
 
     @override
@@ -99,7 +99,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         else:
             self.create_iscsi_sessions(sr_uuid)
 
-        LVHDSR.LVHDSR.load(self, sr_uuid)
+        LVMSR.LVMSR.load(self, sr_uuid)
 
     def create_iscsi_sessions(self, sr_uuid):
         if 'target' in self.original_srcmd.dconf:
@@ -441,7 +441,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         try:
             self.iscsi._attach_LUN_bySCSIid(self.SCSIid)
             self._pathrefresh(LVHDoISCSISR)
-            LVHDSR.LVHDSR.create(self, sr_uuid, size)
+            LVMSR.LVMSR.create(self, sr_uuid, size)
         except Exception as inst:
             self.iscsi.detach(sr_uuid)
             raise xs_errors.XenError("SRUnavailable", opterr=inst)
@@ -450,7 +450,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
     @override
     def delete(self, sr_uuid) -> None:
         self._pathrefresh(LVHDoISCSISR)
-        LVHDSR.LVHDSR.delete(self, sr_uuid)
+        LVMSR.LVMSR.delete(self, sr_uuid)
         for i in self.iscsiSRs:
             i.detach(sr_uuid)
 
@@ -486,7 +486,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
                     scsiutil.rescan([self.iscsi.adapter[a]])
 
             self._pathrefresh(LVHDoISCSISR)
-            LVHDSR.LVHDSR.attach(self, sr_uuid)
+            LVMSR.LVMSR.attach(self, sr_uuid)
         except Exception as inst:
             for i in self.iscsiSRs:
                 i.detach(sr_uuid)
@@ -495,7 +495,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
 
     @override
     def detach(self, sr_uuid) -> None:
-        LVHDSR.LVHDSR.detach(self, sr_uuid)
+        LVMSR.LVMSR.detach(self, sr_uuid)
         for i in self.iscsiSRs:
             i.detach(sr_uuid)
 
@@ -508,7 +508,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
                     i.attach(sr_uuid)
                 except xs_errors.SROSError:
                     util.SMlog("Connection failed for target %s, continuing.." % i.target)
-        LVHDSR.LVHDSR.scan(self, sr_uuid)
+        LVMSR.LVMSR.scan(self, sr_uuid)
 
     @override
     def probe(self) -> str:
@@ -530,7 +530,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         self.iscsi.attach(self.uuid)
         self.iscsi._attach_LUN_bySCSIid(self.SCSIid)
         self._pathrefresh(LVHDoISCSISR)
-        out = LVHDSR.LVHDSR.probe(self)
+        out = LVMSR.LVMSR.probe(self)
         self.iscsi.detach(self.uuid)
         return out
 
@@ -553,7 +553,7 @@ class LVHDoISCSISR(LVHDSR.LVHDSR):
         return LVHDoISCSIVDI(self, uuid)
 
 
-class LVHDoISCSIVDI(LVHDSR.LVHDVDI):
+class LVHDoISCSIVDI(LVMSR.LVMVDI):
     @override
     def generate_config(self, sr_uuid, vdi_uuid) -> str:
         util.SMlog("LVHDoISCSIVDI.generate_config")
@@ -582,7 +582,7 @@ class LVHDoISCSIVDI(LVHDSR.LVHDVDI):
         try:
             self.sr.iscsi.attach(sr_uuid)
             self.sr.iscsi._attach_LUN_bySCSIid(self.sr.SCSIid)
-            return LVHDSR.LVHDVDI.attach(self, sr_uuid, vdi_uuid)
+            return LVMSR.LVMVDI.attach(self, sr_uuid, vdi_uuid)
         except:
             util.logException("LVHDoISCSIVDI.attach_from_config")
             raise xs_errors.XenError('SRUnavailable', \

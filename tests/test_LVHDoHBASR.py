@@ -82,13 +82,13 @@ class TestLVHDoHBASR(unittest.TestCase):
         self.sr_uuid = str(uuid4())
         self.scsi_id = '360a98000534b4f4e46704c76692d6d33'
 
-        lock_patcher = mock.patch('LVHDSR.lock.Lock', autospec=True)
+        lock_patcher = mock.patch('LVMSR.lock.Lock', autospec=True)
         self.mock_lock = lock_patcher.start()
-        lvhdsr_patcher = mock.patch('LVHDoHBASR.LVHDSR')
-        self.mock_lvhdsr = lvhdsr_patcher.start()
+        lvmsr_patcher = mock.patch('LVHDoHBASR.LVMSR')
+        self.mock_lvmsr = lvmsr_patcher.start()
         util_patcher = mock.patch('LVHDoHBASR.util', autospec=True)
         self.mock_util = util_patcher.start()
-        lc_patcher = mock.patch('LVHDSR.lvmcache.lvutil.Fairlock', autospec=True)
+        lc_patcher = mock.patch('LVMSR.lvmcache.lvutil.Fairlock', autospec=True)
         self.mock_lc = lc_patcher.start()
         xenapi_patcher = mock.patch('SR.XenAPI')
         self.mock_xapi = xenapi_patcher.start()

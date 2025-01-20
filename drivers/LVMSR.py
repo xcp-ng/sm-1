@@ -15,7 +15,7 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# LVHDSR: VHD on LVM storage repository
+# LVMSR: VHD on LVM storage repository
 #
 
 from sm_typing import Dict, List, override
@@ -89,7 +89,7 @@ OPS_EXCLUSIVE = [
 # Log if snapshot pauses VM for more than this many seconds
 LONG_SNAPTIME = 60
 
-class LVHDSR(SR.SR):
+class LVMSR(SR.SR):
     DRIVER_TYPE = 'lvhd'
 
     PROVISIONING_TYPES = ["thin", "thick"]
@@ -149,7 +149,7 @@ class LVHDSR(SR.SR):
             return type == "lvm"
         elif name.endswith("EXTSR"):
             return type == "ext"
-        return type == LVHDSR.DRIVER_TYPE
+        return type == LVMSR.DRIVER_TYPE
 
     @override
     def load(self, sr_uuid) -> None:
@@ -452,7 +452,7 @@ class LVHDSR(SR.SR):
             # LVHDoHBASR, LVHDoISCSISR
             return scsiutil.refresh_lun_size_by_SCSIid(getattr(self, 'SCSIid'))
         else:
-            # LVHDSR
+            # LVMSR
             devices = self.dconf['device'].split(',')
             scsiutil.refreshdev(devices)
             return True
@@ -476,18 +476,18 @@ class LVHDSR(SR.SR):
                     # LVHDoHBASR, LVHDoISCSISR might have slaves
                     scsiutil.refresh_lun_size_by_SCSIid_on_slaves(self.session,
                                                        getattr(self, 'SCSIid'))
-                util.SMlog("LVHDSR._expand_size for %s will resize the pv." %
+                util.SMlog("LVMSR._expand_size for %s will resize the pv." %
                            self.uuid)
                 for pv in lvutil.get_pv_for_vg(self.vgname):
                     lvutil.resizePV(pv)
             except:
-                util.logException("LVHDSR._expand_size for %s failed to resize"
+                util.logException("LVMSR._expand_size for %s failed to resize"
                                   " the PV" % self.uuid)
 
     @override
     @deviceCheck
     def create(self, uuid, size) -> None:
-        util.SMlog("LVHDSR.create for %s" % self.uuid)
+        util.SMlog("LVMSR.create for %s" % self.uuid)
         if not self.isMaster:
             util.SMlog('sr_create blocked for non-master')
             raise xs_errors.XenError('LVMMaster')
@@ -516,7 +516,7 @@ class LVHDSR(SR.SR):
 
     @override
     def delete(self, uuid) -> None:
-        util.SMlog("LVHDSR.delete for %s" % self.uuid)
+        util.SMlog("LVMSR.delete for %s" % self.uuid)
         if not self.isMaster:
             raise xs_errors.XenError('LVMMaster')
         cleanup.gc_force(self.session, self.uuid)
@@ -527,7 +527,7 @@ class LVHDSR(SR.SR):
                 continue
 
             if util.doesFileHaveOpenHandles(fileName):
-                util.SMlog("LVHDSR.delete: The dev mapper entry %s has open " \
+                util.SMlog("LVMSR.delete: The dev mapper entry %s has open " \
                            "handles" % fileName)
                 success = False
                 continue
@@ -544,7 +544,7 @@ class LVHDSR(SR.SR):
                 os.unlink(lpath)
             except OSError as e:
                 if e.errno != errno.ENOENT:
-                    util.SMlog("LVHDSR.delete: failed to remove the symlink for " \
+                    util.SMlog("LVMSR.delete: failed to remove the symlink for " \
                                "file %s. Error: %s" % (fileName, str(e)))
                     success = False
 
@@ -553,7 +553,7 @@ class LVHDSR(SR.SR):
                 if util.pathexists(self.path):
                     os.rmdir(self.path)
             except Exception as e:
-                util.SMlog("LVHDSR.delete: failed to remove the symlink " \
+                util.SMlog("LVMSR.delete: failed to remove the symlink " \
                            "directory %s. Error: %s" % (self.path, str(e)))
                 success = False
 
@@ -563,7 +563,7 @@ class LVHDSR(SR.SR):
             raise xs_errors.XenError('SRNotEmpty')
 
         if not success:
-            raise Exception("LVHDSR delete failed, please refer to the log " \
+            raise Exception("LVMSR delete failed, please refer to the log " \
                             "for details.")
 
         lvutil.removeVG(self.dconf['device'], self.vgname)
@@ -571,7 +571,7 @@ class LVHDSR(SR.SR):
 
     @override
     def attach(self, uuid) -> None:
-        util.SMlog("LVHDSR.attach for %s" % self.uuid)
+        util.SMlog("LVMSR.attach for %s" % self.uuid)
 
         self._cleanup(True)  # in case of host crashes, if detach wasn't called
 
@@ -610,7 +610,7 @@ class LVHDSR(SR.SR):
 
     @override
     def detach(self, uuid) -> None:
-        util.SMlog("LVHDSR.detach for %s" % self.uuid)
+        util.SMlog("LVMSR.detach for %s" % self.uuid)
         cleanup.abort(self.uuid)
 
         # Do a best effort cleanup of the dev mapper entries
@@ -625,7 +625,7 @@ class LVHDSR(SR.SR):
                 if util.doesFileHaveOpenHandles(fileName):
                     # if yes, log this and signal failure
                     util.SMlog(
-                        f"LVHDSR.detach: The dev mapper entry {fileName} has "
+                        f"LVMSR.detach: The dev mapper entry {fileName} has "
                         "open handles")
                     success = False
                     continue
@@ -642,7 +642,7 @@ class LVHDSR(SR.SR):
                 lvname = os.path.join(self.path, lvname)
                 util.force_unlink(lvname)
             except Exception as e:
-                util.SMlog("LVHDSR.detach: failed to remove the symlink for " \
+                util.SMlog("LVMSR.detach: failed to remove the symlink for " \
                            "file %s. Error: %s" % (fileName, str(e)))
                 success = False
 
@@ -653,7 +653,7 @@ class LVHDSR(SR.SR):
                 if util.pathexists(self.path):
                     os.rmdir(self.path)
             except Exception as e:
-                util.SMlog("LVHDSR.detach: failed to remove the symlink " \
+                util.SMlog("LVMSR.detach: failed to remove the symlink " \
                            "directory %s. Error: %s" % (self.path, str(e)))
                 success = False
 
@@ -671,14 +671,14 @@ class LVHDSR(SR.SR):
     def forget_vdi(self, uuid) -> None:
         if not self.legacyMode:
             LVMMetadataHandler(self.mdpath).deleteVdiFromMetadata(uuid)
-        super(LVHDSR, self).forget_vdi(uuid)
+        super(LVMSR, self).forget_vdi(uuid)
 
     @override
     def scan(self, uuid) -> None:
         activated = True
         try:
             lvname = ''
-            util.SMlog("LVHDSR.scan for %s" % self.uuid)
+            util.SMlog("LVMSR.scan for %s" % self.uuid)
             if not self.isMaster:
                 util.SMlog('sr_scan blocked for non-master')
                 raise xs_errors.XenError('LVMMaster')
@@ -815,7 +815,7 @@ class LVHDSR(SR.SR):
                     new_vdi.cbt_enabled = True
                     self.vdis[cbt_uuid] = new_vdi
 
-            super(LVHDSR, self).scan(uuid)
+            super(LVMSR, self).scan(uuid)
             self._kickGC()
 
         finally:
@@ -863,7 +863,7 @@ class LVHDSR(SR.SR):
 
     @override
     def vdi(self, uuid) -> VDI.VDI:
-        return LVHDVDI(self, uuid)
+        return LVMVDI(self, uuid)
 
     def _loadvdis(self):
         self.virtual_allocation = 0
@@ -904,12 +904,12 @@ class LVHDSR(SR.SR):
             raise xs_errors.XenError('SRNoSpace')
 
     def _handleInterruptedCloneOps(self):
-        entries = self.journaler.getAll(LVHDVDI.JRN_CLONE)
+        entries = self.journaler.getAll(LVMVDI.JRN_CLONE)
         for uuid, val in entries.items():
             util.fistpoint.activate("LVHDRT_clone_vdi_before_undo_clone", self.uuid)
             self._handleInterruptedCloneOp(uuid, val)
             util.fistpoint.activate("LVHDRT_clone_vdi_after_undo_clone", self.uuid)
-            self.journaler.remove(LVHDVDI.JRN_CLONE, uuid)
+            self.journaler.remove(LVMVDI.JRN_CLONE, uuid)
 
     def _handleInterruptedCoalesceLeaf(self):
         entries = self.journaler.getAll(cleanup.VDI.JRN_LEAF)
@@ -1320,7 +1320,7 @@ class LVHDSR(SR.SR):
         self._ensureSpaceAvailable(self.journaler.LV_SIZE)
 
 
-class LVHDVDI(VDI.VDI):
+class LVMVDI(VDI.VDI):
 
     JRN_CLONE = "clone"  # journal entry type for the clone operation
 
@@ -1367,7 +1367,7 @@ class LVHDVDI(VDI.VDI):
 
     @override
     def create(self, sr_uuid, vdi_uuid, size) -> str:
-        util.SMlog("LVHDVDI.create for %s" % self.uuid)
+        util.SMlog("LVMVDI.create for %s" % self.uuid)
         if not self.sr.isMaster:
             raise xs_errors.XenError('LVMMaster')
         if self.exists:
@@ -1375,7 +1375,7 @@ class LVHDVDI(VDI.VDI):
 
         size = vhdutil.validate_and_round_vhd_size(int(size))
 
-        util.SMlog("LVHDVDI.create: type = %s, %s (size=%s)" % \
+        util.SMlog("LVMVDI.create: type = %s, %s (size=%s)" % \
                 (self.vdi_type, self.path, size))
         lvSize = 0
         self.sm_config = self.sr.srcmd.params["vdi_sm_config"]
@@ -1432,13 +1432,13 @@ class LVHDVDI(VDI.VDI):
 
     @override
     def delete(self, sr_uuid, vdi_uuid, data_only=False) -> None:
-        util.SMlog("LVHDVDI.delete for %s" % self.uuid)
+        util.SMlog("LVMVDI.delete for %s" % self.uuid)
         try:
             self._loadThis()
         except xs_errors.SRException as e:
             # Catch 'VDI doesn't exist' exception
             if e.errno == 46:
-                return super(LVHDVDI, self).delete(sr_uuid, vdi_uuid, data_only)
+                return super(LVMVDI, self).delete(sr_uuid, vdi_uuid, data_only)
             raise
 
         vdi_ref = self.sr.srcmd.params['vdi_ref']
@@ -1474,11 +1474,11 @@ class LVHDVDI(VDI.VDI):
 
         self.sr._updateStats(self.sr.uuid, -self.size)
         self.sr._kickGC()
-        return super(LVHDVDI, self).delete(sr_uuid, vdi_uuid, data_only)
+        return super(LVMVDI, self).delete(sr_uuid, vdi_uuid, data_only)
 
     @override
     def attach(self, sr_uuid, vdi_uuid) -> str:
-        util.SMlog("LVHDVDI.attach for %s" % self.uuid)
+        util.SMlog("LVMVDI.attach for %s" % self.uuid)
         if self.sr.journaler.hasJournals(self.uuid):
             raise xs_errors.XenError('VDIUnavailable',
                     opterr='Interrupted operation detected on this VDI, '
@@ -1509,7 +1509,7 @@ class LVHDVDI(VDI.VDI):
 
     @override
     def detach(self, sr_uuid, vdi_uuid) -> None:
-        util.SMlog("LVHDVDI.detach for %s" % self.uuid)
+        util.SMlog("LVMVDI.detach for %s" % self.uuid)
         self._loadThis()
         already_deflated = (self.utilisation < \
                 lvhdutil.calcSizeVHDLV(self.size))
@@ -1541,7 +1541,7 @@ class LVHDVDI(VDI.VDI):
     # We only support offline resize
     @override
     def resize(self, sr_uuid, vdi_uuid, size) -> str:
-        util.SMlog("LVHDVDI.resize for %s" % self.uuid)
+        util.SMlog("LVMVDI.resize for %s" % self.uuid)
         if not self.sr.isMaster:
             raise xs_errors.XenError('LVMMaster')
 
@@ -1590,7 +1590,7 @@ class LVHDVDI(VDI.VDI):
         self.session.xenapi.VDI.set_physical_utilisation(vdi_ref,
                 str(self.utilisation))
         self.sr._updateStats(self.sr.uuid, self.size - oldSize)
-        super(LVHDVDI, self).resize_cbt(self.sr.uuid, self.uuid, self.size)
+        super(LVMVDI, self).resize_cbt(self.sr.uuid, self.uuid, self.size)
         return VDI.VDI.get_params(self)
 
     @override
@@ -1600,7 +1600,7 @@ class LVHDVDI(VDI.VDI):
 
     @override
     def compose(self, sr_uuid, vdi1, vdi2) -> None:
-        util.SMlog("LVHDSR.compose for %s -> %s" % (vdi2, vdi1))
+        util.SMlog("LVMSR.compose for %s -> %s" % (vdi2, vdi1))
         if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
@@ -1623,7 +1623,7 @@ class LVHDVDI(VDI.VDI):
         util.SMlog("Compose done")
 
     def reset_leaf(self, sr_uuid, vdi_uuid):
-        util.SMlog("LVHDSR.reset_leaf for %s" % vdi_uuid)
+        util.SMlog("LVMSR.reset_leaf for %s" % vdi_uuid)
         if not VdiType.isCowImage(self.vdi_type):
             raise xs_errors.XenError('Unimplemented')
 
@@ -1696,7 +1696,7 @@ class LVHDVDI(VDI.VDI):
         return snapResult
 
     def _snapshot(self, snapType, cloneOp=False, cbtlog=None, cbt_consistency=None):
-        util.SMlog("LVHDVDI._snapshot for %s (type %s)" % (self.uuid, snapType))
+        util.SMlog("LVMVDI._snapshot for %s (type %s)" % (self.uuid, snapType))
 
         if not self.sr.isMaster:
             raise xs_errors.XenError('LVMMaster')
@@ -1841,7 +1841,7 @@ class LVHDVDI(VDI.VDI):
                         pass
 
         except (util.SMException, XenAPI.Failure) as e:
-            util.logException("LVHDVDI._snapshot")
+            util.logException("LVMVDI._snapshot")
             self._failClone(origUuid, jval, str(e))
         util.fistpoint.activate("LVHDRT_clone_vdi_before_remove_journal", self.sr.uuid)
 
@@ -1862,7 +1862,7 @@ class LVHDVDI(VDI.VDI):
         vhdutil.snapshot(snapPath, self.path, parentRaw, lvhdutil.MSIZE_MB)
         snapParent = vhdutil.getParent(snapPath, lvhdutil.extractUuid)
 
-        snapVDI = LVHDVDI(self.sr, snapUuid)
+        snapVDI = LVMVDI(self.sr, snapUuid)
         snapVDI.read_only = False
         snapVDI.location = snapUuid
         snapVDI.size = self.size
@@ -2219,7 +2219,7 @@ class LVHDVDI(VDI.VDI):
     def _create_cbt_log(self) -> str:
         logname = self._get_cbt_logname(self.uuid)
         self.sr.lvmCache.create(logname, self.sr.journaler.LV_SIZE, CBTLOG_TAG)
-        logpath = super(LVHDVDI, self)._create_cbt_log()
+        logpath = super(LVMVDI, self)._create_cbt_log()
         self.sr.lvmCache.deactivateNoRefcount(logname)
         return logpath
 
@@ -2263,6 +2263,6 @@ class LVHDVDI(VDI.VDI):
         return lvutil.exists(logpath)
 
 if __name__ == '__main__':
-    SRCommand.run(LVHDSR, DRIVER_INFO)
+    SRCommand.run(LVMSR, DRIVER_INFO)
 else:
-    SR.registerSR(LVHDSR)
+    SR.registerSR(LVMSR)

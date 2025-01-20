@@ -23,7 +23,7 @@ from sm_typing import override
 import SR
 import VDI
 import LVHDoHBASR
-import LVHDSR
+import LVMSR
 import SRCommand
 import sys
 import xs_errors
@@ -89,7 +89,7 @@ class LVHDoFCoESR(LVHDoHBASR.LVHDoHBASR):
             raise xs_errors.XenError('ConfigSCSIid')
 
         self.SCSIid = self.dconf['SCSIid']
-        LVHDSR.LVHDSR.load(self, sr_uuid)
+        LVMSR.LVMSR.load(self, sr_uuid)
 
     @override
     def vdi(self, uuid) -> VDI.VDI:

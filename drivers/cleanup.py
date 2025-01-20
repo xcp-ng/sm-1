@@ -1203,7 +1203,7 @@ class FileVDI(VDI):
         return self._sizeAllocated
 
 
-class LVHDVDI(VDI):
+class LVMVDI(VDI):
     """Object representing a VDI in an LVHD SR"""
 
     JRN_ZERO = "zero"  # journal entry type for zeroing out end of parent
@@ -1211,7 +1211,7 @@ class LVHDVDI(VDI):
     @override
     def load(self, info=None) -> None:
         # `info` is always set. `None` default value is only here to match parent method.
-        assert info, "No info given to LVHDVDI.load"
+        assert info, "No info given to LVMVDI.load"
         self.parent = None
         self.children = []
         self._sizePhys = -1
@@ -1852,7 +1852,7 @@ class SR(object):
         if type == SR.TYPE_FILE:
             return FileSR(uuid, xapi, createLock, force)
         elif type == SR.TYPE_LVHD:
-            return LVHDSR(uuid, xapi, createLock, force)
+            return LVMSR(uuid, xapi, createLock, force)
         elif type == SR.TYPE_LINSTOR:
             return LinstorSR(uuid, xapi, createLock, force)
         raise util.SMException("SR type %s not recognized" % type)
@@ -2224,7 +2224,7 @@ class SR(object):
 
     def cleanupJournals(self, dryRun=False):
         """delete journal entries for non-existing VDIs"""
-        for t in [LVHDVDI.JRN_ZERO, VDI.JRN_RELINK, SR.JRN_CLONE]:
+        for t in [LVMVDI.JRN_ZERO, VDI.JRN_RELINK, SR.JRN_CLONE]:
             entries = self.journaler.getAll(t)
             for uuid, jval in entries.items():
                 if self.getVDI(uuid):
@@ -2873,7 +2873,7 @@ class FileSR(SR):
         Util.log("*** finished leaf-coalesce successfully")
 
 
-class LVHDSR(SR):
+class LVMSR(SR):
     TYPE = SR.TYPE_LVHD
     SUBTYPES = ["lvhdoiscsi", "lvhdohba"]
 
@@ -2945,7 +2945,7 @@ class LVHDSR(SR):
             vdi = self.getVDI(uuid)
             if not vdi:
                 self.logFilter.logNewVDI(uuid)
-                vdi = LVHDVDI(self, uuid, vdiInfo.vdiType)
+                vdi = LVMVDI(self, uuid, vdiInfo.vdiType)
                 self.vdis[uuid] = vdi
             vdi.load(vdiInfo)
         self._removeStaleVDIs(vdis.keys())
@@ -3500,7 +3500,7 @@ def daemonize():
 
 
 def normalizeType(type):
-    if type in LVHDSR.SUBTYPES:
+    if type in LVMSR.SUBTYPES:
         type = SR.TYPE_LVHD
     if type in ["lvm", "lvmoiscsi", "lvmohba", "lvmofcoe"]:
         # temporary while LVHD is symlinked as LVM
@@ -3958,7 +3958,7 @@ def cache_cleanup(session, srUuid, maxAge):
 def debug(sr_uuid, cmd, vdi_uuid):
     Util.log("Debug command: %s" % cmd)
     sr = SR.getInstance(sr_uuid, None)
-    if not isinstance(sr, LVHDSR):
+    if not isinstance(sr, LVMSR):
         print("Error: not an LVHD SR")
         return
     sr.scanLocked()
