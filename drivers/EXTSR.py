@@ -15,7 +15,7 @@
 # along with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #
-# EXTSR: Based on local-file storage repository, mounts ext3 partition
+# EXTSR: Based on local-file storage repository, mounts ext4 partition
 
 from sm_typing import override
 
@@ -44,8 +44,8 @@ CAPABILITIES = ["SR_PROBE", "SR_UPDATE", "SR_SUPPORTS_LOCAL_CACHING",
 CONFIGURATION = [['device', 'local device path (required) (e.g. /dev/sda3)']]
 
 DRIVER_INFO = {
-    'name': 'Local EXT3 VHD',
-    'description': 'SR plugin which represents disks as VHD files stored on a local EXT3 filesystem, created inside an LVM volume',
+    'name': 'Local EXT4 VHD',
+    'description': 'SR plugin which represents disks as VHD files stored on a local EXT4 filesystem, created inside an LVM volume',
     'vendor': 'Citrix Systems Inc',
     'copyright': '(C) 2008 Citrix Systems Inc',
     'driver_version': '1.0',
@@ -58,7 +58,7 @@ DRIVER_CONFIG = {"ATTACH_FROM_CONFIG_WITH_TAPDISK": True}
 
 
 class EXTSR(FileSR.FileSR):
-    """EXT3 Local file storage repository"""
+    """EXT4 Local file storage repository"""
 
     @override
     @staticmethod
