@@ -4,6 +4,7 @@ from typing import BinaryIO
 import errno
 import struct
 from pathlib import Path
+import zlib
 
 import util
 from cowutil import CowUtil, CowImageInfo
@@ -16,8 +17,8 @@ MIN_QCOW_SIZE: Final = QCOW_CLUSTER_SIZE
 
 MAX_QCOW_SIZE: Final = 16 * 1024 * 1024 * 1024 * 1024
 
-# QEMU_IMG: Final = "/usr/bin/qemu-img"
-QEMU_IMG: Final = "/usr/lib64/xen/bin/qemu-img"
+QEMU_IMG: Final = "/usr/bin/qemu-img"
+#QEMU_IMG: Final = "/usr/lib64/xen/bin/qemu-img"
 
 QCOW2_TYPE: Final = "qcow2"
 
@@ -29,7 +30,7 @@ class QCowUtil(CowUtil):
 
     QCOW2_MAGIC = 0x514649FB  # b"QFI\xfb": Magic number for QCOW2 files
     QCOW2_HEADER_SIZE = 104  # In fact the last information we need is at offset 40-47
-    QCOW2_L2_SIZE = 65536
+    QCOW2_L2_SIZE = QCOW_CLUSTER_SIZE
     QCOW2_BACKING_FILE_OFFSET = 8
 
     ALLOCATED_ENTRY_BIT = (
@@ -364,6 +365,39 @@ class QCowUtil(CowUtil):
 
             return custom_data_offset
 
+    def _set_l1_zero(self):
+        zero = int(0).to_bytes(1, "little")
+        nb_of_entries_per_cluster  = QCOW_CLUSTER_SIZE/8
+        return list(zero * int(nb_of_entries_per_cluster/8))
+
+    def _set_l2_zero(self, b, i):
+        return b & ~(1 << i)
+
+    def _set_l2_one(self, b, i):
+        return b | (1 << i)
+
+    def _create_bitmap(self) -> bytes:
+        idx: int = 0
+        bitmap = list()
+        b = 0
+        for l1_idx, l1_entry in enumerate(self.l1):
+            if not self._is_l1_allocated(l1_entry):
+                bitmap.extend(self._set_l1_zero()) #Should define cluster_size/8 page to 0
+                continue
+
+            l2_table = self.l1_to_l2[l1_entry] #L2 is cluster_size/8 entries of cluster_size page
+            for l2_entry in l2_table:
+                if self._is_l2_allocated(l2_entry):
+                    b = self._set_l2_one(b, idx)
+                else:
+                    b = self._set_l2_zero(b, idx)
+                idx += 1
+                if idx == 8:
+                    bitmap.append(b)
+                    b = 0
+                    idx = 0
+        return struct.pack("B"*len(bitmap), *bitmap)
+
     # ----
     # Implementation of CowUtil
     # ----
@@ -445,8 +479,8 @@ class QCowUtil(CowUtil):
         exitOnError: bool = False
     ) -> Dict[str, CowImageInfo]:
         result: Dict[str, CowImageInfo] = dict()
-        pattern = Path(pattern)
-        list_qcow = list(pattern.parent.glob(pattern.name))
+        pattern_p: Path = Path(pattern)
+        list_qcow = list(pattern_p.parent.glob(pattern_p.name))
         #TODO: handle parents, it needs to getinfo from parents also
         #TODO: handle exitOnError
         for qcow in list_qcow:
@@ -478,7 +512,11 @@ class QCowUtil(CowUtil):
 
     @override
     def setParent(self, path: str, parentPath: str, parentRaw: bool) -> None:
-        pass
+        parentType = QCOW2_TYPE
+        if parentRaw:
+            parentType = "raw"
+        cmd = [QEMU_IMG, "rebase", "-u", "-f", QCOW2_TYPE, "-F", parentType, "-b", parentPath, path]
+        self._ioretry(cmd)
 
     @override
     def getHidden(self, path: str) -> bool:
@@ -598,15 +636,16 @@ class QCowUtil(CowUtil):
 
     @override
     def getBlockBitmap(self, path: str) -> bytes:
-        pass
+        self._read_qcow2(path)
+        return zlib.compress(self._create_bitmap())
 
     @override
     def coalesce(self, path: str) -> int:
         # -d on commit make it not empty the original image since we don't intend to keep it
+        allocated_blocks = self.getAllocatedSize(path)
         cmd = [QEMU_IMG, "commit", "-f", QCOW2_TYPE, path, "-d"]
         ret = cast(str, self._ioretry(cmd))
-        #TODO: Need to know how much we coalesced to return
-        #The same function for vhdutil says: "Coalesce the VHD, on success it returns the number of sectors coalesced."
+        return allocated_blocks
 
     @override
     def create(self, path: str, size: int, static: bool, msize: int = 0) -> None:
