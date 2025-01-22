@@ -361,7 +361,7 @@ class TestVhdUtil(unittest.TestCase):
         context.add_executable(VHD_UTIL, test_function)
 
         # Act/Assert
-        self.assertEqual(25 * self.vhdutil.VHD_SECTOR_SIZE, self.vhdutil.coalesce(TEST_VHD_PATH))
+        self.assertEqual(25 * self.vhdutil.SECTOR_SIZE, vhdutil.coalesce(TEST_VHD_PATH))
 
     @testlib.with_context
     def test_get_vhd_info_allocated_size(self, context):
