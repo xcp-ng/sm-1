@@ -420,6 +420,10 @@ class QCowUtil(CowUtil):
         return 0
 
     @override
+    def getDefaultPreallocationSizeVirt(self) -> int:
+        return 0
+
+    @override
     def getMaxChainLength(self) -> int:
         return MAX_QCOW_CHAIN_LENGTH
 
