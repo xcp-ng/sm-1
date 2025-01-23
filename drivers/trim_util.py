@@ -23,7 +23,7 @@ import util
 import lock
 import lvutil
 
-from lvmcowutil import VG_LOCATION, VG_PREFIX
+from constants import VG_LOCATION, VG_PREFIX
 
 TRIM_LV_TAG = "_trim_lv"
 TRIM_CAP = "SR_TRIM"

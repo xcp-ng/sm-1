@@ -29,6 +29,7 @@ import lock
 import util
 import XenAPI
 
+from constants import NS_PREFIX_LVM, VG_LOCATION, VG_PREFIX
 from cowutil import CowImageInfo, CowUtil, getCowUtil
 from journaler import Journaler
 from lvmcache import LVInfo, LVMCache
@@ -37,13 +38,6 @@ from refcounter import RefCounter
 from vditype import VdiType, VDI_COW_TYPES
 
 # ------------------------------------------------------------------------------
-
-VG_LOCATION: Final = "/dev"
-VG_PREFIX: Final = "VG_XenStorage-"
-
-# Ref counting for VDI's: we need a ref count for LV activation/deactivation
-# on the master.
-NS_PREFIX_LVM: Final = "lvm-"
 
 LOCK_RETRY_ATTEMPTS: Final = 20
 

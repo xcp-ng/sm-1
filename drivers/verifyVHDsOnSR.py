@@ -28,8 +28,9 @@ import vhdutil
 
 import VDI
 
+from constants import NS_PREFIX_LVM, VG_LOCATION, VG_PREFIX
 from lock import Lock
-from lvmcowutil import NS_PREFIX_LVM, LV_PREFIX, VG_LOCATION, VG_PREFIX
+from lvmcowutil import LV_PREFIX
 from refcounter import RefCounter
 from vditype import VdiType
 

@@ -28,6 +28,8 @@ from journaler import Journaler
 import lvutil
 import os
 
+from constants import VG_PREFIX
+
 def attach(session, args):
     if util.is_master(session):
         os.environ['LVM_SYSTEM_DIR'] = lvutil.MASTER_LVM_CONF

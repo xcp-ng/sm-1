@@ -10,6 +10,8 @@ import lvmcowutil
 import util
 
 import on_slave
+
+from constants import NS_PREFIX_LVM
 from vditype import VdiType
 
 
@@ -184,7 +186,7 @@ class Test_on_slave_multi(unittest.TestCase):
         sr_uuid = str(uuid.uuid4())
         vdi_uuid = str(uuid.uuid4())
         vdi_fileName = "test-vdi.vhd"
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + sr_uuid
+        lock_ref = NS_PREFIX_LVM + sr_uuid
 
         args = {"vgName": vgName,
                 "action1": "deactivateNoRefcount",
@@ -233,7 +235,7 @@ class Test_on_slave_multi(unittest.TestCase):
         origParentUuid = str(uuid.uuid4())
         vdi_uuid = str(uuid.uuid4())
 
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + vdi_uuid
+        lock_ref = NS_PREFIX_LVM + vdi_uuid
 
         args = {"vgName": vgName,
                 "action1": "deactivateNoRefcount",
@@ -257,7 +259,7 @@ class Test_on_slave_multi(unittest.TestCase):
         vdi_uuid = str(uuid.uuid4())
         lv_name = 'test_lv'
 
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + sr_uuid
+        lock_ref = NS_PREFIX_LVM + sr_uuid
 
         args = {"vgName": vgName,
                 "action1": "activate",
@@ -288,7 +290,7 @@ class Test_on_slave_multi(unittest.TestCase):
         origParentUuid = str(uuid.uuid4())
         vdi_uuid = str(uuid.uuid4())
 
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + vdi_uuid
+        lock_ref = NS_PREFIX_LVM + vdi_uuid
 
         self.mock_lvmcache.deactivateNoRefcount.side_effect = util.CommandException(errno.EIO, 'activate')
 
@@ -317,7 +319,7 @@ class Test_on_slave_multi(unittest.TestCase):
         origParentUuid = str(uuid.uuid4())
         vdi_uuid = str(uuid.uuid4())
 
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + vdi_uuid
+        lock_ref = NS_PREFIX_LVM + vdi_uuid
 
         self.mock_lvmcache.activateNoRefcount.side_effect = util.CommandException(errno.EIO, 'activate')
 
@@ -343,7 +345,7 @@ class Test_on_slave_multi(unittest.TestCase):
         vdi_uuid = str(uuid.uuid4())
         lv_name = 'test_lv'
 
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + sr_uuid
+        lock_ref = NS_PREFIX_LVM + sr_uuid
 
         self.mock_lvmcache.activate.side_effect = util.CommandException(errno.EIO, 'activate')
 
@@ -373,7 +375,7 @@ class Test_on_slave_multi(unittest.TestCase):
         vdi_uuid = str(uuid.uuid4())
         lv_name = 'test_lv'
 
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + sr_uuid
+        lock_ref = NS_PREFIX_LVM + sr_uuid
 
         self.mock_lvmcache.activateNoRefcount.side_effect = util.CommandException(errno.EIO, 'activate')
 
@@ -404,7 +406,7 @@ class Test_on_slave_multi(unittest.TestCase):
         vdi_uuid = str(uuid.uuid4())
         lv_name = 'test_lv'
 
-        lock_ref = lvmcowutil.NS_PREFIX_LVM + sr_uuid
+        lock_ref = NS_PREFIX_LVM + sr_uuid
 
         self.mock_lvmcache.deactivate.side_effect = util.CommandException(errno.EIO, 'activate')
 

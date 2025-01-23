@@ -50,8 +50,9 @@ from srmetadata import LVMMetadataHandler, VDI_TYPE_TAG
 from functools import reduce
 from time import monotonic as _time
 
+from constants import NS_PREFIX_LVM, VG_LOCATION, VG_PREFIX
 from cowutil import CowUtil, getCowUtil
-from lvmcowutil import LV_PREFIX, NS_PREFIX_LVM, VG_LOCATION, VG_PREFIX, LvmCowUtil
+from lvmcowutil import LV_PREFIX, LvmCowUtil
 from vditype import VdiType, VdiTypeExtension, VDI_COW_TYPES, VDI_TYPE_TO_EXTENSION
 
 try:

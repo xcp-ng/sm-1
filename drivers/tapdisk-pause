@@ -27,8 +27,9 @@ import xs_errors
 import XenAPI
 import lvmcache
 
+from constants import NS_PREFIX_LVM, VG_PREFIX
 from cowutil import getCowUtil
-from lvmcowutil import LV_PREFIX, LV_PREFIX_TO_VDI_TYPE, NS_PREFIX_LVM, VG_PREFIX
+from lvmcowutil import LV_PREFIX, LV_PREFIX_TO_VDI_TYPE
 from vditype import VdiType
 
 try:

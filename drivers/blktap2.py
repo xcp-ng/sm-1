@@ -41,9 +41,9 @@ import json
 import xs_errors
 import XenAPI # pylint: disable=import-error
 import scsiutil
+from constants import NS_PREFIX_LVM
 from syslog import openlog, syslog
 from stat import *  # S_ISBLK(), ...
-from lvmcowutil import NS_PREFIX_LVM
 from vditype import VdiType
 import nfs
 

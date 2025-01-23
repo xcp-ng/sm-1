@@ -19,8 +19,8 @@
 import lvutil
 import os
 import util
+from constants import NS_PREFIX_LVM
 from lock import Lock
-from lvmcowutil import NS_PREFIX_LVM
 from refcounter import RefCounter
 
 

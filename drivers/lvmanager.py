@@ -19,7 +19,7 @@
 import time
 import util
 
-from lvmcowutil import NS_PREFIX_LVM
+from constants import NS_PREFIX_LVM
 
 class LVManagerException(util.SMException):
     pass

@@ -39,8 +39,9 @@ import blktap2
 from journaler import Journaler
 from refcounter import RefCounter
 from ipc import IPCFlag
+from constants import NS_PREFIX_LVM, VG_LOCATION, VG_PREFIX
 from cowutil import getCowUtil
-from lvmcowutil import LV_PREFIX, NS_PREFIX_LVM, VG_LOCATION, VG_PREFIX, LvmCowUtil
+from lvmcowutil import LV_PREFIX, LvmCowUtil
 from lvmanager import LVActivator
 from vditype import VdiType
 import XenAPI # pylint: disable=import-error

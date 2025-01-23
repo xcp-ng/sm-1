@@ -26,8 +26,7 @@ from fairlock import Fairlock
 import util
 import xs_errors
 import xml.dom.minidom
-from lvmcowutil import VG_LOCATION, VG_PREFIX
-from constants import EXT_PREFIX
+from constants import EXT_PREFIX, VG_LOCATION, VG_PREFIX
 import lvmcache
 import srmetadata
 
