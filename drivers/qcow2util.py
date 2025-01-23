@@ -5,6 +5,7 @@ import errno
 import struct
 from pathlib import Path
 import zlib
+import os
 
 import util
 from cowutil import CowUtil, CowImageInfo
@@ -424,8 +425,8 @@ class QCowUtil(CowUtil):
 
     @override
     def calcOverheadEmpty(self, virtual_size: int) -> int:
-        size_l1 = 64 * 1024
-        size_header = 64 * 1024
+        size_l1 = QCOW_CLUSTER_SIZE
+        size_header = QCOW_CLUSTER_SIZE
         size_l2 = (virtual_size * 8) / QCOW_CLUSTER_SIZE #It is only an estimation
 
         size = size_l1 + size_l2 + size_header
@@ -588,9 +589,7 @@ class QCowUtil(CowUtil):
 
     @override
     def getSizePhys(self, path: str) -> int:
-        cmd = ["du", "-b", path] #TODO: use os.stat instead since it won't work with a block device
-        ret = cast(str, self._ioretry(cmd))
-        return int(ret.split()[0])
+        return os.stat(path).st_size
 
     @override
     def setSizePhys(self, path: str, size: int, debug: bool = True) -> None:
